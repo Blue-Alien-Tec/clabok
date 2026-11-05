@@ -23,8 +23,8 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
-// manifestMember is the manifest member name inside the container and the extracted file name.
-const manifestMember = "manifest.json"
+// ManifestMember is the manifest member name inside the container and the extracted file name.
+const ManifestMember = "manifest.json"
 
 // Error is a lifecycle failure with a stable code.
 type Error struct {
@@ -210,7 +210,7 @@ func (life *Lifecycle) Close(id model.BookID) (CloseResult, error) {
 	if err := os.RemoveAll(paths.BlocksDir); err != nil {
 		return CloseResult{}, fail("lifecycle.write-failed", "%v", err)
 	}
-	if err := os.Remove(filepath.Join(paths.Dir, manifestMember)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(filepath.Join(paths.Dir, ManifestMember)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return CloseResult{}, fail("lifecycle.write-failed", "%v", err)
 	}
 	removed := false
@@ -223,6 +223,7 @@ func (life *Lifecycle) Close(id model.BookID) (CloseResult, error) {
 	}
 	if rollbacks, rollbackErr := life.rollbackStore(paths); rollbackErr == nil {
 		_ = rollbacks.Clear(rollback.KindUndo)
+		_ = rollbacks.Clear(rollback.KindBody)
 	}
 	return CloseResult{
 		Paths:        paths,
@@ -289,6 +290,28 @@ func (life *Lifecycle) acquire(id model.BookID) (coordinator.Release, error) {
 	}, coordinator.Exclusive, 0)
 }
 
+// LockBookExclusive holds the book exclusively for a manifest mutation. The caller does not touch
+// the open state, so the store lock is not needed.
+func (life *Lifecycle) LockBookExclusive(id model.BookID) (coordinator.Release, error) {
+	return life.coordinator.Acquire([]coordinator.Resource{
+		{Kind: coordinator.KindBook, Book: id},
+	}, coordinator.Exclusive, 0)
+}
+
+// LockBookShared holds the book shared while a body write runs. A close waits for it.
+func (life *Lifecycle) LockBookShared(id model.BookID) (coordinator.Release, error) {
+	return life.coordinator.Acquire([]coordinator.Resource{
+		{Kind: coordinator.KindBook, Book: id},
+	}, coordinator.Shared, 0)
+}
+
+// LockBlock holds one block exclusively. Call it after LockBookShared: the order is book -> block.
+func (life *Lifecycle) LockBlock(book model.BookID, block model.ID) (coordinator.Release, error) {
+	return life.coordinator.Acquire([]coordinator.Resource{
+		{Kind: coordinator.KindBlock, Book: book, ID: block},
+	}, coordinator.Exclusive, 0)
+}
+
 func (life *Lifecycle) extract(paths store.BookPaths, id model.BookID) error {
 	if _, err := os.Stat(paths.Container); errors.Is(err, os.ErrNotExist) {
 		return fail("lifecycle.no-container", "no container for book %q at %s", id, paths.Container)
@@ -308,10 +331,10 @@ func (life *Lifecycle) extract(paths store.BookPaths, id model.BookID) error {
 // buildContainer rebuilds the container from the extracted state and validates it before anything
 // is written.
 func (life *Lifecycle) buildContainer(paths store.BookPaths) (*store.Container, error) {
-	manifestData, err := os.ReadFile(filepath.Join(paths.Dir, manifestMember))
+	manifestData, err := os.ReadFile(filepath.Join(paths.Dir, ManifestMember))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fail("lifecycle.extracted-incomplete",
-			"%s is missing; the book cannot be packed", manifestMember)
+			"%s is missing; the book cannot be packed", ManifestMember)
 	}
 	if err != nil {
 		return nil, fail("lifecycle.read-failed", "%v", err)
@@ -350,7 +373,7 @@ func (life *Lifecycle) buildContainer(paths store.BookPaths) (*store.Container, 
 		return nil, fail("lifecycle.encode-failed", "%v", err)
 	}
 	container := store.New()
-	if err := container.Write(manifestMember, encoded); err != nil {
+	if err := container.Write(ManifestMember, encoded); err != nil {
 		return nil, err
 	}
 	for id, body := range book.Bodies {
@@ -381,6 +404,32 @@ func (life *Lifecycle) Snapshot(id model.BookID, reason string) (rollback.Packag
 	return rollbacks.Snapshot(rollback.KindUndo, members, reason)
 }
 
+// SnapshotBody records a body-scoped undo package. It reads one body, so parallel writes on other
+// blocks are neither copied nor blocked.
+func (life *Lifecycle) SnapshotBody(id model.BookID, block model.ID, reason string) (rollback.Package, error) {
+	paths, err := life.layout.Book(id)
+	if err != nil {
+		return rollback.Package{}, err
+	}
+	if !extracted(paths) {
+		return rollback.Package{}, fail("lifecycle.not-open", "book %q is not open", id)
+	}
+	var data []byte
+	fileData, readErr := os.ReadFile(filepath.Join(paths.BlocksDir, block.String()+".md"))
+	if readErr == nil {
+		data = fileData
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return rollback.Package{}, fail("lifecycle.read-failed", "%v", readErr)
+	}
+	rollbacks, err := life.rollbackStore(paths)
+	if err != nil {
+		return rollback.Package{}, err
+	}
+	return rollbacks.Snapshot(rollback.KindBody, map[string][]byte{
+		"blocks/" + block.String() + ".md": data,
+	}, reason)
+}
+
 // Restore applies a rollback package. An undo package restores the extracted state; a book-level
 // point restores the container. The state before the restore is snapshotted first.
 func (life *Lifecycle) Restore(id model.BookID, name string) (RestoreResult, error) {
@@ -408,6 +457,10 @@ func (life *Lifecycle) Restore(id model.BookID, name string) (RestoreResult, err
 			return RestoreResult{}, fail("lifecycle.not-open",
 				"book %q is not open; run `pecia book open %s`", id, id)
 		}
+		if _, exists := members[ManifestMember]; !exists {
+			return RestoreResult{}, fail("rollback.invalid-package",
+				"an undo package needs %s", ManifestMember)
+		}
 		current, collectErr := collectMembers(paths)
 		if collectErr != nil {
 			return RestoreResult{}, collectErr
@@ -417,6 +470,21 @@ func (life *Lifecycle) Restore(id model.BookID, name string) (RestoreResult, err
 		}
 		if replaceErr := replaceExtracted(paths, members); replaceErr != nil {
 			return RestoreResult{}, replaceErr
+		}
+	case rollback.KindBody:
+		if !extracted(paths) {
+			return RestoreResult{}, fail("lifecycle.not-open",
+				"book %q is not open; run `pecia book open %s`", id, id)
+		}
+		blockID, data, memberErr := singleBlockMember(members)
+		if memberErr != nil {
+			return RestoreResult{}, memberErr
+		}
+		if _, snapErr := life.SnapshotBody(id, blockID, "restore"); snapErr != nil {
+			return RestoreResult{}, snapErr
+		}
+		if writeErr := store.WriteAtomic(filepath.Join(paths.BlocksDir, blockID.String()+".md"), data); writeErr != nil {
+			return RestoreResult{}, writeErr
 		}
 	case rollback.KindBook:
 		if extracted(paths) {
@@ -484,14 +552,14 @@ func (life *Lifecycle) recordBookPoint(paths store.BookPaths, newData []byte) (b
 }
 
 func collectMembers(paths store.BookPaths) (map[string][]byte, error) {
-	manifestData, err := os.ReadFile(filepath.Join(paths.Dir, manifestMember))
+	manifestData, err := os.ReadFile(filepath.Join(paths.Dir, ManifestMember))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fail("lifecycle.extracted-incomplete", "%s is missing", manifestMember)
+		return nil, fail("lifecycle.extracted-incomplete", "%s is missing", ManifestMember)
 	}
 	if err != nil {
 		return nil, fail("lifecycle.read-failed", "%v", err)
 	}
-	members := map[string][]byte{manifestMember: manifestData}
+	members := map[string][]byte{ManifestMember: manifestData}
 	entries, readErr := os.ReadDir(paths.BlocksDir)
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 		return nil, fail("lifecycle.read-failed", "%v", readErr)
@@ -516,7 +584,7 @@ func replaceExtracted(paths store.BookPaths, members map[string][]byte) error {
 	if err := os.RemoveAll(paths.BlocksDir); err != nil {
 		return fail("lifecycle.write-failed", "%v", err)
 	}
-	if err := os.Remove(filepath.Join(paths.Dir, manifestMember)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(filepath.Join(paths.Dir, ManifestMember)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fail("lifecycle.write-failed", "%v", err)
 	}
 	for member, data := range members {
@@ -535,6 +603,26 @@ func membersOf(container *store.Container) map[string][]byte {
 		members[name] = data
 	}
 	return members
+}
+
+// singleBlockMember extracts the one body member of a body-scoped package.
+func singleBlockMember(members map[string][]byte) (model.ID, []byte, error) {
+	if len(members) != 1 {
+		return model.ZeroID, nil, fail("rollback.invalid-package",
+			"a body package holds exactly one body, got %d", len(members))
+	}
+	for name, data := range members {
+		if !strings.HasPrefix(name, "blocks/") || !strings.HasSuffix(name, ".md") {
+			return model.ZeroID, nil, fail("rollback.invalid-package",
+				"a body package holds only blocks/<id>.md, got %q", name)
+		}
+		id, err := model.ParseID(strings.TrimSuffix(strings.TrimPrefix(name, "blocks/"), ".md"))
+		if err != nil || id.IsZero() {
+			return model.ZeroID, nil, fail("rollback.invalid-package", "invalid body member %q", name)
+		}
+		return id, data, nil
+	}
+	return model.ZeroID, nil, fail("rollback.invalid-package", "empty body package")
 }
 
 func (life *Lifecycle) newEntry(id model.BookID, outputPath string) Entry {
@@ -556,6 +644,6 @@ func newSession() string {
 }
 
 func extracted(paths store.BookPaths) bool {
-	info, err := os.Stat(filepath.Join(paths.Dir, manifestMember))
+	info, err := os.Stat(filepath.Join(paths.Dir, ManifestMember))
 	return err == nil && !info.IsDir()
 }

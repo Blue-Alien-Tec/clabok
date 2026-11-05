@@ -6,6 +6,8 @@
 package rollback
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +27,8 @@ const (
 	KindUndo Kind = "undo"
 	// KindBook is a book-level point created at close when the book changed.
 	KindBook Kind = "book"
+	// KindBody is a body-scoped undo package created before one body write.
+	KindBody Kind = "body"
 )
 
 const (
@@ -88,7 +92,7 @@ func (store_ *Store) Snapshot(kind Kind, members map[string][]byte, reason strin
 	if limit == 0 {
 		return Package{}, nil
 	}
-	if kind != KindUndo && kind != KindBook {
+	if kind != KindUndo && kind != KindBook && kind != KindBody {
 		return Package{}, fail("rollback.invalid-kind", "unknown package kind %q", kind)
 	}
 	if err := os.MkdirAll(store_.dir, 0o755); err != nil {
@@ -96,7 +100,7 @@ func (store_ *Store) Snapshot(kind Kind, members map[string][]byte, reason strin
 	}
 	created := store_.nextTimestamp()
 	cleanReason := sanitizeReason(reason)
-	name := fmt.Sprintf("%s-%s-%s%s", kind, created.Format(timeLayout), cleanReason, extension)
+	name := fmt.Sprintf("%s-%s-%s-%s%s", kind, created.Format(timeLayout), uniqueSuffix(), cleanReason, extension)
 
 	container := store.New()
 	for member, data := range members {
@@ -159,9 +163,6 @@ func (store_ *Store) Load(name string) (Package, map[string][]byte, error) {
 	for _, member := range container.Names() {
 		data, _ := container.Read(member)
 		members[member] = data
-	}
-	if _, exists := members["manifest.json"]; !exists {
-		return Package{}, nil, fail("rollback.invalid-package", "%s has no manifest.json", name)
 	}
 	return pkg, members, nil
 }
@@ -230,19 +231,28 @@ func parseName(name string) (Package, bool) {
 	if !strings.HasSuffix(name, extension) {
 		return Package{}, false
 	}
-	parts := strings.SplitN(strings.TrimSuffix(name, extension), "-", 3)
-	if len(parts) != 3 {
+	parts := strings.SplitN(strings.TrimSuffix(name, extension), "-", 4)
+	if len(parts) != 4 {
 		return Package{}, false
 	}
 	kind := Kind(parts[0])
-	if kind != KindUndo && kind != KindBook {
+	if kind != KindUndo && kind != KindBook && kind != KindBody {
 		return Package{}, false
 	}
 	created, err := time.Parse(timeLayout, parts[1])
 	if err != nil {
 		return Package{}, false
 	}
-	return Package{Name: name, Kind: kind, Reason: parts[2], Created: created}, true
+	return Package{Name: name, Kind: kind, Reason: parts[3], Created: created}, true
+}
+
+// uniqueSuffix keeps package names distinct when several writers snapshot concurrently.
+func uniqueSuffix() string {
+	var buffer [3]byte
+	if _, err := rand.Read(buffer[:]); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano()&0xffffff)
+	}
+	return hex.EncodeToString(buffer[:])
 }
 
 func sanitizeReason(reason string) string {

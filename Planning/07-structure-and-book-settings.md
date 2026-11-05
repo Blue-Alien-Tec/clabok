@@ -1,6 +1,7 @@
 # S07 — Structure and Book Settings Commands
 
-Status: draft, not planned.
+Status: implemented (2026-11-05). Delivery slices: S07a (add, rename, move, remove, book settings,
+delivered) and S07b (declarative `apply` plans, delivered).
 Phase: 4. Depends on: S03 (model), S04 (store), S05 (open state), S06 (locks). Blocks: S08, S09, S11,
 S14.
 PLAN refs: §3.7 (uniform commands, placement, move arguments, reparenting, settings live with the

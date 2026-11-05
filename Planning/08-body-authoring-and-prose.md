@@ -1,6 +1,7 @@
 # S08 — Body Authoring, Prose Discipline and Temp
 
-Status: draft, not planned.
+Status: implemented (2026-11-05). Delivery slices: S08a (body commands, prose discipline, block
+parallelism, delivered) and S08b (temp area, flush, find, delivered).
 Phase: 4. Depends on: S03 (model), S04 (store), S05 (open state, rollback), S06 (locks).
 Blocks: S09, S13, S14.
 PLAN refs: §3 statements 3, 5, 6; §3.3 (temp area), §3.7 (body writes), §2.5 (defect to avoid),

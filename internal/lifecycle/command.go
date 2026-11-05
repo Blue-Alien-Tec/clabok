@@ -140,7 +140,7 @@ func runOpen(env *cli.Env, args []string) (*cli.Result, error) {
 	if argErr != nil {
 		return nil, argErr
 	}
-	life, layout, err := newLifecycle(env)
+	life, layout, err := FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func runClose(env *cli.Env, args []string) (*cli.Result, error) {
 	if argErr != nil {
 		return nil, argErr
 	}
-	life, _, err := newLifecycle(env)
+	life, _, err := FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func runStatus(env *cli.Env, args []string) (*cli.Result, error) {
 	if argErr != nil {
 		return nil, argErr
 	}
-	life, _, err := newLifecycle(env)
+	life, _, err := FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func runStatus(env *cli.Env, args []string) (*cli.Result, error) {
 	}}, nil
 }
 
-func newLifecycle(env *cli.Env) (*Lifecycle, store.Layout, *cli.Error) {
+func FromEnv(env *cli.Env) (*Lifecycle, store.Layout, *cli.Error) {
 	values, err := config.Load(env)
 	if err != nil {
 		return nil, store.Layout{}, err
@@ -372,7 +372,7 @@ func runRollbackList(env *cli.Env, args []string) (*cli.Result, error) {
 	if argErr != nil {
 		return nil, argErr
 	}
-	life, _, err := newLifecycle(env)
+	life, _, err := FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +408,7 @@ func runRollbackRestore(env *cli.Env, args []string) (*cli.Result, error) {
 		return nil, argErr
 	}
 	name := args[1]
-	life, _, err := newLifecycle(env)
+	life, _, err := FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
