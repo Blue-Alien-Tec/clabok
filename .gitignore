@@ -1,0 +1,8 @@
+# Build output
+/pecia.exe
+/pecia
+/dist/
+
+# CLABOK working data
+/_CLABOK/
+/.temp/
