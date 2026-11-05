@@ -9,16 +9,14 @@ the first book.
 
 ## Checks
 
-Free, local:
+Local:
 
 ```powershell
 ./scripts/check.ps1
 ```
 
-or
-
 ```sh
 ./scripts/check.sh
 ```
 
-The cloud workflow `release-ci.yml` runs only on manual dispatch or a `vX.Y.0` tag.
+`release-ci.yml` runs on `workflow_dispatch` and on tags matching `v*.*.0`.
