@@ -5,6 +5,31 @@ Phase: 7. Depends on: S09 (render placement contract). Blocks: none, but S11 is 
 PLAN refs: §3.14 (regions, footer, notes, index prose, status, badges, layout block), §3 (4),
 §3.11 (asciiui types are an S09 concern).
 
+## 0. Current state and pre-planned decisions (2026-11-05)
+
+- Regions already exist in the model (`Region{ID, Kind, Target, Blocks}`; footer/notes) and the
+  renderer renders them (`footer`, `notesFor`) at their target. Authoring commands are missing.
+- `internal/asciiui` exists: `Parse`, `Render(spec, overrides)`, `Defaults`, `Resolve`. The renderer
+  reads `<book>/layouts/asciiui/<blockID>.asciiui` and reports `render.missing-layout` when absent.
+- `structure.AddLockedBlock(book, parent, "UILayout")` creates the locked anchor block; the body and
+  type commands reject locked blocks, while moves and removals stay allowed.
+- Index prose is not modelled; `render`'s `entry`/`indexMarkdown` is the render hook.
+- Status, badges and the layout block do not exist.
+
+Pre-planned decisions:
+
+- Manifest v3 adds one-line index prose per node (`prose`) and any status fields; one version bump
+  covers all S12 model additions.
+- ASCII UI commands: `asciiui add --book <id> --parent <node> --file <spec>`,
+  `asciiui set --book <id> --block <id> --file <spec>`, `asciiui remove --book <id> --block <id>`
+  (delete the spec, then `remove` the locked block). The spec path is fixed, not configurable.
+- Region commands: `region set --book <id> --kind footer --file <path|->`,
+  `region notes --book <id> --target <node|block> --file <path|->`,
+  `region remove --book <id> --target <node|block>`; the footer slot is one per book.
+- Index prose renders after the entry title; it never enters the ToC.
+- Status is opt-in per book, tool-owned vocabulary, rendered through the placement contract.
+- Badges and the layout block stay last; the layout block is deferred and uses `git ls-files`.
+
 ## 1. Goal
 
 Model authored content that is not part of the chapter flow — footer, notes and status — as blocks in

@@ -5,6 +5,24 @@ Phase: 8. Depends on: S07 (structure), S08 (body), S09 (render), plus S05/S06 be
 Blocks: none.
 PLAN refs: §3.10 (TUI included, one tooling surface), §3.13 (package responsibility), §3.11 (config).
 
+## 0. Current state and pre-planned decisions (2026-11-05)
+
+- The CLI surface is complete for authoring and rendering; every payload implements `Text()` and
+  mutating receipts implement `DryRunResult()`.
+- The core services are plain Go (`structure`, `body`, `render`, `lifecycle`, `search`, `temp`) and
+  can be called in-process.
+- The relevant rules are one static binary and no new dependency without an owner decision.
+
+Pre-planned decisions:
+
+- Entry `pecia tui`, only when stdin and stdout are a TTY; otherwise a clear error, never an
+  interactive fallback in pipelines.
+- No TUI library without an explicit owner decision; the default is a hand-rolled renderer over the
+  existing services.
+- Panes: structure tree, body editor/view (external editor or inline), status line, sync/check.
+- Core errors surface as `cli.Error` codes; the TUI adds no domain rules.
+- View models are tested without a terminal.
+
 ## 1. Goal
 
 Give humans an interactive terminal surface on the same core services, without a second

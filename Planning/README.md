@@ -9,6 +9,9 @@ these documents only cut that model into planning units and record what each uni
 
 ## 1. Why this folder exists
 
+**Fresh session:** read [HANDOVER.md](HANDOVER.md) first. It records the implemented state after M4,
+the one-commit-per-milestone rule, the package map, the core APIs and the known gaps.
+
 `PLAN.md` is one document of roughly 650 lines covering fourteen decision blocks, eight gap rows and
 an unrestricted target model. Planning or implementing it in one pass would mix foundation,
 storage, authoring, rendering and delivery concerns in a single plan. Each scope document below is
@@ -18,6 +21,7 @@ session has to resolve.
 
 ## 2. Ground rules
 
+0. A fresh session reads `HANDOVER.md` before planning or touching a scope.
 1. `PLAN.md` is normative. A scope document refines it into planning units and never changes a
   product statement. A contradiction is a defect in the scope document, not a decision.
 2. Scope documents resolve **implementation design only** (command grammar, JSON shapes, formats,

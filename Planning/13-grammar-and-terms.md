@@ -5,6 +5,30 @@ Phase: 7. Depends on: S02 (grammar endpoint), S08 (prose-writing commands, temp)
 PLAN refs: §3.14 (terms and grammar), §3.7 (LanguageTool daemon state stays in the OS temp
 directory), §3.11 (grammar endpoint), §6 (grammar gate on prose writes, confirmation flow).
 
+## 0. Current state and pre-planned decisions (2026-11-05)
+
+- The single prose-write path is `body.Service.write` (lock, normalize, `prose.CheckProse`,
+  `SnapshotBody`, `WriteAtomic`); the grammar gate hooks in before the snapshot.
+- Body gate failures are rejects: `body.forbidden-heading`, `body.expectation-failed` through
+  `body.MapError`.
+- `config.Values.GrammarEndpoint` exists (default `""` = local LanguageTool default); there is no
+  policy key yet.
+- `store.Layout.Terms()` is `<store>/terms.txt`; no code writes it.
+- The coordination daemon (`pecia serve`, AF_UNIX) is unrelated to the grammar server.
+- `apply` has no body step today; if it gains one, the gate must cover it.
+
+Pre-planned decisions:
+
+- Add `grammar.policy` (`block` default, `warn`, `off`) to `clabok.json` with strict validation.
+- Findings `{block, line, column, rule, message, replacements}`; the block policy returns a reject
+  with the findings as details.
+- Terms: requests create pending entries; `terms commit` requires explicit confirmation; the tool
+  never writes `terms.txt` directly.
+- Tests use a fake HTTP server; a missing Java/LanguageTool wrapper degrades to a warning, not a
+  failure.
+- The server lifecycle is opt-in; the default is the local server, and the state, lock and log live
+  in the OS temp directory.
+
 ## 1. Goal
 
 Gate prose writes with a grammar check whose policy is explicit, and make the term list a

@@ -6,6 +6,35 @@ Phase: 6. Depends on: S02 (docs root), S04 (store, registry primitives), S05 (op
 PLAN refs: §3.1 (hard cut, library book as the exception), §3.6 (docs location), §3.8 (naming),
 §3.9 (project boundary), §3 (1, 9), §3.7 (settings defaults, open books immovable), §6.
 
+## 0. Current state and pre-planned decisions (2026-11-05)
+
+Already implemented and to be used:
+
+- `store.LoadRegistry` / `Registry.Save`: v1 `{version, books:[{id, path, kind}]}`. `path` is the
+  output **directory** relative to the project. The library entry uses `.` (README at the project
+  root); a regular book uses e.g. `Docs/guide`.
+- `render.Service.Sync(book, outputDir, SyncOptions)`; `library sync` loops the registry and calls it
+  per book with `--check`/`--write`/`--prune`/`--force`.
+- `lifecycle.FromEnv`, `RequireClosed` and `State` for wiring and the open-book guard.
+- `structure.Service.Rekey` is book-local; library rekey must extend it across registered books.
+- `store.OpenBookCount` and the config mode guard already exist.
+- `config.Values` exposes ProjectDir, StoreRoot, DocsRoot, UndoLimit and BookPointLimit.
+
+Pre-planned decisions:
+
+- `book new --id <id> --title <t>` creates the container from `model.NewManifest`, saves it closed,
+  registers `{ID, Path: <docs-root-relative>/<slug>, Kind: "book"}`, and copies the library defaults
+  into the manifest settings at creation (the model cannot express "unset").
+- `library` command group: `library sync`, `library rekey`, `book new`, `book move`, `book rename`,
+  `book unregister`. Unregister deletes nothing; it removes only the registry entry.
+- The library book is the registry entry with `Kind: "library"` and `Path: "."`; its monolith render
+  is the repository `README.md`.
+- Cut-over: create the library book from the current README content (structure plus blocks), render,
+  and require `sync --check` clean. Do not touch legacy books.
+- Open books cannot move, rename or unregister (`lifecycle.RequireClosed`).
+- Library rekey resolves the target book, then rewrites the same stable ID in every other registered
+  book's bodies; require all affected books open and list the closed ones in the reject.
+
 ## 1. Goal
 
 Make the library the structural authority over its books, create new books under the configured docs
