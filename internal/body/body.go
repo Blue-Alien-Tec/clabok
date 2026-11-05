@@ -88,11 +88,13 @@ type ReplaceResult struct {
 
 // Row is one entry of the body list.
 type Row struct {
-	ID    model.ID
-	Title string
-	Depth int
-	Lines int
-	Bytes int
+	ID     model.ID
+	Title  string
+	Depth  int
+	Lines  int
+	Bytes  int
+	Type   string
+	Locked bool
 }
 
 // Service authors bodies of open books.
@@ -155,11 +157,13 @@ func (service *Service) List(book model.BookID) ([]Row, error) {
 				continue
 			}
 			rows = append(rows, Row{
-				ID:    id,
-				Title: node.Title,
-				Depth: depth,
-				Lines: lineCount(string(data)),
-				Bytes: len(data),
+				ID:     id,
+				Title:  node.Title,
+				Depth:  depth,
+				Lines:  lineCount(string(data)),
+				Bytes:  len(data),
+				Type:   manifest.BlockType(id),
+				Locked: manifest.IsLocked(id),
 			})
 		}
 		return true
@@ -210,6 +214,9 @@ func (service *Service) Replace(book model.BookID, block model.ID, pairs []Pair,
 		if !manifest.IsPlaced(block) {
 			return ReplaceResult{}, fail("body.unknown-block", "block %s is not placed", block)
 		}
+		if manifest.IsLocked(block) {
+			return ReplaceResult{}, fail("body.locked", "block %s is locked; its body cannot be changed", block)
+		}
 		current, readErr := os.ReadFile(blockPath(paths, block))
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 			return ReplaceResult{}, fail("body.read-failed", "%v", readErr)
@@ -230,6 +237,9 @@ func (service *Service) Replace(book model.BookID, block model.ID, pairs []Pair,
 	defer release()
 	if !manifest.IsPlaced(block) {
 		return ReplaceResult{}, fail("body.unknown-block", "block %s is not placed", block)
+	}
+	if manifest.IsLocked(block) {
+		return ReplaceResult{}, fail("body.locked", "block %s is locked; its body cannot be changed", block)
 	}
 	current, readErr := os.ReadFile(blockPath(paths, block))
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
@@ -294,6 +304,9 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 		if !manifest.IsPlaced(block) {
 			return WriteResult{}, fail("body.unknown-block", "block %s is not placed", block)
 		}
+		if manifest.IsLocked(block) {
+			return WriteResult{}, fail("body.locked", "block %s is locked; its body cannot be changed", block)
+		}
 		current, readErr := os.ReadFile(blockPath(paths, block))
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 			return WriteResult{}, fail("body.read-failed", "%v", readErr)
@@ -314,6 +327,9 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 	defer release()
 	if !manifest.IsPlaced(block) {
 		return WriteResult{}, fail("body.unknown-block", "block %s is not placed", block)
+	}
+	if manifest.IsLocked(block) {
+		return WriteResult{}, fail("body.locked", "block %s is locked; its body cannot be changed", block)
 	}
 	current, readErr := os.ReadFile(blockPath(paths, block))
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {

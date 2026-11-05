@@ -81,11 +81,12 @@ func Register(registry *cli.Registry) {
 	registry.Add(renameCommand())
 	registry.Add(moveCommand())
 	registry.Add(removeCommand())
+	registry.Add(blockTypeCommand())
 	registry.Add(settingsCommand())
 }
 
 func addCommand() *cli.Command {
-	var book, title, parent, before, after string
+	var book, title, blockType, parent, before, after string
 	var index int
 	return &cli.Command{
 		Name:     "add",
@@ -96,6 +97,7 @@ func addCommand() *cli.Command {
 			set := env.NewFlagSet("add")
 			set.StringVar(&book, "book", "", "book id")
 			set.StringVar(&title, "title", "", "title of the new unit")
+			set.StringVar(&blockType, "type", "", "optional block type")
 			set.StringVar(&parent, "parent", "", "destination node")
 			set.StringVar(&before, "before", "", "place before this sibling")
 			set.StringVar(&after, "after", "", "place after this sibling")
@@ -118,7 +120,7 @@ func addCommand() *cli.Command {
 			if serviceErr != nil {
 				return nil, serviceErr
 			}
-			receipt, addErr := service.Add(bookID, title, placement, env.Globals.DryRun)
+			receipt, addErr := service.AddTyped(bookID, title, blockType, placement, env.Globals.DryRun)
 			if addErr != nil {
 				return nil, MapError(addErr)
 			}
@@ -247,6 +249,53 @@ func removeCommand() *cli.Command {
 			receipt, removeErr := service.Remove(bookID, target, recursive, env.Globals.DryRun)
 			if removeErr != nil {
 				return nil, MapError(removeErr)
+			}
+			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
+		},
+	}
+}
+
+func blockTypeCommand() *cli.Command {
+	var book string
+	var clear bool
+	return &cli.Command{
+		Name:     "block type",
+		Summary:  "set or clear a block type",
+		Usage:    "pecia block type --book <id> <block> <type>",
+		Mutating: true,
+		Flags: func(env *cli.Env) *flag.FlagSet {
+			set := env.NewFlagSet("block type")
+			set.StringVar(&book, "book", "", "book id")
+			set.BoolVar(&clear, "clear", false, "remove the type")
+			return set
+		},
+		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
+			if clear && len(args) != 1 {
+				return nil, cli.Usage("usage.invalid-arguments", "block type --clear takes the block id only")
+			}
+			if !clear && len(args) != 2 {
+				return nil, cli.Usage("usage.invalid-arguments", "block type takes a block id and a type").
+					WithHint("pecia block type --book <id> <block> <type>")
+			}
+			bookID, bookErr := requireBook(book)
+			if bookErr != nil {
+				return nil, bookErr
+			}
+			block, blockErr := requireID(args[0], "block")
+			if blockErr != nil {
+				return nil, blockErr
+			}
+			value := ""
+			if !clear {
+				value = args[1]
+			}
+			service, serviceErr := newService(env)
+			if serviceErr != nil {
+				return nil, serviceErr
+			}
+			receipt, typeErr := service.SetBlockType(bookID, block, value, env.Globals.DryRun)
+			if typeErr != nil {
+				return nil, MapError(typeErr)
 			}
 			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
 		},

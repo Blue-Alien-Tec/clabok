@@ -10,8 +10,8 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 )
 
-// Version is the supported manifest schema version.
-const Version = 1
+// Version is the supported manifest schema version. Version 2 added optional block metadata.
+const Version = 2
 
 // BookID names a book in the store. It is not an element ID and is not referenced by other books.
 type BookID string
@@ -33,15 +33,53 @@ func (id BookID) Valid() bool {
 	return true
 }
 
+// BlockMeta is the optional metadata of one placed block.
+type BlockMeta struct {
+	// Type is a free-form token for later search filters, for example UILayout.
+	Type string `json:"type,omitempty"`
+	// Locked protects the generated content: a command may not change the body or the type.
+	Locked bool `json:"locked,omitempty"`
+}
+
 // Manifest is the structure document of one book. Bodies are not part of it: they live in the body
 // store and in Book.Bodies.
 type Manifest struct {
-	Version  int       `json:"version"`
-	ID       BookID    `json:"id"`
-	Root     *Node     `json:"root"`
-	Regions  []*Region `json:"regions,omitempty"`
-	Settings Settings  `json:"settings"`
+	Version   int              `json:"version"`
+	ID        BookID           `json:"id"`
+	Root      *Node            `json:"root"`
+	Regions   []*Region        `json:"regions,omitempty"`
+	BlockMeta map[ID]BlockMeta `json:"blockMeta,omitempty"`
+	Settings  Settings         `json:"settings"`
 }
+
+// Meta returns the metadata of a block, or the zero value.
+func (manifest *Manifest) Meta(id ID) BlockMeta {
+	if manifest.BlockMeta == nil {
+		return BlockMeta{}
+	}
+	return manifest.BlockMeta[id]
+}
+
+// SetMeta writes block metadata. The zero value removes the entry.
+func (manifest *Manifest) SetMeta(id ID, meta BlockMeta) {
+	if meta.Type == "" && !meta.Locked {
+		delete(manifest.BlockMeta, id)
+		if len(manifest.BlockMeta) == 0 {
+			manifest.BlockMeta = nil
+		}
+		return
+	}
+	if manifest.BlockMeta == nil {
+		manifest.BlockMeta = map[ID]BlockMeta{}
+	}
+	manifest.BlockMeta[id] = meta
+}
+
+// IsLocked reports whether the block content is protected.
+func (manifest *Manifest) IsLocked(id ID) bool { return manifest.Meta(id).Locked }
+
+// BlockType returns the optional type token of a block.
+func (manifest *Manifest) BlockType(id ID) string { return manifest.Meta(id).Type }
 
 // Error is a manifest-level failure with a stable code.
 type Error struct {
@@ -137,6 +175,12 @@ func (manifest *Manifest) Clone() *Manifest {
 		ID:       manifest.ID,
 		Root:     manifest.Root.Clone(),
 		Settings: manifest.Settings,
+	}
+	if manifest.BlockMeta != nil {
+		clone.BlockMeta = make(map[ID]BlockMeta, len(manifest.BlockMeta))
+		for id, meta := range manifest.BlockMeta {
+			clone.BlockMeta[id] = meta
+		}
 	}
 	if manifest.Regions != nil {
 		clone.Regions = make([]*Region, len(manifest.Regions))

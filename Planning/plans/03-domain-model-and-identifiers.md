@@ -129,3 +129,13 @@ internal/model/title.go       NormalizeTitle
 - `TOC.Enabled` and `Numbering.Enabled` default to false; the library applies its policy at book
   creation (S11). Only `indexDepth` and `output` are normalized.
 
+
+## 9. Refinement (2026-11-05)
+
+- The manifest version is 2. Version 2 adds `blockMeta`: an optional type token and a locked flag
+  per placed block. Placement still defines existence; metadata is an overlay.
+- `model.meta-orphan` rejects metadata for an unplaced block; `model.invalid-type` rejects a type
+  that is not a single token of at most 64 characters.
+- `locked` is a command rule, not a model rule: the model stores the flag, the structure and body
+  commands refuse to change a locked block's type or body.
+- `Manifest.Meta`, `SetMeta`, `IsLocked` and `BlockType` are the accessors; `Clone` copies the map.

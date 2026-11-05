@@ -184,7 +184,10 @@ structural level, is a value used for rendering; only blocks remain as body file
 2. **Structure is data.** Title, chapter and subchapter are values (title, kind, position) with no
    body of their own. They exist to be rendered. The structure tree is stored in the book manifest.
 3. **Blocks are the only bodies.** Every body file belongs to exactly one block. A block holds prose
-   and no structural children of its own.
+   and no structural children of its own. A block may carry an optional type string and a locked
+   flag. The type is free-form and serves later search filters; a locked block's body and type
+   cannot be changed by a command. The ASCII UI layout feature creates a locked block of type
+   `UILayout`; that block is the render anchor for the drawing.
 4. **Placement.** Title, chapter and subchapter hold any number of blocks, rendered in their stored
    order. Every block belongs to one structural node or one region collection and has an ordered
    position there. Region collections are ordered block-ID lists with a stable ID and a target (a
@@ -309,6 +312,10 @@ Applied unless the owner overrides them; these are coding decisions, not product
 - **Placement storage.** Blocks are a flat pool of `{id, body}`. Structural nodes and region
   collections hold ordered lists of block IDs; blocks carry no placement data. A move edits two lists
   and never touches a block.
+- **Block metadata.** A block may carry an optional type token and a locked flag in the manifest.
+  The type is free-form (one token, at most 64 characters) and serves search filters. `locked`
+  protects tool-generated content: no command may change the body or the type of a locked block,
+  and a locked block is removed only by its owning feature.
 - **Sibling order.** List order, no position fields. Stale or concurrent changes are caught by the
   existing book lock and stale check.
 - **Move arguments.** `--child-of <node>` appends, `--index N` places explicitly,
@@ -495,6 +502,10 @@ we keep.
   block is generated from `git ls-files`; without git it is a no-op, not an error. A command authors
   it from a path and a depth (how far the tree branches), and endpoints or branches can be excluded
   afterwards. Per-path prose is authored through commands; the generated tree is never hand-edited.
+- **ASCII UI anchor.** The ASCII UI layout feature adds a block, sets its type to `UILayout` and
+  locks it. That block is the render anchor: the drawing is inserted at its placement, and the
+  locked state keeps the generated body out of manual editing. No separate region or side channel is
+  involved.
 - **Badges.** Badges are generated from repository facts; an explicit message overrides the detector,
   and the generated badge region is never hand-edited.
 - **Regions are blocks.** A region is a block with a stable ID in an ordered collection. There are no

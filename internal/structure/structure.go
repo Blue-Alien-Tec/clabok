@@ -65,6 +65,7 @@ type Receipt struct {
 type Step struct {
 	Op        string
 	Title     string
+	Type      string
 	Target    model.ID
 	Placement Placement
 	Recursive bool
@@ -101,7 +102,34 @@ func (service *Service) Execute(book model.BookID, steps []Step, dryRun bool) ([
 
 // Add creates a chapter, subchapter or block. The kind follows the destination parent.
 func (service *Service) Add(book model.BookID, title string, placement Placement, dryRun bool) (Receipt, error) {
-	receipts, err := service.run(book, "struct.add", []Step{{Op: "add", Title: title, Placement: placement}}, dryRun)
+	return service.AddTyped(book, title, "", placement, dryRun)
+}
+
+// AddTyped creates a unit and sets the block type when it is a block.
+func (service *Service) AddTyped(book model.BookID, title, blockType string, placement Placement, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.add",
+		[]Step{{Op: "add", Title: title, Type: blockType, Placement: placement}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// AddLockedBlock creates a block with a type and locks it. It is the primitive for tool-owned
+// content such as the ASCII UI layout anchor.
+func (service *Service) AddLockedBlock(book model.BookID, parent model.ID, blockType string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.add-locked",
+		[]Step{{Op: "add-locked", Type: blockType, Placement: Append(parent)}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// SetBlockType sets or clears the optional type of a block. A locked block rejects the change.
+func (service *Service) SetBlockType(book model.BookID, block model.ID, value string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "block.type",
+		[]Step{{Op: "type", Target: block, Value: value}}, dryRun)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -214,6 +242,10 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 		return applyAdd(manifest, ids, step)
 	case "add-block":
 		return applyAddBlock(manifest, ids, step)
+	case "type":
+		return applySetType(manifest, step)
+	case "add-locked":
+		return applyAddLockedBlock(manifest, ids, step)
 	case "rename":
 		return applyRename(manifest, step)
 	case "move":
@@ -236,6 +268,14 @@ func applyAdd(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, erro
 	if !unitBlock && strings.TrimSpace(cleanTitle) == "" {
 		return mutation{}, fail("structure.empty-title", "the title must not be empty")
 	}
+	if step.Type != "" {
+		if !unitBlock {
+			return mutation{}, fail("structure.type-on-node", "only a block carries a type")
+		}
+		if message := model.ValidateTypeToken(step.Type); message != "" {
+			return mutation{}, fail("structure.invalid-type", "%s", message)
+		}
+	}
 	id, err := ids.next()
 	if err != nil {
 		return mutation{}, err
@@ -246,12 +286,55 @@ func applyAdd(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, erro
 		parent.Blocks = insertID(parent.Blocks, index, id)
 		result.receipt.Order = append([]model.ID(nil), parent.Blocks...)
 		result.created = []model.ID{id}
+		if step.Type != "" {
+			manifest.SetMeta(id, model.BlockMeta{Type: step.Type})
+		}
 	} else {
 		node := &model.Node{ID: id, Kind: model.Kind(kind), Title: cleanTitle}
 		parent.Children = insertNode(parent.Children, index, node)
 		result.receipt.Order = childIDs(parent.Children)
 	}
 	return result, nil
+}
+
+func applyAddLockedBlock(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
+	if step.Type == "" {
+		return mutation{}, fail("structure.invalid-type", "a locked block needs a type")
+	}
+	if message := model.ValidateTypeToken(step.Type); message != "" {
+		return mutation{}, fail("structure.invalid-type", "%s", message)
+	}
+	result, err := applyAddBlock(manifest, ids, step)
+	if err != nil {
+		return mutation{}, err
+	}
+	manifest.SetMeta(result.receipt.Target, model.BlockMeta{Type: step.Type, Locked: true})
+	return result, nil
+}
+
+func applySetType(manifest *model.Manifest, step Step) (mutation, error) {
+	if step.Target.IsZero() {
+		return mutation{}, fail("structure.unknown-target", "a block id is required")
+	}
+	if _, _, isBlock := blockParent(manifest, step.Target); !isBlock {
+		return mutation{}, fail("structure.unknown-target", "block %s does not exist", step.Target)
+	}
+	if manifest.IsLocked(step.Target) {
+		return mutation{}, fail("structure.block-locked",
+			"block %s is locked; its type cannot be changed", step.Target)
+	}
+	value := strings.TrimSpace(step.Value)
+	if value != "" {
+		if message := model.ValidateTypeToken(value); message != "" {
+			return mutation{}, fail("structure.invalid-type", "%s", message)
+		}
+	}
+	meta := manifest.Meta(step.Target)
+	meta.Type = value
+	manifest.SetMeta(step.Target, meta)
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Target: step.Target, Kind: "block", Index: -1, Changed: true,
+	}}, nil
 }
 
 func applyAddBlock(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
@@ -391,6 +474,12 @@ func applyRemove(manifest *model.Manifest, step Step) (mutation, error) {
 				"node %s still has children or blocks; pass --recursive", step.Target)
 		}
 		collectBlocks(node, &result.removed)
+		for _, id := range result.removed {
+			if manifest.IsLocked(id) {
+				return mutation{}, fail("structure.block-locked",
+					"block %s is locked; the subtree cannot be removed", id)
+			}
+		}
 		parent, index, ok := nodeParent(manifest, step.Target)
 		if !ok {
 			return mutation{}, fail("structure.unknown-target", "node %s has no parent", step.Target)
@@ -402,6 +491,10 @@ func applyRemove(manifest *model.Manifest, step Step) (mutation, error) {
 		return result, nil
 	}
 	if parent, index, isBlock := blockParent(manifest, step.Target); isBlock {
+		if manifest.IsLocked(step.Target) {
+			return mutation{}, fail("structure.block-locked",
+				"block %s is locked; unlock it in its owning feature first", step.Target)
+		}
 		result.removed = append(result.removed, step.Target)
 		parent.Blocks = removeIDAt(parent.Blocks, index)
 		result.receipt.Kind = "block"

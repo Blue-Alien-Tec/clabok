@@ -58,7 +58,7 @@ func TestManifestRoundTrip(t *testing.T) {
 }
 
 func TestDecodeNormalizesSettings(t *testing.T) {
-	document := `{"version":1,"id":"x","root":{"id":"1","kind":"title","title":"X"},"settings":{}}`
+	document := `{"version":2,"id":"x","root":{"id":"1","kind":"title","title":"X"},"settings":{}}`
 	manifest, err := Decode([]byte(document))
 	if err != nil {
 		t.Fatal(err)
@@ -73,9 +73,9 @@ func TestDecodeRejectsInvalidDocuments(t *testing.T) {
 		document string
 		code     string
 	}{
-		{`{"version":1,"id":"x","root":{"id":"1","kind":"title","title":"X"},"bogus":1}`, "model.unknown-key"},
-		{`{"version":1,"version":1}`, "model.duplicate-key"},
-		{`{"version":2,"id":"x"}`, "model.manifest-version"},
+		{`{"version":2,"id":"x","root":{"id":"1","kind":"title","title":"X"},"bogus":1}`, "model.unknown-key"},
+		{`{"version":2,"version":2}`, "model.duplicate-key"},
+		{`{"version":3,"id":"x"}`, "model.manifest-version"},
 		{`{"id":"x"}`, "model.manifest-version"},
 		{`{`, "model.invalid-json"},
 	}

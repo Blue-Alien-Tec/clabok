@@ -91,3 +91,10 @@ instead of hand-written markup, while removing the header and preamble regions f
 - The footer and notes are blocks. Do not introduce a second region storage next to the block pool;
   `PLAN.md` removed the separate region sources deliberately.
 - Header and preamble must be gone, not deprecated. Grep for them in the acceptance test.
+
+## Refinement (2026-11-05)
+
+- The ASCII UI layout feature does not get its own container type. It creates a block, sets its
+  type to `UILayout` and locks it. The block is the render anchor: the drawing is inserted at its
+  placement, and `locked` keeps the generated body out of manual edits. The primitive is
+  `structure.Service.AddLockedBlock`.

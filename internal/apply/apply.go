@@ -41,6 +41,7 @@ func fail(code, format string, args ...any) *Error {
 type rawStep struct {
 	Op        string `json:"op"`
 	Title     string `json:"title,omitempty"`
+	Type      string `json:"type,omitempty"`
 	Target    string `json:"target,omitempty"`
 	Parent    string `json:"parent,omitempty"`
 	ChildOf   string `json:"childOf,omitempty"`
@@ -89,7 +90,7 @@ func parseStep(index int, raw rawStep) (structure.Step, error) {
 		if err != nil {
 			return structure.Step{}, located(where, err)
 		}
-		return structure.Step{Op: "add", Title: raw.Title, Placement: placement}, nil
+		return structure.Step{Op: "add", Title: raw.Title, Type: raw.Type, Placement: placement}, nil
 	case "rename":
 		target, err := idOf(raw.Target, where+".target")
 		if err != nil {
@@ -115,6 +116,12 @@ func parseStep(index int, raw rawStep) (structure.Step, error) {
 			return structure.Step{}, err
 		}
 		return structure.Step{Op: "remove", Target: target, Recursive: raw.Recursive}, nil
+	case "type":
+		target, err := idOf(raw.Target, where+".target")
+		if err != nil {
+			return structure.Step{}, err
+		}
+		return structure.Step{Op: "type", Target: target, Value: raw.Type}, nil
 	case "setting":
 		if strings.TrimSpace(raw.Key) == "" || strings.TrimSpace(raw.Value) == "" {
 			return structure.Step{}, fail("apply.invalid-step", "%s needs key and value", where)

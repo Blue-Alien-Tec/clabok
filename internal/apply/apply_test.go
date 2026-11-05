@@ -34,13 +34,14 @@ func TestParseValidPlan(t *testing.T) {
 		{"op":"rename","target":"10","title":"Eins"},
 		{"op":"move","target":"11","childOf":"root"},
 		{"op":"remove","target":"12","recursive":true},
+		{"op":"type","target":"11","type":"UILayout"},
 		{"op":"setting","key":"numbering","value":"on"}
 	]}`
 	steps, err := Parse([]byte(document))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != 6 {
+	if len(steps) != 7 {
 		t.Fatalf("steps %d", len(steps))
 	}
 	if steps[0].Placement.Parent != 10 || steps[0].Placement.Index != 0 {

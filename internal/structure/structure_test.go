@@ -79,6 +79,31 @@ func (s scene) manifest(t *testing.T) *model.Manifest {
 	return manifest
 }
 
+func (s scene) setMeta(t *testing.T, id model.ID, meta model.BlockMeta) {
+	t.Helper()
+	paths, err := s.life.RequireOpen("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(paths.Dir, lifecycle.ManifestMember)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.SetMeta(id, meta)
+	encoded, err := manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAtomic(path, encoded); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (s scene) manifestBytes(t *testing.T) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(s.paths.Dir, lifecycle.ManifestMember))
@@ -354,6 +379,73 @@ func TestMutationsCreateUndoPackages(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no undo package after a mutation: %+v", packages)
+	}
+}
+
+func TestSetBlockType(t *testing.T) {
+	s := newScene(t)
+	if _, err := s.service.SetBlockType("fixture", 11, "UILayout", false); err != nil {
+		t.Fatal(err)
+	}
+	manifest := s.manifest(t)
+	if manifest.BlockType(11) != "UILayout" || manifest.IsLocked(11) {
+		t.Fatalf("meta %+v", manifest.Meta(11))
+	}
+	if _, err := s.service.SetBlockType("fixture", 11, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if s.manifest(t).BlockType(11) != "" {
+		t.Fatal("type not cleared")
+	}
+	if _, err := s.service.SetBlockType("fixture", 11, "UI Layout", false); err == nil {
+		t.Fatal("expected structure.invalid-type")
+	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.invalid-type" {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if _, err := s.service.SetBlockType("fixture", 999, "X", false); err == nil {
+		t.Fatal("expected structure.unknown-target")
+	}
+}
+
+func TestLockedRules(t *testing.T) {
+	s := newScene(t)
+	s.setMeta(t, 11, model.BlockMeta{Type: "UILayout", Locked: true})
+	if _, err := s.service.SetBlockType("fixture", 11, "Other", false); err == nil {
+		t.Fatal("expected structure.block-locked")
+	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.block-locked" {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if _, err := s.service.Remove("fixture", 11, false, false); err == nil {
+		t.Fatal("a locked block must not be removed")
+	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.block-locked" {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if _, err := s.service.Remove("fixture", 10, true, false); err == nil {
+		t.Fatal("a node holding a locked block must not be removed")
+	}
+}
+
+func TestAddLockedBlock(t *testing.T) {
+	s := newScene(t)
+	receipt, err := s.service.AddLockedBlock("fixture", 10, "UILayout", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := s.manifest(t)
+	if !manifest.IsLocked(receipt.Target) || manifest.BlockType(receipt.Target) != "UILayout" {
+		t.Fatalf("meta %+v", manifest.Meta(receipt.Target))
+	}
+	if _, err := s.service.SetBlockType("fixture", receipt.Target, "X", false); err == nil {
+		t.Fatal("the type of a locked block must not change")
+	}
+}
+
+func TestAddTypeOnNodeRejected(t *testing.T) {
+	s := newScene(t)
+	if _, err := s.service.AddTyped("fixture", "Sub", "UILayout", Append(10), false); err == nil {
+		t.Fatal("expected structure.type-on-node")
+	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.type-on-node" {
+		t.Fatalf("unexpected error %v", err)
 	}
 }
 

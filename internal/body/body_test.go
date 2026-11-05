@@ -73,6 +73,27 @@ func (s scene) secondService(t *testing.T) *Service {
 	return New(life)
 }
 
+func (s scene) setMeta(t *testing.T, id model.ID, meta model.BlockMeta) {
+	t.Helper()
+	path := filepath.Join(s.paths.Dir, lifecycle.ManifestMember)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.SetMeta(id, meta)
+	encoded, err := manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAtomic(path, encoded); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (s scene) bodyOf(t *testing.T, block model.ID) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(s.paths.BlocksDir, block.String()+".md"))
@@ -375,6 +396,50 @@ func TestParallelBlockWrites(t *testing.T) {
 	}
 	if bodyPackages != 3 {
 		t.Fatalf("body packages %d", bodyPackages)
+	}
+}
+
+func TestLockedBodyRejected(t *testing.T) {
+	s := newScene(t)
+	s.setMeta(t, 11, model.BlockMeta{Type: "UILayout", Locked: true})
+	before := s.bodyOf(t, 11)
+	if _, err := s.service.Set("fixture", 11, 0, "x", false); err == nil {
+		t.Fatal("expected body.locked")
+	} else if bodyErr, ok := err.(*Error); !ok || bodyErr.Code != "body.locked" {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if _, err := s.service.Set("fixture", 11, 0, "x", true); err == nil {
+		t.Fatal("a dry run must reject a locked block as well")
+	}
+	if _, err := s.service.Append("fixture", 11, 0, "x", false); err == nil {
+		t.Fatal("append on a locked block")
+	}
+	if _, err := s.service.Replace("fixture", 11, []Pair{{Find: "Body", Replace: "X"}}, ReplaceOptions{Expect: 1}, false); err == nil {
+		t.Fatal("replace on a locked block")
+	}
+	if s.bodyOf(t, 11) != before {
+		t.Fatal("a locked body was changed")
+	}
+}
+
+func TestListShowsMeta(t *testing.T) {
+	s := newScene(t)
+	s.setMeta(t, 12, model.BlockMeta{Type: "Note", Locked: true})
+	rows, err := s.service.List("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		switch row.ID {
+		case 11:
+			if row.Type != "" || row.Locked {
+				t.Fatalf("block 11 meta %+v", row)
+			}
+		case 12:
+			if row.Type != "Note" || !row.Locked {
+				t.Fatalf("block 12 meta %+v", row)
+			}
+		}
 	}
 }
 

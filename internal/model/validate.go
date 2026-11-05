@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Issue is one validation finding. Validation aggregates instead of raising, so one call reports
@@ -80,6 +81,7 @@ func (manifest *Manifest) Validate() *ValidationError {
 		validator.walkNode(manifest.Root, 1, "root")
 	}
 	validator.validateRegions()
+	validator.validateBlockMeta()
 	validator.validateSettings()
 	if len(validator.issues) == 0 {
 		return nil
@@ -291,6 +293,43 @@ func (validator *manifestValidator) validateRegions() {
 		}
 		validator.validateBlocks(region.Blocks, path+".blocks")
 	}
+}
+
+func (validator *manifestValidator) validateBlockMeta() {
+	ids := make([]ID, 0, len(validator.manifest.BlockMeta))
+	for id := range validator.manifest.BlockMeta {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(left, right int) bool { return ids[left] < ids[right] })
+	for _, id := range ids {
+		path := "blockMeta[" + id.String() + "]"
+		if id.IsZero() {
+			validator.add("model.zero-id", path, "a metadata key must not be zero")
+			continue
+		}
+		if _, placed := validator.placed[id]; !placed {
+			validator.add("model.meta-orphan", path, "metadata for an unplaced block")
+		}
+		meta := validator.manifest.BlockMeta[id]
+		if meta.Type != "" {
+			if message := ValidateTypeToken(meta.Type); message != "" {
+				validator.add("model.invalid-type", path+".type", "%s", message)
+			}
+		}
+	}
+}
+
+// ValidateTypeToken checks the block type format: a single token of at most 64 characters.
+func ValidateTypeToken(value string) string {
+	if len(value) > 64 {
+		return "must be at most 64 characters"
+	}
+	for _, character := range value {
+		if unicode.IsSpace(character) || unicode.IsControl(character) {
+			return "must not contain whitespace or control characters"
+		}
+	}
+	return ""
 }
 
 func (validator *manifestValidator) validateSettings() {

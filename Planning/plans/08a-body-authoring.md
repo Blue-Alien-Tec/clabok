@@ -21,6 +21,7 @@ First delivery slice of S08. S08b adds the temp area, `flush` and `find`.
 | 10 | Replace | literal pairs in one left-to-right pass (longest first); any regex pair switches to sequential regex runs; `--expect` counts the total | No cascade for literals; regex users get standard `$1` expansion |
 | 11 | Block list | depth is a number, taken from the node depth | The reference defect class (`body list` JSON) |
 | 12 | CLI flag | the body content flag is `--body`; `--text` is the global human-output flag | A flag cannot be defined twice |
+| 13 | Locked blocks | `set`/`append`/`prepend`/`replace` reject with `body.locked`, including dry runs; `body list` reports type and locked | The lock protects generated content |
 
 ## 2. Error codes
 

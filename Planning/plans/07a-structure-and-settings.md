@@ -25,6 +25,7 @@ First delivery slice of S07. S07b adds declarative `apply` plans.
 | 13 | Settings | `numbering on|off`, `toc on|off`, `index-depth >= 1`, `output monolith|chapter|part` | `PLAN.md` §3.7 |
 | 14 | Receipts | JSON reports kind, target, parent, index and the resulting order; `--dry-run` writes nothing | Tooling needs the resulting order; dry run is the contract |
 | 15 | IDs | existing IDs are collected into a set; the allocator retries on collision | Global uniqueness stays the invariant |
+| 16 | Block metadata | `block type --book <id> <block> <type>` sets or clears the type; `add --type` sets it on a new block; a locked block rejects both, and `remove` refuses a locked block or a subtree containing one | The type is a manifest overlay; `locked` protects tool-owned content |
 
 ## 2. Error codes
 

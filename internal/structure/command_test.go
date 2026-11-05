@@ -174,6 +174,83 @@ func TestAddRequiresBook(t *testing.T) {
 	}
 }
 
+func TestBlockTypeCommand(t *testing.T) {
+	directory := prepareProject(t)
+	code, _, stderr := run(t, directory, "block", "type", "--book", "fixture", "11", "UILayout")
+	if code != cli.ExitOK {
+		t.Fatalf("type exit %d: %s", code, stderr)
+	}
+	layout, err := store.NewLayout(filepath.Join(directory, "_CLABOK"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := layout.Book("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := readManifest(t, paths)
+	if manifest.BlockType(11) != "UILayout" {
+		t.Fatalf("type %q", manifest.BlockType(11))
+	}
+	code, _, stderr = run(t, directory, "block", "type", "--book", "fixture", "11", "--clear")
+	if code != cli.ExitOK {
+		t.Fatalf("clear exit %d: %s", code, stderr)
+	}
+	if readManifest(t, paths).BlockType(11) != "" {
+		t.Fatal("type not cleared")
+	}
+
+	code, stdout, stderr := run(t, directory, "add", "--book", "fixture", "--parent", "10", "--title", "Sub")
+	if code != cli.ExitOK {
+		t.Fatalf("sub add exit %d: %s", code, stderr)
+	}
+	var sub struct {
+		Data struct {
+			Target string `json:"target"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &sub); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = run(t, directory, "add", "--book", "fixture", "--parent", sub.Data.Target, "--type", "Note")
+	if code != cli.ExitOK {
+		t.Fatalf("block add exit %d: %s", code, stderr)
+	}
+	var block struct {
+		Data struct {
+			Target string `json:"target"`
+			Kind   string `json:"kind"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &block); err != nil {
+		t.Fatal(err)
+	}
+	if block.Data.Kind != "block" {
+		t.Fatalf("kind %q", block.Data.Kind)
+	}
+	manifest = readManifest(t, paths)
+	blockID, err := model.ParseID(block.Data.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.BlockType(blockID) != "Note" {
+		t.Fatalf("block type %q", manifest.BlockType(blockID))
+	}
+}
+
+func readManifest(t *testing.T, paths store.BookPaths) *model.Manifest {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(paths.Dir, lifecycle.ManifestMember))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest
+}
+
 func TestMoveRequiresDestination(t *testing.T) {
 	directory := prepareProject(t)
 	code, _, stderr := run(t, directory, "move", "--book", "fixture", "10")

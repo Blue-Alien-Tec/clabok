@@ -173,6 +173,38 @@ func TestRegionRules(t *testing.T) {
 	expectCode(t, manifest, "model.unknown-region-kind")
 }
 
+func TestBlockMeta(t *testing.T) {
+	manifest := validManifest()
+	manifest.SetMeta(11, BlockMeta{Type: "UILayout", Locked: true})
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("valid metadata: %v", err.Issues)
+	}
+	if !manifest.IsLocked(11) || manifest.BlockType(11) != "UILayout" {
+		t.Fatal("metadata accessors broken")
+	}
+	if manifest.IsLocked(12) {
+		t.Fatal("block 12 must not be locked")
+	}
+
+	manifest = validManifest()
+	manifest.SetMeta(404, BlockMeta{Type: "Note"})
+	expectCode(t, manifest, "model.meta-orphan")
+
+	manifest = validManifest()
+	manifest.SetMeta(0, BlockMeta{Type: "Note"})
+	expectCode(t, manifest, "model.zero-id")
+
+	manifest = validManifest()
+	manifest.SetMeta(11, BlockMeta{Type: "UI Layout"})
+	expectCode(t, manifest, "model.invalid-type")
+
+	manifest = validManifest()
+	manifest.SetMeta(11, BlockMeta{})
+	if manifest.BlockMeta != nil {
+		t.Fatal("setting the zero meta must remove the entry")
+	}
+}
+
 func TestSettingsRules(t *testing.T) {
 	manifest := validManifest()
 	manifest.Settings.Output = "stripe"

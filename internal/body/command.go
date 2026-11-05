@@ -72,11 +72,13 @@ func (payload replacePayload) Text() string {
 }
 
 type rowPayload struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Depth int    `json:"depth"`
-	Lines int    `json:"lines"`
-	Bytes int    `json:"bytes"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Depth  int    `json:"depth"`
+	Lines  int    `json:"lines"`
+	Bytes  int    `json:"bytes"`
+	Type   string `json:"type,omitempty"`
+	Locked bool   `json:"locked,omitempty"`
 }
 
 type listPayload struct {
@@ -300,7 +302,7 @@ func listCommand() *cli.Command {
 			for _, row := range rows {
 				payload.Blocks = append(payload.Blocks, rowPayload{
 					ID: row.ID.String(), Title: row.Title, Depth: row.Depth,
-					Lines: row.Lines, Bytes: row.Bytes,
+					Lines: row.Lines, Bytes: row.Bytes, Type: row.Type, Locked: row.Locked,
 				})
 			}
 			return &cli.Result{Data: payload}, nil
