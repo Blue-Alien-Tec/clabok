@@ -415,13 +415,34 @@ func TestLockedRules(t *testing.T) {
 	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.block-locked" {
 		t.Fatalf("unexpected error %v", err)
 	}
-	if _, err := s.service.Remove("fixture", 11, false, false); err == nil {
-		t.Fatal("a locked block must not be removed")
-	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.block-locked" {
-		t.Fatalf("unexpected error %v", err)
+
+	// A locked block may move: placement is remapping, not content.
+	if _, err := s.service.Move("fixture", 11, Append(20), false); err != nil {
+		t.Fatalf("a locked block may move: %v", err)
 	}
-	if _, err := s.service.Remove("fixture", 10, true, false); err == nil {
-		t.Fatal("a node holding a locked block must not be removed")
+	if s.manifest(t).BlockType(11) != "UILayout" {
+		t.Fatal("the move lost the type")
+	}
+
+	// A locked block must be removable, and the metadata goes with it.
+	if _, err := s.service.Remove("fixture", 11, false, false); err != nil {
+		t.Fatalf("a locked block must be removable: %v", err)
+	}
+	manifest := s.manifest(t)
+	if manifest.BlockType(11) != "" {
+		t.Fatal("metadata survived removal")
+	}
+	if _, err := os.Stat(filepath.Join(s.paths.BlocksDir, "11.md")); !os.IsNotExist(err) {
+		t.Fatalf("body survived removal: %v", err)
+	}
+
+	// Removing a node removes its locked blocks and their metadata.
+	s.setMeta(t, 13, model.BlockMeta{Type: "UILayout", Locked: true})
+	if _, err := s.service.Remove("fixture", 10, true, false); err != nil {
+		t.Fatalf("node removal with a locked block: %v", err)
+	}
+	if s.manifest(t).BlockType(13) != "" {
+		t.Fatal("metadata survived node removal")
 	}
 }
 

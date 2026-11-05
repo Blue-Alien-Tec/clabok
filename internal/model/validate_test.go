@@ -182,6 +182,10 @@ func TestBlockMeta(t *testing.T) {
 	if !manifest.IsLocked(11) || manifest.BlockType(11) != "UILayout" {
 		t.Fatal("metadata accessors broken")
 	}
+	manifest.SetMeta(13, BlockMeta{Type: "UILayout", Locked: true})
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("a type may be shared by several blocks: %v", err.Issues)
+	}
 	if manifest.IsLocked(12) {
 		t.Fatal("block 12 must not be locked")
 	}

@@ -185,9 +185,10 @@ structural level, is a value used for rendering; only blocks remain as body file
    body of their own. They exist to be rendered. The structure tree is stored in the book manifest.
 3. **Blocks are the only bodies.** Every body file belongs to exactly one block. A block holds prose
    and no structural children of its own. A block may carry an optional type string and a locked
-   flag. The type is free-form and serves later search filters; a locked block's body and type
-   cannot be changed by a command. The ASCII UI layout feature creates a locked block of type
-   `UILayout`; that block is the render anchor for the drawing.
+   flag. The type is free-form and serves later search filters; a type is not unique, so several
+   blocks may share it. A locked block's body and type cannot be changed by a command; it can still
+   be moved and removed like any other block. The ASCII UI layout feature creates a locked block of
+   type `UILayout`; that block is the render anchor for the drawing.
 4. **Placement.** Title, chapter and subchapter hold any number of blocks, rendered in their stored
    order. Every block belongs to one structural node or one region collection and has an ordered
    position there. Region collections are ordered block-ID lists with a stable ID and a target (a
@@ -314,8 +315,9 @@ Applied unless the owner overrides them; these are coding decisions, not product
   and never touches a block.
 - **Block metadata.** A block may carry an optional type token and a locked flag in the manifest.
   The type is free-form (one token, at most 64 characters) and serves search filters. `locked`
-  protects tool-generated content: no command may change the body or the type of a locked block,
-  and a locked block is removed only by its owning feature.
+  protects tool-generated content: no command may change the body or the type of a locked block.
+  Moving a locked block is placement-only and stays allowed; removing it is a normal structure
+  operation that also drops its metadata. Types may repeat across blocks.
 - **Sibling order.** List order, no position fields. Stale or concurrent changes are caught by the
   existing book lock and stale check.
 - **Move arguments.** `--child-of <node>` appends, `--index N` places explicitly,

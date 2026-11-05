@@ -474,29 +474,23 @@ func applyRemove(manifest *model.Manifest, step Step) (mutation, error) {
 				"node %s still has children or blocks; pass --recursive", step.Target)
 		}
 		collectBlocks(node, &result.removed)
-		for _, id := range result.removed {
-			if manifest.IsLocked(id) {
-				return mutation{}, fail("structure.block-locked",
-					"block %s is locked; the subtree cannot be removed", id)
-			}
-		}
 		parent, index, ok := nodeParent(manifest, step.Target)
 		if !ok {
 			return mutation{}, fail("structure.unknown-target", "node %s has no parent", step.Target)
 		}
 		parent.Children = removeNodeAt(parent.Children, index)
+		for _, id := range result.removed {
+			manifest.SetMeta(id, model.BlockMeta{})
+		}
 		result.receipt.Kind = string(node.Kind)
 		result.receipt.Parent = parent.ID
 		result.receipt.Order = childIDs(parent.Children)
 		return result, nil
 	}
 	if parent, index, isBlock := blockParent(manifest, step.Target); isBlock {
-		if manifest.IsLocked(step.Target) {
-			return mutation{}, fail("structure.block-locked",
-				"block %s is locked; unlock it in its owning feature first", step.Target)
-		}
 		result.removed = append(result.removed, step.Target)
 		parent.Blocks = removeIDAt(parent.Blocks, index)
+		manifest.SetMeta(step.Target, model.BlockMeta{})
 		result.receipt.Kind = "block"
 		result.receipt.Parent = parent.ID
 		result.receipt.Order = append([]model.ID(nil), parent.Blocks...)
