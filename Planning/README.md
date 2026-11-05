@@ -26,8 +26,8 @@ session has to resolve.
   with the owning scope ID, never implemented locally.
 4. One scope, one plan. The output of planning a scope is an implementation plan (resolved design
   decisions, task breakdown, test plan) written to `Planning/plans/<scope-id>-<slug>.md`.
-5. Status flows `draft` -> `planned` -> `implemented`. The status line of each scope document and
-  the status table in this file are updated together.
+5. Status flows `draft` -> `planned` -> `in progress` -> `implemented`. The status line of each
+  scope document and the status table in this file are updated together.
 6. Adding, splitting or merging a scope is allowed when planning shows the cut is wrong. The scope
   catalogue, the coverage table (§5) and the dependency order (§4) are updated in the same change.
 
@@ -38,9 +38,9 @@ session has to resolve.
 | [S01](01-foundation-and-cli-contract.md) | Foundation and CLI contract | 1 | — | implemented | §3.8, §3.9, §3.10, §3.13 |
 | [S02](02-configuration.md) | Configuration | 1 | S01 | implemented | §3.11 |
 | [S03](03-domain-model-and-identifiers.md) | Domain model and identifiers | 2 | S01 | implemented | §3, §3.7 (identity, placement, normalization), §3.14 (rekey) |
-| [S04](04-central-store-and-containers.md) | Central store and containers | 3 | S02, S03 | draft | §3.2, §3.7 (store layout), §6 |
-| [S05](05-open-close-and-rollback.md) | Open/close lifecycle and rollback tiers | 3 | S04, S06 | draft | §3.5, §3.7 (open state, rollback) |
-| [S06](06-concurrency-and-coordination.md) | Concurrency and coordination | 3 | S04 | draft | §3.12, §6 |
+| [S04](04-central-store-and-containers.md) | Central store and containers | 3 | S02, S03 | implemented | §3.2, §3.7 (store layout), §6 |
+| [S05](05-open-close-and-rollback.md) | Open/close lifecycle and rollback tiers | 3 | S04, S06 | implemented | §3.5, §3.7 (open state, rollback) |
+| [S06](06-concurrency-and-coordination.md) | Concurrency and coordination | 3 | S04 | implemented | §3.12, §6 |
 | [S07](07-structure-and-book-settings.md) | Structure and book settings commands | 4 | S03, S04, S05, S06 | draft | §3.7 (uniform commands, placement, move, settings), §3.14 (no pin) |
 | [S08](08-body-authoring-and-prose.md) | Body authoring, prose discipline and temp | 4 | S03, S04, S05, S06 | draft | §3 (3, 5, 6), §3.3, §3.7 (body writes), §2.5 |
 | [S09](09-rendering-and-output-modes.md) | Rendering and output modes | 5 | S04, S07, S08 | draft | §3.4, §3.7 (heading mapping, mode switch, navigation), §3 (7), §3.14 (index prose) |
@@ -82,6 +82,9 @@ milestones do not block it.
 
 M1 is delivered (2026-11-05): `cli`, `config`, `jsonstrict` and `model` build and pass their tests;
 `gofmt`, `go vet`, `go build` and `go test` are green. The current version is `0.1.0-dev`.
+
+M2 is delivered (2026-11-05): the store, the open/close lifecycle with rollback tiers and both
+coordination backends are in place. The version is bumped to `0.2.0-dev`.
 
 ### 4.1 Version policy
 

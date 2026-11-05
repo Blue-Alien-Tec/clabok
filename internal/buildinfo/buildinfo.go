@@ -12,4 +12,4 @@ const (
 )
 
 // Version is the build version; the development default applies to unstamped builds.
-var Version = "0.1.0-dev"
+var Version = "0.2.0-dev"
