@@ -65,11 +65,19 @@ func (e *Error) WithDetails(details any) *Error {
 	return e
 }
 
-// AsError maps any error to a command error. An untyped error is an internal failure.
+// AsError maps any error to a command error. A domain error that carries a stable code keeps it; an
+// untyped error is an internal failure.
 func AsError(err error) *Error {
 	var commandErr *Error
 	if errors.As(err, &commandErr) && commandErr != nil {
 		return commandErr
+	}
+	var coded interface {
+		error
+		ErrorCode() string
+	}
+	if errors.As(err, &coded) && coded.ErrorCode() != "" {
+		return Fail(coded.ErrorCode(), "%s", coded.Error())
 	}
 	return Fail("internal.error", "%v", err)
 }

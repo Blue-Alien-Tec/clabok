@@ -432,7 +432,10 @@ Applied unless the owner overrides them; these are coding decisions, not product
   flags override the config.
 - **The core is backend-agnostic.** Book logic depends on a coordinator interface, never on the
   backend.
-- **Daemon transport is local-only.** Named pipe on Windows, Unix socket elsewhere; no TCP listener.
+- **Daemon transport is local-only.** One AF_UNIX socket on every platform (Windows 10 1803+ and
+  Unix); no TCP listener. Owner decision 2026-11-05: one transport code path instead of a Win32
+  named-pipe implementation. The socket path is configurable; the default lives in the OS temp
+  directory and is derived from the store root.
 - **Daemon lifecycle.** `pecia serve` is a mode of the same binary. In `daemon` mode the CLI expects a
   running daemon and fails with a clear error when it is absent; it does not auto-start one.
 - **Mode changes require no open sessions.** Switching the mode while a book is open is rejected.

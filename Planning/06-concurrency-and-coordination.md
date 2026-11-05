@@ -1,6 +1,7 @@
 # S06 — Concurrency and Coordination
 
-Status: draft, not planned.
+Status: implemented (2026-11-05). Delivery slices: S06a (coordinator interface, file backend,
+delivered) and S06b (daemon, mode selection, version handshake, conformance suite, delivered).
 Phase: 3. Depends on: S04 (store, atomic writes). Blocks: S05, S07, S08, S12, S14.
 PLAN refs: §3.12 (complete), §3.5 (close coordination), §3.7 (stale and concurrent changes),
 §6 (identical backend semantics, per-block concurrency, stable lock order).
@@ -24,7 +25,7 @@ parallel, structural changes serialize per node, and no backend changes book dat
 | 7 | Reads use an atomic snapshot and need no write lock; a reader never sees a half-written block | §3.12 |
 | 8 | Close coordination: a close waits for or rejects in-flight block edits and never repacks a body being written | §3.12 |
 | 9 | Mode selection from S02 (`concurrency.mode`), CLI flags override; switching the mode while a book is open is rejected | §3.12 |
-| 10 | Daemon transport is local only: named pipe on Windows, Unix socket elsewhere; no TCP listener | §3.12 |
+| 10 | Daemon transport is local only: one AF_UNIX socket on every platform (owner decision 2026-11-05); no TCP listener | §3.12 |
 | 11 | The CLI expects a running daemon in `daemon` mode and fails with a clear error when it is absent; it never auto-starts one | §3.12 |
 | 12 | CLI and daemon must run the same version; a mismatch is a clear error | §3.12 |
 | 13 | The backend never changes book data, IDs, rendering or output | §3.12 |

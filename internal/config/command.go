@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
 type rootValues struct {
@@ -230,11 +231,20 @@ func runSet(env *cli.Env, args []string) (*cli.Result, error) {
 	if fromErr != nil {
 		return nil, fromErr
 	}
+	beforeMode := resolve(document, location, env.Globals).ConcurrencyMode
 	if setErr := setValue(document, key, raw); setErr != nil {
 		return nil, setErr
 	}
 	if issues := validate(document); len(issues) > 0 {
 		return nil, invalidError(issues)
+	}
+	if key == "concurrency.mode" {
+		values := resolve(document, location, env.Globals)
+		if values.ConcurrencyMode != beforeMode {
+			if guardErr := ensureNoOpenBooks(values); guardErr != nil {
+				return nil, guardErr
+			}
+		}
 	}
 	to, _, toErr := lookupValue(document, key)
 	if toErr != nil {
@@ -270,8 +280,17 @@ func runUnset(env *cli.Env, args []string) (*cli.Result, error) {
 	if fromErr != nil {
 		return nil, fromErr
 	}
+	beforeMode := resolve(document, location, env.Globals).ConcurrencyMode
 	if unsetErr := unsetValue(document, key); unsetErr != nil {
 		return nil, unsetErr
+	}
+	if key == "concurrency.mode" {
+		values := resolve(document, location, env.Globals)
+		if values.ConcurrencyMode != beforeMode {
+			if guardErr := ensureNoOpenBooks(values); guardErr != nil {
+				return nil, guardErr
+			}
+		}
 	}
 	to, _, toErr := lookupValue(document, key)
 	if toErr != nil {
@@ -339,6 +358,24 @@ func targetFile(location Location) string {
 
 func sameValue(left, right any) bool {
 	return reflect.DeepEqual(left, right)
+}
+
+// ensureNoOpenBooks blocks a coordination-mode change while any book is open. The mode switch is a
+// gate: it is reported as a reject and nothing is written.
+func ensureNoOpenBooks(values *Values) *cli.Error {
+	layout, err := store.NewLayout(values.StoreRoot)
+	if err != nil {
+		return cli.AsError(err)
+	}
+	count, countErr := store.OpenBookCount(layout.OpenState())
+	if countErr != nil {
+		return cli.AsError(countErr)
+	}
+	if count > 0 {
+		return cli.Reject("config.open-books", "cannot change the coordination mode while %d book(s) are open", count).
+			WithHint("close the open books and retry")
+	}
+	return nil
 }
 
 func writeFile(path string, document *file) *cli.Error {

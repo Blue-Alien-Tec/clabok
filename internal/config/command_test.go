@@ -391,3 +391,52 @@ func TestTextOutput(t *testing.T) {
 		t.Fatalf("unexpected text output %q", stdout)
 	}
 }
+
+func writeOpenState(t *testing.T, project, body string) {
+	t.Helper()
+	directory := filepath.Join(project, "_CLABOK")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "open.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestModeChangeBlockedByOpenBook(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	writeConfigDocument(t, project, `{"version":1,"concurrency":{"mode":"file"}}`)
+	writeOpenState(t, project, `{"version":1,"books":[{"id":"x"}]}`)
+
+	code, _, stderr := runCommand(t, "config", "set", "concurrency.mode", "daemon")
+	if code != cli.ExitReject {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "config.open-books") {
+		t.Fatalf("unexpected reject %s", stderr)
+	}
+
+	if err := os.Remove(filepath.Join(project, "_CLABOK", "open.json")); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr = runCommand(t, "config", "set", "concurrency.mode", "daemon")
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+}
+
+func TestModeUnsetBlockedByOpenBook(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	writeConfigDocument(t, project, `{"version":1,"concurrency":{"mode":"daemon"}}`)
+	writeOpenState(t, project, `{"version":1,"books":[{"id":"x"}]}`)
+
+	code, _, stderr := runCommand(t, "config", "unset", "concurrency.mode")
+	if code != cli.ExitReject {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "config.open-books") {
+		t.Fatalf("unexpected reject %s", stderr)
+	}
+}

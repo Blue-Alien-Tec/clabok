@@ -52,6 +52,9 @@ type Error struct {
 // Error returns the human message.
 func (err *Error) Error() string { return err.Message }
 
+// ErrorCode returns the stable code for the CLI boundary.
+func (err *Error) ErrorCode() string { return err.Code }
+
 // NewManifest creates an empty book with a title root.
 func NewManifest(id BookID, title string, allocator Allocator) (*Manifest, error) {
 	if !id.Valid() {

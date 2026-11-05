@@ -19,10 +19,19 @@ type ValidationError struct {
 	Issues []Issue
 }
 
-// Error returns the human summary.
+// Error returns the human summary with the first finding.
 func (err *ValidationError) Error() string {
-	return fmt.Sprintf("invalid book: %d problem(s)", len(err.Issues))
+	if len(err.Issues) == 0 {
+		return "invalid book"
+	}
+	if len(err.Issues) == 1 {
+		return "invalid book: " + err.Issues[0].String()
+	}
+	return fmt.Sprintf("invalid book: %d problems; first: %s", len(err.Issues), err.Issues[0].String())
 }
+
+// ErrorCode returns the stable code for the CLI boundary.
+func (err *ValidationError) ErrorCode() string { return "model.invalid" }
 
 // Codes returns the finding codes in order, which is what most tests need.
 func (err *ValidationError) Codes() []string {

@@ -1,6 +1,7 @@
 # S05 — Open/Close Lifecycle and Rollback Tiers
 
-Status: draft, not planned.
+Status: implemented (2026-11-05). Delivery slices: S05a (open/close mechanics, open state,
+extraction, repack, recovery, delivered) and S05b (rollback tiers, crash reporting, delivered).
 Phase: 3. Depends on: S04 (container, store layout), S06 (coordinator interface). Blocks: S07, S08,
 S11, S14.
 PLAN refs: §3.5 (complete lifecycle), §3.7 (open state, extracted bodies, rollback, immovability),
