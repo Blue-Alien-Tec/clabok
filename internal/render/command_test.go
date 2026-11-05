@@ -21,7 +21,7 @@ func run(t *testing.T, directory string, args ...string) (int, string, string) {
 	config.Register(registry)
 	coordinator.Register(registry)
 	lifecycle.Register(registry)
-	Register(registry)
+	Register(registry, nil)
 	var stdout, stderr strings.Builder
 	code := cli.Run(registry, args, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()

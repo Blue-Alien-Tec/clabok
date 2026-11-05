@@ -101,9 +101,15 @@ type Service struct {
 	Structure *structure.Service
 }
 
-// New returns a body service.
+// New returns a body service. It uses the cooperative random allocator; production commands wire
+// the library ID allocator with NewWithAllocator.
 func New(life *lifecycle.Lifecycle) *Service {
-	return &Service{Lifecycle: life, Structure: structure.New(life, nil)}
+	return NewWithAllocator(life, nil)
+}
+
+// NewWithAllocator returns a body service that creates blocks with the given allocator.
+func NewWithAllocator(life *lifecycle.Lifecycle, allocator model.Allocator) *Service {
+	return &Service{Lifecycle: life, Structure: structure.New(life, allocator)}
 }
 
 type mode int

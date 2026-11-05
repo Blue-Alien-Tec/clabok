@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/idspace"
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
@@ -311,11 +312,11 @@ func listCommand() *cli.Command {
 }
 
 func newService(env *cli.Env) (*Service, *cli.Error) {
-	life, _, err := lifecycle.FromEnv(env)
+	life, layout, err := lifecycle.FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
-	return New(life), nil
+	return NewWithAllocator(life, idspace.New(life, layout)), nil
 }
 
 func requireBook(raw string) (model.BookID, *cli.Error) {

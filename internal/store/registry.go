@@ -11,8 +11,9 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
 
-// RegistryVersion is the supported library registry schema version.
-const RegistryVersion = 1
+// RegistryVersion is the supported library registry schema version. Version 2 added optional
+// library defaults; a version 1 document is read as version 2 without defaults.
+const RegistryVersion = 2
 
 // Registry kinds.
 const (
@@ -23,7 +24,8 @@ const (
 // RegistryEntry is one book in the library registry.
 //
 // Path is the rendered output location, relative to the project directory. The store never
-// resolves it; S11 owns the resolution rules.
+// resolves it; S11 owns the resolution rules. The title and the index file name are deliberately
+// not stored: the manifest is the only title source and every book renders a README.md.
 type RegistryEntry struct {
 	ID   model.BookID `json:"id"`
 	Path string       `json:"path"`
@@ -32,11 +34,31 @@ type RegistryEntry struct {
 
 // Registry is the library registry document. Entry order is the library index order.
 type Registry struct {
-	Version int             `json:"version"`
-	Books   []RegistryEntry `json:"books"`
+	Version  int             `json:"version"`
+	Books    []RegistryEntry `json:"books"`
+	Defaults *model.Settings `json:"defaults,omitempty"`
+}
+
+// Library returns the single library entry.
+func (registry *Registry) Library() (RegistryEntry, bool) {
+	for _, entry := range registry.Books {
+		if entry.Kind == KindLibrary {
+			return entry, true
+		}
+	}
+	return RegistryEntry{}, false
+}
+
+// EffectiveDefaults returns the library defaults with every unset value filled in.
+func (registry *Registry) EffectiveDefaults() model.Settings {
+	if registry.Defaults == nil {
+		return model.DefaultSettings()
+	}
+	return registry.Defaults.Normalized()
 }
 
 // LoadRegistry reads the registry. A missing file yields an empty registry at the current version.
+// A version 1 document is upgraded in memory.
 func LoadRegistry(path string) (*Registry, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -52,37 +74,87 @@ func LoadRegistry(path string) (*Registry, error) {
 	if err := registry.Validate(); err != nil {
 		return nil, err
 	}
+	registry.Version = RegistryVersion
 	return &registry, nil
 }
 
-// Validate checks the version and every entry.
+// Validate checks the version and every entry. Versions 1 and 2 are accepted; Save always writes
+// the current version.
 func (registry *Registry) Validate() error {
-	if registry.Version != RegistryVersion {
+	if registry.Version != 1 && registry.Version != RegistryVersion {
 		return fail("store.registry-version",
 			"unsupported registry version %d (expected %d)", registry.Version, RegistryVersion)
 	}
-	seen := make(map[model.BookID]struct{}, len(registry.Books))
+	seenIDs := make(map[model.BookID]struct{}, len(registry.Books))
+	seenPaths := make(map[string]struct{}, len(registry.Books))
+	libraries := 0
 	for index, entry := range registry.Books {
 		where := "books[" + strconv.Itoa(index) + "]"
 		if !entry.ID.Valid() {
 			return fail("store.registry-invalid", "%s.id: invalid book id %q", where, string(entry.ID))
 		}
-		if _, duplicate := seen[entry.ID]; duplicate {
+		if _, duplicate := seenIDs[entry.ID]; duplicate {
 			return fail("store.registry-invalid", "%s.id: duplicate book id %q", where, string(entry.ID))
 		}
-		seen[entry.ID] = struct{}{}
-		if strings.TrimSpace(entry.Path) == "" {
-			return fail("store.registry-invalid", "%s.path: must not be empty", where)
+		seenIDs[entry.ID] = struct{}{}
+		clean, ok := cleanRegistryPath(entry.Path)
+		if !ok {
+			return fail("store.registry-invalid",
+				"%s.path: expected a relative path inside the project, got %q", where, entry.Path)
 		}
-		if filepath.IsAbs(entry.Path) {
-			return fail("store.registry-invalid", "%s.path: must be relative, got %q", where, entry.Path)
+		if _, duplicate := seenPaths[clean]; duplicate {
+			return fail("store.registry-invalid", "%s.path: duplicate output path %q", where, entry.Path)
 		}
-		if entry.Kind != KindLibrary && entry.Kind != KindBook {
+		seenPaths[clean] = struct{}{}
+		switch entry.Kind {
+		case KindLibrary:
+			libraries++
+			if clean != "." {
+				return fail("store.registry-invalid",
+					"%s.path: the library entry must use \".\", got %q", where, entry.Path)
+			}
+		case KindBook:
+		default:
 			return fail("store.registry-invalid",
 				"%s.kind: expected %q or %q, got %q", where, KindLibrary, KindBook, entry.Kind)
 		}
 	}
+	if libraries > 1 {
+		return fail("store.registry-invalid", "at most one entry may have kind %q", KindLibrary)
+	}
+	if registry.Defaults != nil {
+		defaults := registry.Defaults.Normalized()
+		if !defaults.Output.Valid() {
+			return fail("store.registry-invalid",
+				"defaults.output: unknown output mode %q", string(defaults.Output))
+		}
+	}
 	return nil
+}
+
+// cleanRegistryPath validates that a registry path stays inside the project and returns its clean
+// form with forward slashes.
+func cleanRegistryPath(path string) (string, bool) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, "/") ||
+		strings.HasPrefix(trimmed, `\`) || (len(trimmed) > 1 && trimmed[1] == ':') {
+		return "", false
+	}
+	normalized := filepath.ToSlash(filepath.Clean(trimmed))
+	if normalized == ".." || strings.HasPrefix(normalized, "../") {
+		return "", false
+	}
+	return normalized, true
+}
+
+// RegistryPath validates a path for a new registry entry.
+func RegistryPath(path string) (string, error) {
+	clean, ok := cleanRegistryPath(path)
+	if !ok {
+		return "", fail("store.registry-invalid",
+			"expected a relative path inside the project, got %q", path)
+	}
+	return clean, nil
 }
 
 // Find returns a registry entry by book ID.
@@ -117,15 +189,37 @@ func (registry *Registry) Remove(id model.BookID) bool {
 	return false
 }
 
-// Save validates and writes the registry atomically.
+// Save validates and writes the registry atomically. The library entry is written first; the
+// remaining entries keep their relative order.
 func (registry *Registry) Save(path string) error {
 	registry.Version = RegistryVersion
 	if err := registry.Validate(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(registry, "", "  ")
+	document := struct {
+		Version  int             `json:"version"`
+		Books    []RegistryEntry `json:"books"`
+		Defaults *model.Settings `json:"defaults,omitempty"`
+	}{Version: RegistryVersion, Books: orderedEntries(registry.Books), Defaults: registry.Defaults}
+	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return fail("store.write-failed", "%v", err)
 	}
 	return atomicWrite(path, append(data, '\n'))
+}
+
+// orderedEntries places the library entry first and keeps the relative order of the rest.
+func orderedEntries(entries []RegistryEntry) []RegistryEntry {
+	ordered := make([]RegistryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind == KindLibrary {
+			ordered = append(ordered, entry)
+		}
+	}
+	for _, entry := range entries {
+		if entry.Kind != KindLibrary {
+			ordered = append(ordered, entry)
+		}
+	}
+	return ordered
 }

@@ -14,6 +14,7 @@ func TestSortResources(t *testing.T) {
 		{Kind: KindNode, Book: "a", ID: 2},
 		{Kind: KindBlock, Book: "b", ID: 5},
 		{Kind: KindNode, Book: "a", ID: 1},
+		{Kind: KindIDs},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +23,7 @@ func TestSortResources(t *testing.T) {
 	for _, resource := range ordered {
 		got = append(got, resource.String())
 	}
-	want := "store,book:b,node:a:1,node:a:2,block:b:5"
+	want := "store,book:b,node:a:1,node:a:2,block:b:5,ids"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("order %v, want %s", got, want)
 	}
@@ -37,6 +38,8 @@ func TestResourceValidation(t *testing.T) {
 		{Kind: KindBook, Book: "a", ID: 1},
 		{Kind: KindNode, Book: "a"},
 		{Kind: KindBlock, Book: "bad id", ID: 1},
+		{Kind: KindIDs, Book: "a"},
+		{Kind: KindIDs, ID: 1},
 	}
 	for _, resource := range cases {
 		if err := resource.validate(); err == nil {
@@ -48,6 +51,7 @@ func TestResourceValidation(t *testing.T) {
 		{Kind: KindBook, Book: "a"},
 		{Kind: KindNode, Book: "a", ID: 1},
 		{Kind: KindBlock, Book: "a", ID: 1},
+		{Kind: KindIDs},
 	} {
 		if err := resource.validate(); err != nil {
 			t.Fatalf("%+v must be valid: %v", resource, err)
@@ -64,6 +68,7 @@ func TestLockNames(t *testing.T) {
 		{Resource{Kind: KindBook, Book: "clabok"}, "book-clabok.lock"},
 		{Resource{Kind: KindNode, Book: "clabok", ID: 3}, "node-clabok-3.lock"},
 		{Resource{Kind: KindBlock, Book: "clabok", ID: 42}, "block-clabok-42.lock"},
+		{Resource{Kind: KindIDs}, "ids.lock"},
 	}
 	for _, testCase := range cases {
 		if got := testCase.resource.lockName(); got != testCase.want {

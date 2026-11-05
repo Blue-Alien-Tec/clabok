@@ -271,9 +271,15 @@ structural level, is a value used for rendering; only blocks remain as body file
 ### 3.5 Book open/close lifecycle (owner decision, 2026-11-05)
 
 - **Body data stays packed.** Bodies live compressed in the book container while the book is closed.
-- **Every body access requires an open book.** Reading or writing a body requires `open`; a closed book
-  is not readable. Opening extracts all body data, and the commands work directly on the extracted
-  body files.
+- **Body mutation requires open.** Reading or writing bodies for authoring requires `open`. Opening
+  extracts all body data, and the modifying commands work directly on the extracted body files. The
+  open cycle exists so authoring does not unpack and repack the container for every command.
+- **Rendering is the sole read path that bypasses open.** The renderer, and the read-only acceptance
+  over its result (`check`, `verify`), read the packed container directly when the book is closed;
+  they never create an extracted state and never mutate the book. When the book is already open, the
+  extracted state wins (it is authoritative) and the same render runs from it.
+- **Registry operations stay closed.** `book move`, `book rename` and `book unregister` require a
+  closed book and touch only the registry or the manifest title; they never read or write bodies.
 - **Closing repacks.** A dedicated close command writes the body data back into the container.
 - **Multiple books may be open.** `open` and `close` take an explicit book argument and never touch
   another open book. Open is a global book state, not a per-process session: `open` is idempotent, so
@@ -524,8 +530,11 @@ we keep.
 - **Terms and grammar.** The term list and the grammar gate remain tool-owned. Terms change only
   through the confirmation flow.
 - **Book status.** Clean/dirty state from input and output hashes remains the drift signal.
-- **Rekey.** IDs are stable by default. A rekey command changes an ID and rewrites the references
-  across the library; it is the only way to change an ID.
+- **Immutable IDs.** An ID never changes. Placement is a collection edit: `move` and reparenting
+  change the ordered lists, the unit keeps its ID and every reference stays valid. A copy creates a
+  new ID for the copy and maps the copy's internal references; an import maps imported IDs to fresh
+  library IDs. No command swaps an existing ID, so there is no rekey. Duplicate ownership is a
+  corruption to report (`sync --check`), never to repair by renaming.
 - **Not carried over.** Header and preamble regions, cleanup of legacy nav/index/banner residue,
   migrate and import (paused), and the storage-mode command (replaced by open/close).
 

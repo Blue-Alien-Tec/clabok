@@ -9,6 +9,7 @@ import (
 
 const (
 	registryFile   = "library.json"
+	idsFile        = "ids.json"
 	termsFile      = "terms.txt"
 	rollbackDir    = "rollback"
 	containerExt   = ".book"
@@ -39,6 +40,10 @@ func NewLayout(root string) (Layout, error) {
 
 // Registry is the library registry file.
 func (layout Layout) Registry() string { return filepath.Join(layout.Root, registryFile) }
+
+// IDs is the library ID ledger file. The ledger is the library's authority for the global ID
+// namespace: every issued ID comes from here, so uniqueness is a constraint, not a probability.
+func (layout Layout) IDs() string { return filepath.Join(layout.Root, idsFile) }
 
 // Terms is the term list file.
 func (layout Layout) Terms() string { return filepath.Join(layout.Root, termsFile) }

@@ -8,6 +8,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/config"
 	"github.com/Blue-Alien-Tec/clabok/internal/coordinator"
+	"github.com/Blue-Alien-Tec/clabok/internal/library"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/render"
 	"github.com/Blue-Alien-Tec/clabok/internal/search"
@@ -25,6 +26,7 @@ func main() {
 	body.Register(registry)
 	search.Register(registry)
 	temp.Register(registry)
-	render.Register(registry)
+	render.Register(registry, library.IndexEntries)
+	library.Register(registry)
 	os.Exit(cli.Run(registry, os.Args[1:], os.Stdout, os.Stderr))
 }

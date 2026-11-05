@@ -31,6 +31,9 @@ const (
 	KindNode Kind = "node"
 	// KindBlock locks one block body.
 	KindBlock Kind = "block"
+	// KindIDs locks the library ID ledger. It is acquired alone; a holder never waits for a
+	// store or book lock, so it is safe while a book lock is held.
+	KindIDs Kind = "ids"
 )
 
 // Resource identifies one lockable unit.
@@ -49,6 +52,8 @@ func (resource Resource) String() string {
 		return "book:" + string(resource.Book)
 	case KindNode:
 		return "node:" + string(resource.Book) + ":" + resource.ID.String()
+	case KindIDs:
+		return "ids"
 	default:
 		return "block:" + string(resource.Book) + ":" + resource.ID.String()
 	}
@@ -59,6 +64,10 @@ func (resource Resource) validate() error {
 	case KindStore:
 		if resource.Book != "" || !resource.ID.IsZero() {
 			return fail("coordinator.invalid-resource", "a store resource carries no book and no id")
+		}
+	case KindIDs:
+		if resource.Book != "" || !resource.ID.IsZero() {
+			return fail("coordinator.invalid-resource", "an ids resource carries no book and no id")
 		}
 	case KindBook:
 		if !resource.Book.Valid() {
@@ -88,6 +97,8 @@ func (resource Resource) rank() int {
 		return 1
 	case KindNode:
 		return 2
+	case KindIDs:
+		return 4
 	default:
 		return 3
 	}
@@ -111,6 +122,8 @@ func (resource Resource) lockName() string {
 		return "book-" + string(resource.Book) + ".lock"
 	case KindNode:
 		return "node-" + string(resource.Book) + "-" + resource.ID.String() + ".lock"
+	case KindIDs:
+		return "ids.lock"
 	default:
 		return "block-" + string(resource.Book) + "-" + resource.ID.String() + ".lock"
 	}

@@ -5,14 +5,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
 
 func TestRegistryRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "library.json")
+	defaults := model.DefaultSettings()
+	defaults.Numbering.Enabled = true
+	defaults.Output = model.OutputChapter
 	registry := &Registry{Version: RegistryVersion, Books: []RegistryEntry{
-		{ID: "clabok", Path: "README.md", Kind: KindLibrary},
+		{ID: "clabok", Path: ".", Kind: KindLibrary},
 		{ID: "guide", Path: "Docs/guide", Kind: KindBook},
-	}}
+	}, Defaults: &defaults}
 	if err := registry.Save(path); err != nil {
 		t.Fatal(err)
 	}
@@ -23,9 +28,13 @@ func TestRegistryRoundTrip(t *testing.T) {
 	if loaded.Version != RegistryVersion || len(loaded.Books) != 2 {
 		t.Fatalf("registry %+v", loaded)
 	}
-	if loaded.Books[0].ID != "clabok" || loaded.Books[0].Path != "README.md" ||
+	if loaded.Books[0].ID != "clabok" || loaded.Books[0].Path != "." ||
 		loaded.Books[0].Kind != KindLibrary {
 		t.Fatalf("entry %+v", loaded.Books[0])
+	}
+	if loaded.Defaults == nil || !loaded.Defaults.Numbering.Enabled ||
+		loaded.Defaults.Output != model.OutputChapter {
+		t.Fatalf("defaults %+v", loaded.Defaults)
 	}
 
 	again, err := os.ReadFile(path)
@@ -83,34 +92,58 @@ func TestRegistryRejects(t *testing.T) {
 	}{
 		{
 			name:     "version",
-			document: `{"version":2,"books":[]}`,
+			document: `{"version":3,"books":[]}`,
 			code:     "store.registry-version",
 		},
 		{
 			name: "duplicate id",
-			document: `{"version":1,"books":[
+			document: `{"version":2,"books":[
 				{"id":"a","path":"Docs/a","kind":"book"},
 				{"id":"a","path":"Docs/b","kind":"book"}]}`,
 			code: "store.registry-invalid",
 		},
 		{
+			name: "duplicate path",
+			document: `{"version":2,"books":[
+				{"id":"a","path":"Docs/a","kind":"book"},
+				{"id":"b","path":"Docs/a/","kind":"book"}]}`,
+			code: "store.registry-invalid",
+		},
+		{
+			name: "second library",
+			document: `{"version":2,"books":[
+				{"id":"a","path":".","kind":"library"},
+				{"id":"b","path":"Docs/b","kind":"library"}]}`,
+			code: "store.registry-invalid",
+		},
+		{
+			name:     "library path",
+			document: `{"version":2,"books":[{"id":"a","path":"Docs/a","kind":"library"}]}`,
+			code:     "store.registry-invalid",
+		},
+		{
+			name:     "escaping path",
+			document: `{"version":2,"books":[{"id":"a","path":"../a","kind":"book"}]}`,
+			code:     "store.registry-invalid",
+		},
+		{
 			name:     "empty id",
-			document: `{"version":1,"books":[{"id":"","path":"Docs/a","kind":"book"}]}`,
+			document: `{"version":2,"books":[{"id":"","path":"Docs/a","kind":"book"}]}`,
 			code:     "store.registry-invalid",
 		},
 		{
 			name:     "empty path",
-			document: `{"version":1,"books":[{"id":"a","path":"","kind":"book"}]}`,
+			document: `{"version":2,"books":[{"id":"a","path":"","kind":"book"}]}`,
 			code:     "store.registry-invalid",
 		},
 		{
 			name:     "absolute path",
-			document: `{"version":1,"books":[{"id":"a","path":"` + absolute + `","kind":"book"}]}`,
+			document: `{"version":2,"books":[{"id":"a","path":"` + absolute + `","kind":"book"}]}`,
 			code:     "store.registry-invalid",
 		},
 		{
 			name:     "unknown kind",
-			document: `{"version":1,"books":[{"id":"a","path":"Docs/a","kind":"manual"}]}`,
+			document: `{"version":2,"books":[{"id":"a","path":"Docs/a","kind":"manual"}]}`,
 			code:     "store.registry-invalid",
 		},
 		{
@@ -129,6 +162,31 @@ func TestRegistryRejects(t *testing.T) {
 			t.Fatalf("%s: expected an error", testCase.name)
 		}
 		expectCode(t, err, testCase.code)
+	}
+}
+
+func TestRegistryUpgradesVersion1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.json")
+	document := `{"version":1,"books":[{"id":"library","path":".","kind":"library"}]}`
+	if err := os.WriteFile(path, []byte(document), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := LoadRegistry(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registry.Version != RegistryVersion || registry.Defaults != nil {
+		t.Fatalf("upgraded registry %+v", registry)
+	}
+	if err := registry.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), `"version": 2`) {
+		t.Fatalf("the registry was not written as version 2:\n%s", saved)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/idspace"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
@@ -82,17 +83,17 @@ func Register(registry *cli.Registry) {
 	registry.Add(moveCommand())
 	registry.Add(removeCommand())
 	registry.Add(blockTypeCommand())
-	registry.Add(rekeyCommand())
 	registry.Add(settingsCommand())
 }
 
 func addCommand() *cli.Command {
-	var book, title, blockType, parent, before, after string
+	var book, title, blockType, parent, before, after, refBook, refNode, refBlock string
 	var index int
+	var link bool
 	return &cli.Command{
 		Name:     "add",
-		Summary:  "add a chapter, subchapter or block",
-		Usage:    "pecia add --book <id> --title <title> [--parent <node>] [--index N | --before <id> | --after <id>]",
+		Summary:  "add a chapter, subchapter, block or link entry",
+		Usage:    "pecia add --book <id> --title <title> [--parent <node>] [--index N | --before <id> | --after <id>] [--link --ref-book <id> [--ref-node <id> | --ref-block <id>]]",
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("add")
@@ -103,6 +104,10 @@ func addCommand() *cli.Command {
 			set.StringVar(&before, "before", "", "place before this sibling")
 			set.StringVar(&after, "after", "", "place after this sibling")
 			set.IntVar(&index, "index", -1, "position in the destination")
+			set.BoolVar(&link, "link", false, "add a link entry at the book root")
+			set.StringVar(&refBook, "ref-book", "", "link target book (omit for a local link)")
+			set.StringVar(&refNode, "ref-node", "", "link target node id")
+			set.StringVar(&refBlock, "ref-block", "", "link target block id")
 			return set
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
@@ -121,6 +126,20 @@ func addCommand() *cli.Command {
 			if serviceErr != nil {
 				return nil, serviceErr
 			}
+			if link {
+				if blockType != "" {
+					return nil, cli.Usage("usage.invalid-arguments", "--type does not apply to a link")
+				}
+				ref, refErr := linkRef(refBook, refNode, refBlock)
+				if refErr != nil {
+					return nil, refErr
+				}
+				receipt, addErr := service.AddLink(bookID, title, ref, placement, env.Globals.DryRun)
+				if addErr != nil {
+					return nil, MapError(addErr)
+				}
+				return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
+			}
 			receipt, addErr := service.AddTyped(bookID, title, blockType, placement, env.Globals.DryRun)
 			if addErr != nil {
 				return nil, MapError(addErr)
@@ -128,6 +147,39 @@ func addCommand() *cli.Command {
 			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
 		},
 	}
+}
+
+func linkRef(book, node, block string) (*model.Ref, *cli.Error) {
+	ref := &model.Ref{}
+	if book != "" {
+		bookID := model.BookID(book)
+		if !bookID.Valid() {
+			return nil, cli.Usage("usage.invalid-value", "invalid target book %q", book)
+		}
+		ref.Book = bookID
+	}
+	if node != "" {
+		id, err := model.ParseID(node)
+		if err != nil || id.IsZero() {
+			return nil, cli.Usage("usage.invalid-value", "invalid target node %q", node)
+		}
+		ref.Node = id
+	}
+	if block != "" {
+		id, err := model.ParseID(block)
+		if err != nil || id.IsZero() {
+			return nil, cli.Usage("usage.invalid-value", "invalid target block %q", block)
+		}
+		ref.Block = id
+	}
+	if node != "" && block != "" {
+		return nil, cli.Usage("usage.invalid-arguments", "use --ref-node or --ref-block, not both")
+	}
+	if !ref.Valid() {
+		return nil, cli.Usage("usage.invalid-arguments",
+			"a link needs --ref-book, --ref-node or --ref-block")
+	}
+	return ref, nil
 }
 
 func renameCommand() *cli.Command {
@@ -256,48 +308,6 @@ func removeCommand() *cli.Command {
 	}
 }
 
-func rekeyCommand() *cli.Command {
-	var book string
-	return &cli.Command{
-		Name:     "rekey",
-		Summary:  "change a node or block id and rewrite references",
-		Usage:    "pecia rekey --book <id> <old> <new>",
-		Mutating: true,
-		Flags: func(env *cli.Env) *flag.FlagSet {
-			set := env.NewFlagSet("rekey")
-			set.StringVar(&book, "book", "", "book id")
-			return set
-		},
-		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
-			if len(args) != 2 {
-				return nil, cli.Usage("usage.invalid-arguments", "rekey takes the old and the new id").
-					WithHint("pecia rekey --book <id> <old> <new>")
-			}
-			bookID, bookErr := requireBook(book)
-			if bookErr != nil {
-				return nil, bookErr
-			}
-			oldID, oldErr := requireID(args[0], "old")
-			if oldErr != nil {
-				return nil, oldErr
-			}
-			newID, newErr := requireID(args[1], "new")
-			if newErr != nil {
-				return nil, newErr
-			}
-			service, serviceErr := newService(env)
-			if serviceErr != nil {
-				return nil, serviceErr
-			}
-			receipt, rekeyErr := service.Rekey(bookID, oldID, newID, env.Globals.DryRun)
-			if rekeyErr != nil {
-				return nil, MapError(rekeyErr)
-			}
-			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
-		},
-	}
-}
-
 func blockTypeCommand() *cli.Command {
 	var book string
 	var clear bool
@@ -374,11 +384,11 @@ func settingsCommand() *cli.Command {
 }
 
 func newService(env *cli.Env) (*Service, *cli.Error) {
-	life, _, err := lifecycle.FromEnv(env)
+	life, layout, err := lifecycle.FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
-	return New(life, model.NewRandomAllocator()), nil
+	return New(life, idspace.New(life, layout)), nil
 }
 
 func requireBook(raw string) (model.BookID, *cli.Error) {

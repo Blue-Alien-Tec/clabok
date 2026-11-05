@@ -3,7 +3,7 @@
 Status: implemented (2026-11-05). Plan: [plans/03-domain-model-and-identifiers.md](plans/03-domain-model-and-identifiers.md).
 Phase: 2. Depends on: S01. Blocks: S04, S07, S08, S09, S10, S11.
 PLAN refs: §3 statements 2, 3, 4, 5, 6, 10; §3.7 (placement storage, identity, sibling order,
-normalization, uniform commands); §3.14 (regions are blocks, rekey); §6 (block ID `0`, references by
+normalization, uniform commands); §3.14 (regions are blocks); §6 (block ID `0`, references by
 stable ID).
 
 ## 1. Goal
@@ -28,7 +28,7 @@ make every structural invariant machine-checkable before any storage, command or
 | 10 | Title normalization: a numeric prefix (`1.`, `1.1`, `1.1.1`, `IV.`) is stripped during normalization, never rejected; titles are stored without numbers | §3.7 |
 | 11 | Book settings are stored in the manifest (`numbering`, `toc`, `index.depth`, `output`) with their defaults; their semantics are owned by S09 and S10 | §3.7 |
 | 12 | Validators as pure functions returning stable error codes: level limit, block-child rule, dangling block ID, duplicate ID, stored block ID `0`, duplicate sibling order entry, region target validity | §3.7 |
-| 13 | Rekey: an operation type that changes an ID and rewrites every reference to it; the rewrite itself is owned by S10 | §3.14 |
+| 13 | IDs are immutable; there is no rekey operation. Placement changes are collection edits; a copy gets a new ID | §3.14 |
 | 14 | Manifest encoding is a data-only concern: serializable and round-trippable, no IO, no rendering, no locking | §3.13 |
 
 ## 3. Out of scope
@@ -44,7 +44,7 @@ make every structural invariant machine-checkable before any storage, command or
 
 ## 4. Deliverables
 
-- `internal/model`: book, node, block, region collection, settings, ID types, rekey operation type.
+- `internal/model`: book, node, block, region collection, settings, ID types.
 - Validators for every invariant in the in-scope list, with stable error codes and aggregate
   reporting (all violations, not just the first).
 - Manifest schema (JSON) plus a documented, versioned schema description.
@@ -64,7 +64,7 @@ make every structural invariant machine-checkable before any storage, command or
 4. Round-trip of every fixture is lossless, including empty books, empty regions and a book whose
    structure is only a title.
 5. ID generation never yields `0`, never collides across two books that are validated together, and
-   survives a rekey of another ID.
+   is unaffected by a placement change.
 6. Title normalization strips `1.`, `1.1`, `1.1.1` and `IV.` prefixes and leaves `2026 – Year of X`
    and `3D Printing` unchanged (the latter is a test case, not an assumption).
 7. `part` is representable on a chapter or link and rejected on a subchapter or block.
@@ -87,7 +87,6 @@ make every structural invariant machine-checkable before any storage, command or
 - Region collection shape: one collection type with a target discriminator, or a node-attached
   collection field. `PLAN.md` says regions are blocks in an ordered collection with a target.
 - `index.depth`, `toc` and `output` enum values: define them here so S09 can consume them.
-- How a rekey request is represented so S10 can execute the reference rewrite atomically.
 
 ## 7. Risks and constraints
 

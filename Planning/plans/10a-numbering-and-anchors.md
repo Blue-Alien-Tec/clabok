@@ -19,7 +19,7 @@ First delivery slice of S10. S10b adds rekey.
 | 7 | Prose references | `[[id:N]]`; expanded to `[Title](href)` | Stable-ID references, anchors resolved at render |
 | 8 | Cross-file hrefs | `file#anchor` when the target lives in another rendered file | Works in chapter and part modes |
 | 9 | Dangling references | stay literal in the output and are a blocking `refs.dangling` finding | No silent rewrite, no crash |
-| 10 | Link entries | `Ref.Node`/`Ref.Block` are validated against the book; cross-book refs wait for S11 | `PLAN.md` §3.7 |
+| 10 | Link entries | `Ref.Node`/`Ref.Block` are validated against the book; cross-book refs were deferred to S11 and delivered retrospectively (2026-11-05) through the library-wide layout map | `PLAN.md` §3.7 |
 | 11 | Removal cleanup | removing a node or block drops notes whose target disappears and their blocks | A removed target must not leave an invalid region |
 | 12 | Reorder | numbering recomputes; anchors stay title-based | `PLAN.md` §3.7 |
 
@@ -52,8 +52,8 @@ internal/structure/structure.go  note cleanup when a target is removed
 
 ## 5. Out of scope
 
-- Rekey: S10b.
-- Library-wide reference resolution: S11.
+- Rekey: S10b (removed by the owner decision of 2026-11-05).
+- Library-wide reference resolution: S11, delivered retrospectively on 2026-11-05.
 - Configurable per-level number styles: not in the target model; the fixed hierarchy is the decision.
 
 ## 6. Implementation notes (2026-11-05)

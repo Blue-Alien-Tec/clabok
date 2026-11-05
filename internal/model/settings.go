@@ -27,6 +27,14 @@ func DefaultSettings() Settings {
 	return Settings{IndexDepth: DefaultIndexDepth, Output: OutputMonolith}
 }
 
+// Normalized returns the settings with every unset value filled in. It is the public form of the
+// manifest normalization, used where a settings value arrives from outside a manifest (the library
+// defaults in the registry).
+func (settings Settings) Normalized() Settings {
+	settings.normalize()
+	return settings
+}
+
 // normalize fills the two settings whose zero value cannot mean "unset".
 func (settings *Settings) normalize() {
 	if settings.IndexDepth <= 0 {

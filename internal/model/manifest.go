@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -224,6 +225,40 @@ func (manifest *Manifest) PlacedBlocks() []ID {
 			ids = append(ids, region.Blocks...)
 		}
 	}
+	return ids
+}
+
+// OwnedIDs returns every ID the manifest owns, sorted ascending: nodes, placed blocks, regions,
+// region targets and block metadata. Zero is not owned. The list may contain duplicates; the
+// validator rejects a duplicate ownership inside one book.
+func (manifest *Manifest) OwnedIDs() []ID {
+	ids := make([]ID, 0)
+	appendID := func(id ID) {
+		if !id.IsZero() {
+			ids = append(ids, id)
+		}
+	}
+	manifest.Walk(func(current *Node, depth int, parent *Node) bool {
+		appendID(current.ID)
+		for _, block := range current.Blocks {
+			appendID(block)
+		}
+		return true
+	})
+	for _, region := range manifest.Regions {
+		if region == nil {
+			continue
+		}
+		appendID(region.ID)
+		appendID(region.Target.ID)
+		for _, block := range region.Blocks {
+			appendID(block)
+		}
+	}
+	for id := range manifest.BlockMeta {
+		appendID(id)
+	}
+	sort.Slice(ids, func(left, right int) bool { return ids[left] < ids[right] })
 	return ids
 }
 

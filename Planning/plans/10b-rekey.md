@@ -1,5 +1,10 @@
 # S10b — Implementation Plan: Rekey
 
+> **Superseded (2026-11-05, owner decision).** IDs are immutable; there is no rekey. Placement is a
+> collection edit, a copy gets a new ID, and a duplicate owned ID is a `sync --check` finding. This
+> file is kept as the historical implementation record; the `rekey` command was removed from the
+> product.
+
 Status: implemented (2026-11-05). Parent scope: [../10-numbering-anchors-references.md](../10-numbering-anchors-references.md).
 Normative source: [../../PLAN.md](../../PLAN.md) §3.14 (rekey), §3.7 (IDs), §6.
 

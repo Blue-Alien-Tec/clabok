@@ -1,6 +1,9 @@
 # S11 — Library Book, Documentation Location and Cut-Over
 
-Status: draft, not planned.
+Status: implemented (2026-11-05); milestone close pending.
+Revision (2026-11-05, owner decision): IDs are immutable and there is no rekey. Placement is a
+collection edit; duplicate ownership is a `sync --check` finding. The rekey references in the
+historical text below are superseded.
 Phase: 6. Depends on: S02 (docs root), S04 (store, registry primitives), S05 (open state), S09
 (render), S10 (references). Blocks: the dogfooding milestone.
 PLAN refs: §3.1 (hard cut, library book as the exception), §3.6 (docs location), §3.8 (naming),
@@ -16,7 +19,8 @@ Already implemented and to be used:
 - `render.Service.Sync(book, outputDir, SyncOptions)`; `library sync` loops the registry and calls it
   per book with `--check`/`--write`/`--prune`/`--force`.
 - `lifecycle.FromEnv`, `RequireClosed` and `State` for wiring and the open-book guard.
-- `structure.Service.Rekey` is book-local; library rekey must extend it across registered books.
+- IDs are immutable; there is no rekey. `move`/reparent change only the ordered collections, so
+  references stay valid.
 - `store.OpenBookCount` and the config mode guard already exist.
 - `config.Values` exposes ProjectDir, StoreRoot, DocsRoot, UndoLimit and BookPointLimit.
 
@@ -25,15 +29,18 @@ Pre-planned decisions:
 - `book new --id <id> --title <t>` creates the container from `model.NewManifest`, saves it closed,
   registers `{ID, Path: <docs-root-relative>/<slug>, Kind: "book"}`, and copies the library defaults
   into the manifest settings at creation (the model cannot express "unset").
-- `library` command group: `library sync`, `library rekey`, `book new`, `book move`, `book rename`,
+- `library` command group: `library sync`, `book new`, `book move`, `book rename`,
   `book unregister`. Unregister deletes nothing; it removes only the registry entry.
 - The library book is the registry entry with `Kind: "library"` and `Path: "."`; its monolith render
   is the repository `README.md`.
 - Cut-over: create the library book from the current README content (structure plus blocks), render,
   and require `sync --check` clean. Do not touch legacy books.
 - Open books cannot move, rename or unregister (`lifecycle.RequireClosed`).
-- Library rekey resolves the target book, then rewrites the same stable ID in every other registered
-  book's bodies; require all affected books open and list the closed ones in the reject.
+- Render is the sole read path that bypasses the open state: it reads a closed book's container
+  read-only, so the library-wide sync never opens a book. Body and structure mutations still require
+  `open` (`PLAN.md` §3.5).
+- IDs are issued by the library ledger and never change. A duplicate owned ID is corruption:
+  `sync --check` rejects it with the ID and the affected books instead of renaming anything.
 
 ## 1. Goal
 
@@ -51,7 +58,7 @@ real book while the legacy books stay untouched.
 | 4 | New books render into `Docs/` by default (docs root from S02); the library `README.md` stays fixed at the project root | §3.6, §3.11 |
 | 5 | New-book authoring flow: create the book, choose the opt-ins, build the structure, then insert the prose | §3.1 |
 | 6 | Hard cut: no migration, no import, no adopt; the new tool never reads legacy containers; the legacy tree is not changed, moved or deleted | §3.1, §3.9 |
-| 7 | Library-wide sync: render every registered book and regenerate the library README index; report drift per book | §3 (1), §3.14 |
+| 7 | Library-wide sync: render every registered book and regenerate the library README index; report drift per book. Render reads a closed book's container read-only; modifying commands keep the open requirement. Cross-book `[[id:N]]` references and link entries resolve through the registry-wide layout map | §3 (1), §3.5, §3.7, §3.14 |
 | 8 | Book move, rename and unregister update the registry and the output path; all three are refused while the book is open | §3.7 |
 | 9 | The generated Document Index and the repository-layout block follow registry paths and the repository contents | §2.6, §3.14 |
 | 10 | Product and CLI naming (`CLABOK`, `pecia`) is fixed; implementation file names may keep their names until a rename is planned | §3.8 |
@@ -88,8 +95,8 @@ real book while the legacy books stay untouched.
    the default monolith mode.
 2. A book created outside the docs root is either refused or explicitly allowed by a named flag;
    there is no silent third location.
-3. The library README renders at the project root and contains the Document Index of all registered
-   books, in registry order.
+3. The library README renders at the project root, carries `[Document Index]` navigation at the top
+   and bottom, and contains the Document Index of all registered books in registry order.
 4. Library defaults apply to a book that has no explicit value; a per-book value wins.
 5. Library sync renders every registered book and reports per-book drift without writing under
    `--check`.

@@ -41,15 +41,15 @@ session has to resolve.
 |---|---|---|---|---|---|
 | [S01](01-foundation-and-cli-contract.md) | Foundation and CLI contract | 1 | — | implemented | §3.8, §3.9, §3.10, §3.13 |
 | [S02](02-configuration.md) | Configuration | 1 | S01 | implemented | §3.11 |
-| [S03](03-domain-model-and-identifiers.md) | Domain model and identifiers | 2 | S01 | implemented | §3, §3.7 (identity, placement, normalization), §3.14 (rekey) |
+| [S03](03-domain-model-and-identifiers.md) | Domain model and identifiers | 2 | S01 | implemented | §3, §3.7 (identity, placement, normalization) |
 | [S04](04-central-store-and-containers.md) | Central store and containers | 3 | S02, S03 | implemented | §3.2, §3.7 (store layout), §6 |
 | [S05](05-open-close-and-rollback.md) | Open/close lifecycle and rollback tiers | 3 | S04, S06 | implemented | §3.5, §3.7 (open state, rollback) |
 | [S06](06-concurrency-and-coordination.md) | Concurrency and coordination | 3 | S04 | implemented | §3.12, §6 |
 | [S07](07-structure-and-book-settings.md) | Structure and book settings commands | 4 | S03, S04, S05, S06 | implemented | §3.7 (uniform commands, placement, move, settings), §3.14 (no pin) |
 | [S08](08-body-authoring-and-prose.md) | Body authoring, prose discipline and temp | 4 | S03, S04, S05, S06 | implemented | §3 (3, 5, 6), §3.3, §3.7 (body writes), §2.5 |
 | [S09](09-rendering-and-output-modes.md) | Rendering and output modes | 5 | S04, S07, S08 | implemented | §3.4, §3.7 (heading mapping, mode switch, navigation), §3 (7), §3.14 (index prose) |
-| [S10](10-numbering-anchors-references.md) | Numbering, anchors and references | 5 | S09 | implemented | §3.7 (numbering, anchors, references, reorder), §3.14 (rekey) |
-| [S11](11-library-docs-and-cutover.md) | Library book, documentation location and cut-over | 6 | S02, S04, S05, S09, S10 | draft | §3.1, §3.6, §3.8, §3.9 |
+| [S10](10-numbering-anchors-references.md) | Numbering, anchors and references | 5 | S09 | implemented | §3.7 (numbering, anchors, references, reorder) |
+| [S11](11-library-docs-and-cutover.md) | Library book, documentation location and cut-over | 6 | S02, S04, S05, S09, S10 | implemented | §3.1, §3.6, §3.8, §3.9 |
 | [S12](12-editorial-state-and-generated-content.md) | Editorial state and generated content | 7 | S09 | draft | §3.14, §3 (4) |
 | [S13](13-grammar-and-terms.md) | Grammar gate and term list | 7 | S02, S08 | draft | §3.14 (terms and grammar), §3.11 (grammar endpoint) |
 | [S14](14-tui.md) | Terminal UI | 8 | S07, S08, S09 | draft | §3.10 (TUI) |
@@ -94,7 +94,11 @@ M3 is delivered (2026-11-05): the structure commands, declarative plans, body au
 flush are in place. The version is bumped to `0.3.0-dev`.
 
 M4 is delivered (2026-11-05): rendering (all modes plus the ASCII UI anchor), numbering, anchors,
-references and rekey are in place. The version is bumped to `1.0.0-dev`.
+references are in place. The version is bumped to `1.0.0-dev`. IDs are immutable; rekey was removed
+by the owner decision of 2026-11-05 (placement is a collection edit).
+
+M5 (S11) is implemented and pushed (2026-11-05) without a version bump and without a CI run; the
+`1.1.0-dev` bump is deferred. The version is still `1.0.0-dev`.
 
 ### 4.1 Version policy
 
@@ -139,7 +143,7 @@ references and rekey are in place. The version is bumped to `1.0.0-dev`.
 | §3.11 | Configuration | S02 |
 | §3.12 | Concurrency and locking | S06 |
 | §3.13 | Code organization | S01 (baseline), every scope (its packages) |
-| §3.14 | Generated content and editorial state | S12, S13, S10 (rekey) |
+| §3.14 | Generated content and editorial state | S12, S13 |
 
 `PLAN.md` §2 (verified current state) is reference material, not a scope. §2.5 is an explicit
 constraint on S08: the JSON defect of the reference implementation must not be reproduced.

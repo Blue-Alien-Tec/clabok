@@ -11,8 +11,8 @@ import (
 
 // TestDomainPackagesDoNotImportCLI guards the dependency direction for the pure packages: the domain
 // never imports the CLI or the entry point. Packages that also expose their own command surface
-// (config, lifecycle, structure, coordinator) import the CLI by design. Packages that do not exist
-// yet are skipped, so the list can grow with the scopes.
+// (config, lifecycle, structure, coordinator, library) import the CLI by design. Packages that do
+// not exist yet are skipped, so the list can grow with the scopes.
 func TestDomainPackagesDoNotImportCLI(t *testing.T) {
 	pure := []string{
 		"buildinfo",
@@ -21,8 +21,8 @@ func TestDomainPackagesDoNotImportCLI(t *testing.T) {
 		"store",
 		"rollback",
 		"refs",
-		"library",
 		"asciiui",
+		"idspace",
 	}
 	for _, name := range pure {
 		directory := filepath.Join("..", name)

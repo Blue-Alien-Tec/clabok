@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/idspace"
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
@@ -276,11 +277,11 @@ func applyCommand() *cli.Command {
 			if parseErr != nil {
 				return nil, cli.AsError(parseErr)
 			}
-			life, _, envErr := lifecycle.FromEnv(env)
+			life, layout, envErr := lifecycle.FromEnv(env)
 			if envErr != nil {
 				return nil, envErr
 			}
-			service := structure.New(life, model.NewRandomAllocator())
+			service := structure.New(life, idspace.New(life, layout))
 			receipts, applyErr := service.Execute(bookID, steps, env.Globals.DryRun)
 			if applyErr != nil {
 				return nil, structure.MapError(applyErr)

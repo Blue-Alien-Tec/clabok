@@ -258,6 +258,11 @@ func (life *Lifecycle) State(id model.BookID) (State, error) {
 	return State{ID: id, Status: status, Extracted: isExtracted, Entry: entry, HasEntry: hasEntry}, nil
 }
 
+// Paths returns the store paths of one book without inspecting or changing its open state.
+func (life *Lifecycle) Paths(id model.BookID) (store.BookPaths, error) {
+	return life.layout.Book(id)
+}
+
 // RequireOpen returns the book paths or the lifecycle.not-open error.
 func (life *Lifecycle) RequireOpen(id model.BookID) (store.BookPaths, error) {
 	state, err := life.State(id)
@@ -287,6 +292,22 @@ func (life *Lifecycle) acquire(id model.BookID) (coordinator.Release, error) {
 	return life.coordinator.Acquire([]coordinator.Resource{
 		{Kind: coordinator.KindStore},
 		{Kind: coordinator.KindBook, Book: id},
+	}, coordinator.Exclusive, 0)
+}
+
+// LockStore holds the store-level exclusive lock. Registry mutations use it so two processes cannot
+// interleave a read-modify-write of the library registry.
+func (life *Lifecycle) LockStore() (coordinator.Release, error) {
+	return life.coordinator.Acquire([]coordinator.Resource{
+		{Kind: coordinator.KindStore},
+	}, coordinator.Exclusive, 0)
+}
+
+// LockIDs holds the library ID ledger exclusively. The ledger holder never waits for a store or
+// book lock, so it may be acquired while a book lock is held without a deadlock.
+func (life *Lifecycle) LockIDs() (coordinator.Release, error) {
+	return life.coordinator.Acquire([]coordinator.Resource{
+		{Kind: coordinator.KindIDs},
 	}, coordinator.Exclusive, 0)
 }
 

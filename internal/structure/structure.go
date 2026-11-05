@@ -71,6 +71,7 @@ type Step struct {
 	Recursive bool
 	Key       string
 	Value     string
+	Ref       *model.Ref
 }
 
 // mutation is the pure result of one step: the receipt plus the file effects the commit applies.
@@ -115,6 +116,17 @@ func (service *Service) AddTyped(book model.BookID, title, blockType string, pla
 	return receipts[0], nil
 }
 
+// AddLink adds a link entry at the book root. The target stays an ID; local and cross-book links
+// are resolved at render time.
+func (service *Service) AddLink(book model.BookID, title string, ref *model.Ref, placement Placement, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.add-link",
+		[]Step{{Op: "add-link", Title: title, Ref: ref, Placement: placement}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
 // AddLockedBlock creates a block with a type and locks it. It is the primitive for tool-owned
 // content such as the ASCII UI layout anchor.
 func (service *Service) AddLockedBlock(book model.BookID, parent model.ID, blockType string, dryRun bool) (Receipt, error) {
@@ -124,181 +136,6 @@ func (service *Service) AddLockedBlock(book model.BookID, parent model.ID, block
 		return Receipt{}, err
 	}
 	return receipts[0], nil
-}
-
-// Rekey changes the ID of a node or a block and rewrites every reference in the book. It is the
-// only operation that changes an ID.
-func (service *Service) Rekey(book model.BookID, old, new model.ID, dryRun bool) (Receipt, error) {
-	release, err := service.Lifecycle.LockBookExclusive(book)
-	if err != nil {
-		return Receipt{}, err
-	}
-	defer func() { _ = release() }()
-
-	paths, manifest, err := service.load(book)
-	if err != nil {
-		return Receipt{}, err
-	}
-	if old.IsZero() || new.IsZero() {
-		return Receipt{}, fail("structure.invalid-id", "both ids must be non-zero")
-	}
-	if old == new {
-		return Receipt{Book: book, Target: new, Index: -1, Changed: false}, nil
-	}
-	if idUsed(manifest, new) {
-		return Receipt{}, fail("structure.id-in-use", "id %s is already used in this book", new)
-	}
-
-	receipt := Receipt{Book: book, Target: new, Index: -1, Changed: true}
-	renameBody := false
-	if node, ok := manifest.FindNode(old); ok {
-		node.ID = new
-		receipt.Kind = string(node.Kind)
-	} else if parent, index, isBlock := blockParent(manifest, old); isBlock {
-		parent.Blocks[index] = new
-		if meta := manifest.Meta(old); meta.Type != "" || meta.Locked {
-			manifest.SetMeta(new, meta)
-			manifest.SetMeta(old, model.BlockMeta{})
-		}
-		receipt.Kind = "block"
-		renameBody = true
-	} else {
-		return Receipt{}, fail("structure.unknown-target", "unit %s does not exist", old)
-	}
-	rewriteReferences(manifest, old, new)
-	if err := validate(manifest); err != nil {
-		return Receipt{}, err
-	}
-
-	bodies, err := readBodies(paths)
-	if err != nil {
-		return Receipt{}, err
-	}
-	final := make(map[model.ID]string, len(bodies))
-	for id, body := range bodies {
-		final[id] = body
-	}
-	if renameBody {
-		if body, ok := final[old]; ok {
-			final[new] = body
-			delete(final, old)
-		}
-	}
-	oldRef := "[[" + "id:" + old.String() + "]]"
-	newRef := "[[" + "id:" + new.String() + "]]"
-	changed := make(map[model.ID]string)
-	for id, body := range final {
-		next := strings.ReplaceAll(body, oldRef, newRef)
-		if next != body || (renameBody && id == new) {
-			changed[id] = next
-		}
-	}
-	if dryRun {
-		return receipt, nil
-	}
-	if _, err := service.Lifecycle.Snapshot(book, "structure.rekey"); err != nil {
-		return Receipt{}, err
-	}
-	for id, body := range changed {
-		if err := store.WriteAtomic(bodyPath(paths, id), []byte(body)); err != nil {
-			return Receipt{}, err
-		}
-	}
-	if renameBody {
-		_ = os.Remove(bodyPath(paths, old))
-	}
-	if err := service.save(paths, manifest); err != nil {
-		return Receipt{}, err
-	}
-	return receipt, nil
-}
-
-func idUsed(manifest *model.Manifest, id model.ID) bool {
-	used := false
-	manifest.Walk(func(node *model.Node, depth int, parent *model.Node) bool {
-		if node.ID == id {
-			used = true
-			return false
-		}
-		for _, blockID := range node.Blocks {
-			if blockID == id {
-				used = true
-				return false
-			}
-		}
-		return !used
-	})
-	if used {
-		return true
-	}
-	for _, region := range manifest.Regions {
-		if region == nil {
-			continue
-		}
-		if region.ID == id || region.Target.ID == id {
-			return true
-		}
-		for _, blockID := range region.Blocks {
-			if blockID == id {
-				return true
-			}
-		}
-	}
-	_, hasMeta := manifest.BlockMeta[id]
-	return hasMeta
-}
-
-func rewriteReferences(manifest *model.Manifest, old, new model.ID) {
-	manifest.Walk(func(node *model.Node, depth int, parent *model.Node) bool {
-		if node.Ref != nil {
-			if node.Ref.Node == old {
-				node.Ref.Node = new
-			}
-			if node.Ref.Block == old {
-				node.Ref.Block = new
-			}
-		}
-		return true
-	})
-	for _, region := range manifest.Regions {
-		if region == nil {
-			continue
-		}
-		if region.Target.ID == old {
-			region.Target.ID = new
-		}
-		for index, blockID := range region.Blocks {
-			if blockID == old {
-				region.Blocks[index] = new
-			}
-		}
-	}
-}
-
-func readBodies(paths store.BookPaths) (map[model.ID]string, error) {
-	bodies := make(map[model.ID]string)
-	entries, err := os.ReadDir(paths.BlocksDir)
-	if errors.Is(err, os.ErrNotExist) {
-		return bodies, nil
-	}
-	if err != nil {
-		return nil, fail("structure.read-failed", "%v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		id, parseErr := model.ParseID(strings.TrimSuffix(entry.Name(), ".md"))
-		if parseErr != nil {
-			continue
-		}
-		data, readErr := os.ReadFile(filepath.Join(paths.BlocksDir, entry.Name()))
-		if readErr != nil {
-			return nil, fail("structure.read-failed", "%v", readErr)
-		}
-		bodies[id] = string(data)
-	}
-	return bodies, nil
 }
 
 // SetBlockType sets or clears the optional type of a block. A locked block rejects the change.
@@ -369,7 +206,18 @@ func (service *Service) run(book model.BookID, reason string, steps []Step, dryR
 	if err != nil {
 		return nil, err
 	}
-	ids := newIDs(manifest, service.Allocator)
+	allocator := service.Allocator
+	if dryRun {
+		// A dry run previews the IDs without touching the library ledger.
+		if preview, ok := allocator.(interface{ Peek() (model.ID, error) }); ok {
+			start, peekErr := preview.Peek()
+			if peekErr != nil {
+				return nil, fail("structure.alloc-failed", "%v", peekErr)
+			}
+			allocator = model.NewSequenceAllocator(start)
+		}
+	}
+	ids := newIDs(manifest, allocator)
 	receipts := make([]Receipt, 0, len(steps))
 	var created, removed []model.ID
 	for _, step := range steps {
@@ -415,6 +263,8 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 	switch step.Op {
 	case "add":
 		return applyAdd(manifest, ids, step)
+	case "add-link":
+		return applyAddLink(manifest, ids, step)
 	case "add-block":
 		return applyAddBlock(manifest, ids, step)
 	case "type":
@@ -470,6 +320,36 @@ func applyAdd(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, erro
 		result.receipt.Order = childIDs(parent.Children)
 	}
 	return result, nil
+}
+
+func applyAddLink(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
+	cleanTitle := model.NormalizeTitle(step.Title)
+	if strings.TrimSpace(cleanTitle) == "" {
+		return mutation{}, fail("structure.empty-title", "the title must not be empty")
+	}
+	if step.Ref == nil || !step.Ref.Valid() {
+		return mutation{}, fail("structure.invalid-ref", "a link needs a book, a node or a block")
+	}
+	if step.Ref.Book != "" && !step.Ref.Book.Valid() {
+		return mutation{}, fail("structure.invalid-ref", "invalid target book %q", step.Ref.Book)
+	}
+	parent, index, unitBlock, _, err := addDestination(manifest, step.Placement)
+	if err != nil {
+		return mutation{}, err
+	}
+	if unitBlock || parent != manifest.Root {
+		return mutation{}, fail("structure.parent-invalid", "a link belongs to the book root")
+	}
+	id, err := ids.next()
+	if err != nil {
+		return mutation{}, err
+	}
+	node := &model.Node{ID: id, Kind: model.KindLink, Title: cleanTitle, Ref: step.Ref}
+	parent.Children = insertNode(parent.Children, index, node)
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Target: id, Kind: "link", Parent: parent.ID, Index: index,
+		Order: childIDs(parent.Children), Changed: true,
+	}}, nil
 }
 
 func applyAddLockedBlock(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
@@ -723,38 +603,47 @@ func containsID(ids []model.ID, id model.ID) bool {
 }
 
 func applySetting(manifest *model.Manifest, step Step) (mutation, error) {
-	switch step.Key {
-	case "numbering":
-		enabled, err := parseOnOff(step.Key, step.Value)
-		if err != nil {
-			return mutation{}, err
-		}
-		manifest.Settings.Numbering.Enabled = enabled
-	case "toc":
-		enabled, err := parseOnOff(step.Key, step.Value)
-		if err != nil {
-			return mutation{}, err
-		}
-		manifest.Settings.TOC.Enabled = enabled
-	case "index-depth":
-		depth, err := strconv.Atoi(strings.TrimSpace(step.Value))
-		if err != nil || depth < 1 {
-			return mutation{}, fail("structure.invalid-value",
-				"index-depth expects an integer of at least 1, got %q", step.Value)
-		}
-		manifest.Settings.IndexDepth = depth
-	case "output":
-		mode := model.OutputMode(strings.TrimSpace(step.Value))
-		if !mode.Valid() {
-			return mutation{}, fail("structure.invalid-value",
-				"output expects monolith, chapter or part, got %q", step.Value)
-		}
-		manifest.Settings.Output = mode
-	default:
-		return mutation{}, fail("structure.unknown-setting",
-			"unknown book setting %q; use numbering, toc, index-depth or output", step.Key)
+	if err := ApplySettingValue(&manifest.Settings, step.Key, step.Value); err != nil {
+		return mutation{}, err
 	}
 	return mutation{receipt: Receipt{Book: manifest.ID, Kind: "settings", Index: -1, Changed: true}}, nil
+}
+
+// ApplySettingValue parses one book setting key and writes it into settings. It is shared by the
+// per-book `book set` command and the library defaults.
+func ApplySettingValue(settings *model.Settings, key, value string) error {
+	switch key {
+	case "numbering":
+		enabled, err := parseOnOff(key, value)
+		if err != nil {
+			return err
+		}
+		settings.Numbering.Enabled = enabled
+	case "toc":
+		enabled, err := parseOnOff(key, value)
+		if err != nil {
+			return err
+		}
+		settings.TOC.Enabled = enabled
+	case "index-depth":
+		depth, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || depth < 1 {
+			return fail("structure.invalid-value",
+				"index-depth expects an integer of at least 1, got %q", value)
+		}
+		settings.IndexDepth = depth
+	case "output":
+		mode := model.OutputMode(strings.TrimSpace(value))
+		if !mode.Valid() {
+			return fail("structure.invalid-value",
+				"output expects monolith, chapter or part, got %q", value)
+		}
+		settings.Output = mode
+	default:
+		return fail("structure.unknown-setting",
+			"unknown book setting %q; use numbering, toc, index-depth or output", key)
+	}
+	return nil
 }
 
 func (service *Service) load(book model.BookID) (store.BookPaths, *model.Manifest, error) {
