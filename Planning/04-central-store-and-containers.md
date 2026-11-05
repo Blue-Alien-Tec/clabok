@@ -1,6 +1,7 @@
 # S04 — Central Store and Containers
 
-Status: draft, not planned.
+Status: implemented (2026-11-05). Delivery slices: S04a (container codec, delivered) -> S04b (store
+layout, book identity, hash pairs, delivered) -> S04c (registry, diff, export, delivered).
 Phase: 3. Depends on: S02 (paths), S03 (model). Blocks: S05, S06, S07, S08, S09, S11.
 PLAN refs: §3.2 (central store), §3.7 (store layout, extracted bodies, rollback location), §6
 (deterministic containers, drift detection), §2.1 (current container shape), §2.5 (defect to avoid).
