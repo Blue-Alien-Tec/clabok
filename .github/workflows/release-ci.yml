@@ -3,8 +3,10 @@ name: release-ci
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
-      - 'v*.*.0'
+      - 'v*.*.*'
 
 permissions:
   contents: read
