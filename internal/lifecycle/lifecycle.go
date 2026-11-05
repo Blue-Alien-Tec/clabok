@@ -393,7 +393,7 @@ func (life *Lifecycle) Snapshot(id model.BookID, reason string) (rollback.Packag
 	if !extracted(paths) {
 		return rollback.Package{}, fail("lifecycle.not-open", "book %q is not open", id)
 	}
-	members, err := collectMembers(paths)
+	members, err := CollectMembers(paths)
 	if err != nil {
 		return rollback.Package{}, err
 	}
@@ -461,7 +461,7 @@ func (life *Lifecycle) Restore(id model.BookID, name string) (RestoreResult, err
 			return RestoreResult{}, fail("rollback.invalid-package",
 				"an undo package needs %s", ManifestMember)
 		}
-		current, collectErr := collectMembers(paths)
+		current, collectErr := CollectMembers(paths)
 		if collectErr != nil {
 			return RestoreResult{}, collectErr
 		}
@@ -551,7 +551,8 @@ func (life *Lifecycle) recordBookPoint(paths store.BookPaths, newData []byte) (b
 	return pkg.Name != "", nil
 }
 
-func collectMembers(paths store.BookPaths) (map[string][]byte, error) {
+// CollectMembers returns the extracted manifest and bodies as a member set.
+func CollectMembers(paths store.BookPaths) (map[string][]byte, error) {
 	manifestData, err := os.ReadFile(filepath.Join(paths.Dir, ManifestMember))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fail("lifecycle.extracted-incomplete", "%s is missing", ManifestMember)

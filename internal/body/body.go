@@ -19,6 +19,7 @@ import (
 
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
+	"github.com/Blue-Alien-Tec/clabok/internal/prose"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 	"github.com/Blue-Alien-Tec/clabok/internal/structure"
 )
@@ -40,10 +41,7 @@ func fail(code, format string, args ...any) *Error {
 }
 
 // Issue is one prose violation.
-type Issue struct {
-	Line int    `json:"line"`
-	Text string `json:"text"`
-}
+type Issue = prose.Issue
 
 // Slice is a body read.
 type Slice struct {
@@ -408,56 +406,10 @@ func blockPath(paths store.BookPaths, block model.ID) string {
 	return filepath.Join(paths.BlocksDir, block.String()+".md")
 }
 
-// CheckProse reports #, ## and ### heading lines outside fenced code blocks. #### and deeper are
-// text, as are lines indented by four spaces.
+// CheckProse reports structural headings in a body. It is shared with the render acceptance.
 func CheckProse(text string) []Issue {
-	issues := make([]Issue, 0)
-	fence := ""
-	for index, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimLeft(line, " \t")
-		if fence != "" {
-			if strings.HasPrefix(trimmed, fence) {
-				fence = ""
-			}
-			continue
-		}
-		if strings.HasPrefix(trimmed, "```") {
-			fence = "```"
-			continue
-		}
-		if strings.HasPrefix(trimmed, "~~~") {
-			fence = "~~~"
-			continue
-		}
-		if level := headingLevel(line); level >= 1 && level <= 3 {
-			issues = append(issues, Issue{Line: index + 1, Text: line})
-		}
-	}
-	return issues
+	return prose.CheckProse(text)
 }
-
-func headingLevel(line string) int {
-	spaces := 0
-	for spaces < len(line) && line[spaces] == ' ' {
-		spaces++
-	}
-	if spaces > 3 {
-		return 0
-	}
-	hashes := 0
-	for spaces+hashes < len(line) && line[spaces+hashes] == '#' {
-		hashes++
-	}
-	if hashes == 0 {
-		return 0
-	}
-	rest := spaces + hashes
-	if rest < len(line) && line[rest] != ' ' && line[rest] != '\t' {
-		return 0
-	}
-	return hashes
-}
-
 func headingError(issues []Issue) error {
 	var builder strings.Builder
 	builder.WriteString("a body must not contain #, ## or ### headings; use #### or deeper for text")

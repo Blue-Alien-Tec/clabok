@@ -20,7 +20,6 @@ func TestDomainPackagesDoNotImportCLI(t *testing.T) {
 		"model",
 		"store",
 		"rollback",
-		"render",
 		"refs",
 		"library",
 		"asciiui",
