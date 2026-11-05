@@ -1,7 +1,7 @@
 # CLABOK — Body Granularity, Structural Authority, Documentation Location and Central Store (Conceptual Target Model)
 
 Status: draft (2026-11-04, revised 2026-11-05). Conceptual only: no implementation design, no
-migration started. Owner decisions are recorded in §3.1–3.12. This document records the target
+migration started. Owner decisions are recorded in §3.1–3.14. This document records the target
 picture, the verified current state and the gap between them so the later implementation plan can be
 written against it.
 
@@ -15,6 +15,7 @@ neighbouring tool folders — DocEngine 2.4, book schema v3, container format 1.
 DocEngine itself is not modified.
 
 Implementation target: `F:\UnityProjects\CLABOK`.
+Scope breakdown: `Planning/README.md` (planning units; this document stays the normative source).
 Language: Go.
 
 Scope: the document model (structural blocks, body granularity, heading ownership), the render
@@ -185,10 +186,11 @@ structural level, is a value used for rendering; only blocks remain as body file
 3. **Blocks are the only bodies.** Every body file belongs to exactly one block. A block holds prose
    and no structural children of its own.
 4. **Placement.** Title, chapter and subchapter hold any number of blocks, rendered in their stored
-   order. Every block belongs to one structural node and has an ordered position there. Chapters and
-   subchapters have an order among their siblings. Moving a block or a structure node reassigns its
-   placement; the moved unit keeps its identity, and a block keeps its body. Reordering and
-   reparenting of chapter and subchapter nodes must stay possible.
+   order. Every block belongs to one structural node or one region collection and has an ordered
+   position there. Region collections are ordered block-ID lists with a stable ID and a target (a
+   node, a block or the book). Chapters and subchapters have an order among their siblings. Moving a
+   block or a structure node reassigns its placement; the moved unit keeps its identity, and a block
+   keeps its body. Reordering and reparenting of chapter and subchapter nodes must stay possible.
 5. **Prose discipline.** Prose is written only into blocks. Blocks must not contain `#`, `##` or
    `###`.
 6. **Prose headings.** `####` or deeper inside prose is text: it is neither a body unit nor a deeper
@@ -304,13 +306,15 @@ structural level, is a value used for rendering; only blocks remain as body file
 
 Applied unless the owner overrides them; these are coding decisions, not product questions.
 
-- **Placement storage.** Blocks are a flat pool of `{id, body}`. Structural nodes hold ordered lists
-  of block IDs; blocks carry no placement data. A move edits two lists and never touches a block.
+- **Placement storage.** Blocks are a flat pool of `{id, body}`. Structural nodes and region
+  collections hold ordered lists of block IDs; blocks carry no placement data. A move edits two lists
+  and never touches a block.
 - **Sibling order.** List order, no position fields. Stale or concurrent changes are caught by the
   existing book lock and stale check.
 - **Move arguments.** `--child-of <node>` appends, `--index N` places explicitly,
   `--before/--after <block-id>` places relatively.
-- **Identity.** Structural nodes have stable IDs like blocks.
+- **Identity.** Structural nodes and region collections have stable IDs like blocks. Block ID `0` is
+  reserved as the new-block sentinel; generated IDs are nonzero.
 - **Reparenting.** A node may move across levels. It keeps its ID and its block list, and its children
   move with it. A move that would create a fourth structural level is rejected; the children must be
   moved or promoted first.
@@ -333,7 +337,8 @@ Applied unless the owner overrides them; these are coding decisions, not product
 - **Output mode.** Set per book; the chosen mode applies to every chapter in the book.
 - **Heading mapping per mode.** Monolith: README `#`, chapter `##`, subchapter `###`. Part file: part
   `#`, chapter `##`, subchapter `###`. Chapter file: chapter `#`, subchapter `##`.
-- **Navigation and status.** Split files keep the current per-file navigation, ToC and status system.
+- **Navigation.** Split files keep the current per-file navigation and ToC; the status system is
+  covered in §3.14.
 - **No pin.** `pin` is removed; the generated index follows the structure order.
 - **Numbering is never authored.** Numbers are added at render time when numbering is enabled; titles
   are stored without them. A numeric prefix in an incoming title (`1.`, `1.1`, `IV.`) is stripped
@@ -345,6 +350,9 @@ Applied unless the owner overrides them; these are coding decisions, not product
   node type follows the target parent (child of the book = chapter, child of a chapter = subchapter,
   child of a subchapter = block). There are no per-type commands. `body` covers prose, `book` covers
   lifecycle and settings.
+- **Body writes.** A body-writing command always takes a block ID. `0` appends a new block to the
+  target chapter or subchapter; a valid block ID overwrites that block's body; an invalid ID is
+  rejected. The target is required for `0` and never moves an existing block.
 - **Open/close replaces the storage modes.** A closed book is the packed container; an open book is the
   extracted body files. There is no separate storage-mode setting.
 - **Settings live with the book.** `numbering`, `toc`, `index.depth` and `output` are stored in the
@@ -368,10 +376,13 @@ Applied unless the owner overrides them; these are coding decisions, not product
 ### 3.10 Implementation language (owner decision, 2026-11-05)
 
 - **Go.** CLABOK is implemented in Go; the Python reference implementation is not modified.
-- **CLI-only for external consumers.** Unity editor, AI agent, human and CI use the `pecia` CLI; there
-  is no in-process library contract. The built-in TUI uses the same core.
-- **CLI contract.** Non-interactive, JSON-first (`--json`), stable error objects and exit codes,
-  `--dry-run` for every mutating command, and a versioned schema.
+- **The whole CLI is the tooling surface.** The Unity editor, AI agents, CI and the TUI use the same
+  commands; there is no agent-only or editor-only subset. Humans use the TUI for interactive work,
+  and the CLI remains available to them.
+- **CLI contract.** Tooling-first: structured JSON is the canonical output and the default; `--text`
+  renders a human-readable form. Data goes to stdout, diagnostics to stderr. No prompts, colors,
+  paging or emoji. Stable error objects, stable exit codes, `--dry-run` for every mutating command,
+  and a versioned schema.
 - **Single static binary.** No .NET, Node or Python runtime; builds with `CGO_ENABLED=0`.
 - **TUI included.** The tool ships its own terminal UI on top of the same core.
 
@@ -399,8 +410,8 @@ Applied unless the owner overrides them; these are coding decisions, not product
   invalid config fails before any write.
 - **Config commands.** `config show` (effective values), `config get <key>`, `config set <key>
   <value>`, `config unset <key>` (restore the default), `config validate` and `config path` (resolved
-  file). All accept `--json`; `set` and `unset` accept `--dry-run`. They are project-level and do not
-  require an open book.
+  file). They emit JSON by default; `--text` renders human output. `set` and `unset` accept
+  `--dry-run`. They are project-level and do not require an open book.
 
 ### 3.12 Concurrency and locking (owner decision, 2026-11-05)
 
@@ -428,6 +439,80 @@ Applied unless the owner overrides them; these are coding decisions, not product
 - **Version match.** CLI and daemon must run the same version; a mismatch is a clear error.
 - **No data difference.** The backend never changes book data, IDs, rendering or output.
 
+### 3.13 Code organization (owner guidance, 2026-11-05)
+
+Starting points, not a contract. The layout will move as the code teaches us; the principles are what
+we keep.
+
+- **Packages are the responsibility boundary.** Name a package after what it provides, not what it
+  contains. Avoid catch-all packages such as `utils`, `helpers`, `common`, `models` or `types`; if one
+  appears, it usually marks a missing responsibility.
+- **Dependency direction.** `cmd` and `cli` depend on application services; application services
+  depend on the domain and the store. The domain should not import the CLI.
+- **Thin entry point.** Keep `cmd/pecia/main.go` to flags, wiring and exit codes; business logic
+  belongs in `internal/`.
+- **Private by default.** Prefer `internal/` until a public API is real.
+- **Consumer-side interfaces.** Prefer small interfaces defined where they are consumed; avoid
+  interface-per-type and DI containers.
+- **File granularity.** As a rule of thumb, one primary type or feature per file, tests beside the
+  code, `doc.go` per package, platform code in `_windows.go`/`_unix.go` files with build tags. Split a
+  file when it exceeds roughly 300–500 lines or mixes two responsibilities.
+- **Starting layout.** A starting point, not a straitjacket. New packages are fine when they carry a
+  real responsibility; merges and renames are expected.
+  ```
+  cmd/pecia/            entry point
+  internal/cli/         command dispatch, text and JSON output
+  internal/config/      config load, defaults, validation
+  internal/model/       book, node, block, IDs
+  internal/structure/   add, move, remove, reorder, invariants
+  internal/body/        body read and write, heading rule
+  internal/store/       containers, open/close, checksums
+  internal/coordinator/ file and daemon backends
+  internal/render/      monolith, part, chapter, headings, ToC
+  internal/refs/        ID references, anchors, resolution
+  internal/library/     registry, books, numbering defaults
+  internal/apply/       declarative batch plans
+  internal/search/      find over manifests and bodies
+  internal/diff/        rendered and rollback diffs
+  internal/export/      container member export
+  internal/temp/        .temp handling, flush
+  internal/asciiui/     layout catalog, generic types, overrides
+  internal/layout/      repository layout block
+  internal/grammar/     LanguageTool client, terms
+  ```
+- **Enforcement.** `go vet` and `gofmt` are the baseline. Staticcheck or golangci-lint with
+  `depguard` are optional aids, and `go list -deps` is a review aid rather than a gate.
+
+### 3.14 Generated content and editorial state (owner decision, 2026-11-05)
+
+- **Status system.** The editorial status system remains and is opt-in per book. The tool owns the
+  state vocabulary (states, assignments, legend, badges) and renders it structurally; authors never
+  write the status markup.
+- **Layout block.** Opt-in and deferred; not part of the first delivery. With git on the host the
+  block is generated from `git ls-files`; without git it is a no-op, not an error. A command authors
+  it from a path and a depth (how far the tree branches), and endpoints or branches can be excluded
+  afterwards. Per-path prose is authored through commands; the generated tree is never hand-edited.
+- **Badges.** Badges are generated from repository facts; an explicit message overrides the detector,
+  and the generated badge region is never hand-edited.
+- **Regions are blocks.** A region is a block with a stable ID in an ordered collection. There are no
+  separate region sources or region types; the collection order is the render order.
+- **Notes.** A note is a region collection attached to a structural node or a block; it renders
+  directly beneath the target first, before the next element. Placement is tool-owned; the text is
+  authored through a command.
+- **Footer.** The footer is a region collection with exactly one slot per book. It is tool-owned,
+  replaceable through a command, and always renders in the book's `README.md` at the bottom, above the
+  navigation.
+- **Header and preamble are not part of the model.**
+- **Index prose.** Each index entry can carry optional prose, authored through a command and rendered
+  in the index.
+- **Terms and grammar.** The term list and the grammar gate remain tool-owned. Terms change only
+  through the confirmation flow.
+- **Book status.** Clean/dirty state from input and output hashes remains the drift signal.
+- **Rekey.** IDs are stable by default. A rekey command changes an ID and rewrites the references
+  across the library; it is the only way to change an ID.
+- **Not carried over.** Header and preamble regions, cleanup of legacy nav/index/banner residue,
+  migrate and import (paused), and the storage-mode command (replaced by open/close).
+
 ## 4. Gap Analysis
 
 | # | Target statement | Current state | Gap |
@@ -453,8 +538,9 @@ Conceptual impact areas only; no solution is proposed here.
   and the move arguments that express a placement.
 - **Body unit boundaries.** What a newly authored block body may start with, and whether the legacy
   `####`-in-body pattern is documented as a legacy exception rather than as a model rule.
-- **New-book authoring flow.** The minimum command sequence — create the book, define the structure,
-  add blocks, insert prose — and where prose enters the store.
+- **New-book authoring flow.** Create the book, choose the opt-ins, build the initial structure, then
+  add prose. A block ID of `0` appends a new block to the target chapter or subchapter; a valid ID
+  overwrites that block; an invalid ID is rejected.
 - **Heading ownership.** Structure headings generated from the manifest; prose headings that are not
   structure. This affects rendering, ToC generation, anchor generation and lint.
 - **Render output modes.** Monolith by default as a `README.md` that carries the index and then the
@@ -502,6 +588,9 @@ Any future implementation keeps these properties, because the rest of the toolin
   reader snapshots, no lost writes and stale-session detection.
 - Two processes can edit different blocks of the same structural node concurrently; structural changes
   serialize per node, and locks are acquired in a stable order.
+- The package dependency direction stays acyclic; the domain never imports the CLI.
+- CLI output is machine-readable by default, schema-versioned and stable.
+- Block ID `0` is reserved for creation and is never a valid stored ID.
 - Drift detection between inputs and generated output (`sync --check`, `book status`).
 - Rollback packages for every write to an existing book.
 - Cross-book references by stable ID, with rendered anchors derived from the target.
@@ -543,8 +632,7 @@ out of scope.
 
 ## 8. Out of Scope
 
-- Detailed command syntax, schema version, file format or module layout; the command capabilities are
-  recorded in the decisions.
+- Detailed command syntax, schema version or file format; the package layout is recorded in §3.13.
 - Changes to DocEngine itself; it is a read-only reference for this plan.
 - Import, adopt and migration of the existing books (owner decision: hard cut, import paused),
   including conversion, content mapping and re-authoring.
