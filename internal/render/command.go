@@ -178,7 +178,13 @@ func newService(env *cli.Env) (*Service, *cli.Error) {
 	if err != nil {
 		return nil, err
 	}
-	return New(life), nil
+	values, configErr := config.Load(env)
+	if configErr != nil {
+		return nil, configErr
+	}
+	service := New(life)
+	service.Overrides = values.AsciiUITypes
+	return service, nil
 }
 
 func requireBook(raw string) (model.BookID, *cli.Error) {

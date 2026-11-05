@@ -43,8 +43,8 @@ session has to resolve.
 | [S06](06-concurrency-and-coordination.md) | Concurrency and coordination | 3 | S04 | implemented | §3.12, §6 |
 | [S07](07-structure-and-book-settings.md) | Structure and book settings commands | 4 | S03, S04, S05, S06 | implemented | §3.7 (uniform commands, placement, move, settings), §3.14 (no pin) |
 | [S08](08-body-authoring-and-prose.md) | Body authoring, prose discipline and temp | 4 | S03, S04, S05, S06 | implemented | §3 (3, 5, 6), §3.3, §3.7 (body writes), §2.5 |
-| [S09](09-rendering-and-output-modes.md) | Rendering and output modes | 5 | S04, S07, S08 | in progress | §3.4, §3.7 (heading mapping, mode switch, navigation), §3 (7), §3.14 (index prose) |
-| [S10](10-numbering-anchors-references.md) | Numbering, anchors and references | 5 | S09 | draft | §3.7 (numbering, anchors, references, reorder), §3.14 (rekey) |
+| [S09](09-rendering-and-output-modes.md) | Rendering and output modes | 5 | S04, S07, S08 | implemented | §3.4, §3.7 (heading mapping, mode switch, navigation), §3 (7), §3.14 (index prose) |
+| [S10](10-numbering-anchors-references.md) | Numbering, anchors and references | 5 | S09 | implemented | §3.7 (numbering, anchors, references, reorder), §3.14 (rekey) |
 | [S11](11-library-docs-and-cutover.md) | Library book, documentation location and cut-over | 6 | S02, S04, S05, S09, S10 | draft | §3.1, §3.6, §3.8, §3.9 |
 | [S12](12-editorial-state-and-generated-content.md) | Editorial state and generated content | 7 | S09 | draft | §3.14, §3 (4) |
 | [S13](13-grammar-and-terms.md) | Grammar gate and term list | 7 | S02, S08 | draft | §3.14 (terms and grammar), §3.11 (grammar endpoint) |
@@ -89,13 +89,22 @@ coordination backends are in place. The version is bumped to `0.2.0-dev`.
 M3 is delivered (2026-11-05): the structure commands, declarative plans, body authoring, find and
 flush are in place. The version is bumped to `0.3.0-dev`.
 
+M4 is delivered (2026-11-05): rendering (all modes plus the ASCII UI anchor), numbering, anchors,
+references and rekey are in place. The version is bumped to `1.0.0-dev`.
+
 ### 4.1 Version policy
 
 - **One place.** The version lives only in `internal/buildinfo/buildinfo.go` (`var Version`). No
   `go.mod` change, no second constant, no version string in `cmd/`.
-- **Bump only at a milestone close.** The bump rides the commit that closes the milestone, after
-  the milestone's scopes are green; that push to `main` is the CI run worth having. No bump per
-  scope, per commit, per fix or per document change.
+- **One commit, one push per milestone.** The milestone work and the version bump live in the same
+  commit. That commit is the only one that is committed and pushed; every slice before it stays
+  local. No commit and no push without a bump.
+- **CI only on the bump.** The workflow is path-filtered to `internal/buildinfo/buildinfo.go`, so a
+  push starts a run only when it changes the version file; `workflow_dispatch` remains for an
+  explicit manual run. There are no tag triggers and no other push trigger.
+- **Bump only at a milestone close.** The bump is part of the commit that closes the milestone,
+  after the milestone's scopes are green. No bump per scope, per commit, per fix or per document
+  change.
 - **Reaching `1.4.0-dev`.** The ladder above ends at `1.4.0-dev` when the last scope (S14) closes.
   `1.0.0-dev` at M4 marks the complete authoring and rendering core; M5 proves it on a real book;
   the remaining minors add optional capability.

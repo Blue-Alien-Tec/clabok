@@ -251,6 +251,31 @@ func readManifest(t *testing.T, paths store.BookPaths) *model.Manifest {
 	return manifest
 }
 
+func TestRekeyCommand(t *testing.T) {
+	directory := prepareProject(t)
+	code, stdout, stderr := run(t, directory, "rekey", "--book", "fixture", "11", "60")
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, `"target": "60"`) {
+		t.Fatalf("unexpected receipt %s", stdout)
+	}
+	layout, err := store.NewLayout(filepath.Join(directory, "_CLABOK"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := layout.Book("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(paths.BlocksDir, "60.md")); err != nil {
+		t.Fatalf("renamed body missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(paths.BlocksDir, "11.md")); !os.IsNotExist(err) {
+		t.Fatalf("old body still present: %v", err)
+	}
+}
+
 func TestMoveRequiresDestination(t *testing.T) {
 	directory := prepareProject(t)
 	code, _, stderr := run(t, directory, "move", "--book", "fixture", "10")

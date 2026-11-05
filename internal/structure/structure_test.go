@@ -3,6 +3,7 @@ package structure
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/coordinator"
@@ -43,6 +44,10 @@ func newScene(t *testing.T) scene {
 			},
 		},
 		{ID: 20, Kind: model.KindChapter, Title: "Two", Blocks: []model.ID{21}},
+	}
+	manifest.Regions = []*model.Region{
+		{ID: 40, Kind: model.RegionNotes, Target: model.Target{Kind: model.TargetNode, ID: 10}, Blocks: []model.ID{44}},
+		{ID: 41, Kind: model.RegionNotes, Target: model.Target{Kind: model.TargetBlock, ID: 13}, Blocks: []model.ID{45}},
 	}
 	data, err := manifest.Encode()
 	if err != nil {
@@ -467,6 +472,105 @@ func TestAddTypeOnNodeRejected(t *testing.T) {
 		t.Fatal("expected structure.type-on-node")
 	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.type-on-node" {
 		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestRekeyBlock(t *testing.T) {
+	s := newScene(t)
+	if err := os.WriteFile(filepath.Join(s.paths.BlocksDir, "11.md"), []byte("See [[id:13]].\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := s.service.Rekey("fixture", 13, 60, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Kind != "block" || receipt.Target != 60 {
+		t.Fatalf("receipt %+v", receipt)
+	}
+	manifest := s.manifest(t)
+	sub, ok := manifest.FindNode(12)
+	if !ok || len(sub.Blocks) != 1 || sub.Blocks[0] != 60 {
+		t.Fatalf("placement %+v", sub)
+	}
+	if manifest.Regions[1].Target.ID != 60 {
+		t.Fatalf("region target %+v", manifest.Regions[2].Target)
+	}
+	body11, err := os.ReadFile(filepath.Join(s.paths.BlocksDir, "11.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body11), "[[id:60]]") {
+		t.Fatalf("prose ref not rewritten: %s", body11)
+	}
+	renamed, err := os.ReadFile(filepath.Join(s.paths.BlocksDir, "60.md"))
+	if err != nil {
+		t.Fatalf("body not renamed: %v", err)
+	}
+	if string(renamed) != "Body 13\n" {
+		t.Fatalf("renamed body %q", renamed)
+	}
+	if _, err := os.Stat(filepath.Join(s.paths.BlocksDir, "13.md")); !os.IsNotExist(err) {
+		t.Fatalf("old body still present: %v", err)
+	}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("manifest invalid: %v", err.Issues)
+	}
+}
+
+func TestRekeyNode(t *testing.T) {
+	s := newScene(t)
+	if err := os.WriteFile(filepath.Join(s.paths.BlocksDir, "11.md"), []byte("See [[id:10]].\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := s.service.Rekey("fixture", 10, 70, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Kind != "chapter" || receipt.Target != 70 {
+		t.Fatalf("receipt %+v", receipt)
+	}
+	manifest := s.manifest(t)
+	node, ok := manifest.FindNode(70)
+	if !ok || node.ID != 70 || len(node.Blocks) != 1 || node.Blocks[0] != 11 {
+		t.Fatalf("node %+v", node)
+	}
+	if _, ok := manifest.FindNode(10); ok {
+		t.Fatal("old node id still present")
+	}
+	if manifest.Regions[0].Target.ID != 70 {
+		t.Fatalf("region target %+v", manifest.Regions[1].Target)
+	}
+	body11, err := os.ReadFile(filepath.Join(s.paths.BlocksDir, "11.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body11), "[[id:70]]") {
+		t.Fatalf("prose ref not rewritten: %s", body11)
+	}
+}
+
+func TestRekeyConflict(t *testing.T) {
+	s := newScene(t)
+	if _, err := s.service.Rekey("fixture", 13, 20, false); err == nil {
+		t.Fatal("expected structure.id-in-use")
+	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.id-in-use" {
+		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestRekeyDryRun(t *testing.T) {
+	s := newScene(t)
+	before := s.manifestBytes(t)
+	receipt, err := s.service.Rekey("fixture", 13, 60, true)
+	if err != nil || !receipt.Changed {
+		t.Fatalf("receipt %+v err %v", receipt, err)
+	}
+	after := s.manifestBytes(t)
+	if string(before) != string(after) {
+		t.Fatal("a dry run wrote the manifest")
+	}
+	if _, err := os.Stat(filepath.Join(s.paths.BlocksDir, "13.md")); err != nil {
+		t.Fatal("a dry run renamed a body")
 	}
 }
 

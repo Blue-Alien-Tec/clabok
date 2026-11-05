@@ -1,6 +1,6 @@
 # S09 — Rendering and Output Modes
 
-Status: in progress (S09a delivered). Delivery slices: S09a (render modes, index, sync, check) -> S09b (ASCII UI catalog and overrides).
+Status: implemented (2026-11-05). Delivery slices: S09a (render modes, index, sync, check) and S09b (ASCII UI catalog, anchor rendering). The index-prose field arrives with S12.
 Phase: 5. Depends on: S04 (store), S07 (structure, settings), S08 (bodies). Blocks: S10, S11, S12, S14.
 PLAN refs: §3.4 (modes), §3.7 (rendering between blocks, mode switches, heading mapping, navigation,
 no pin), §3 (7), §3.14 (index prose rendering), §6 (deterministic output, drift detection, `check`).

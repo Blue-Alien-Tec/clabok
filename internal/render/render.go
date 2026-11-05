@@ -13,9 +13,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/asciiui"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/prose"
+	"github.com/Blue-Alien-Tec/clabok/internal/refs"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
@@ -54,6 +56,8 @@ type Result struct {
 // Service renders one open book.
 type Service struct {
 	Lifecycle *lifecycle.Lifecycle
+	// Overrides maps a generic asciiui widget name to a project-specific label.
+	Overrides map[string]string
 }
 
 // New returns a render service.
@@ -70,6 +74,20 @@ func (service *Service) Render(book model.BookID) (Result, error) {
 	bodies, err := loadBodies(paths)
 	if err != nil {
 		return Result{}, err
+	}
+	// A locked UILayout block is a render anchor: its body is the generated drawing, not prose.
+	layoutsDir := filepath.Join(paths.Dir, "layouts")
+
+	for _, id := range manifest.PlacedBlocks() {
+		if !manifest.IsLocked(id) || manifest.BlockType(id) != "UILayout" {
+			continue
+		}
+		drawing, drawErr := renderAsciiUI(layoutsDir, id, service.Overrides)
+		if drawErr != nil {
+			return Result{}, drawErr
+		}
+		bodies[id] = "<!-- asciiui:" + id.String() + " -->\n" + drawing +
+			"\n<!-- /asciiui:" + id.String() + " -->\n"
 	}
 	mode := manifest.Settings.Output
 	var files []File
@@ -103,6 +121,20 @@ func (service *Service) load(book model.BookID) (store.BookPaths, *model.Manifes
 	return paths, manifest, nil
 }
 
+func renderAsciiUI(layoutsDir string, id model.ID, overrides map[string]string) (string, error) {
+	specPath := filepath.Join(layoutsDir, "asciiui", id.String()+".asciiui")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return "", fail("render.missing-layout",
+			"block %s has no asciiui spec at %s", id, specPath)
+	}
+	spec, err := asciiui.Parse(string(data))
+	if err != nil {
+		return "", err
+	}
+	return asciiui.Render(spec, overrides)
+}
+
 func loadBodies(paths store.BookPaths) (map[model.ID]string, error) {
 	bodies := map[model.ID]string{}
 	entries, err := os.ReadDir(paths.BlocksDir)
@@ -129,28 +161,8 @@ func loadBodies(paths store.BookPaths) (map[model.ID]string, error) {
 	return bodies, nil
 }
 
-// Slug derives a deterministic file or anchor token from a title.
-func Slug(text string) string {
-	var builder strings.Builder
-	lastDash := false
-	for _, character := range strings.ToLower(text) {
-		alphanumeric := (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')
-		if alphanumeric {
-			builder.WriteRune(character)
-			lastDash = false
-			continue
-		}
-		if !lastDash && builder.Len() > 0 {
-			builder.WriteByte('-')
-			lastDash = true
-		}
-	}
-	slug := strings.Trim(builder.String(), "-")
-	if slug == "" {
-		return "section"
-	}
-	return slug
-}
+// Slug derives an anchor or file token from a title. Numbers are never part of it.
+func Slug(text string) string { return refs.Anchor(text) }
 
 func uniqueSlug(base string, used map[string]struct{}) string {
 	slug := base
@@ -220,21 +232,60 @@ func joinNonEmpty(parts ...string) string {
 	return strings.Join(sections, "\n\n") + "\n"
 }
 
-func heading(level int, title string) string {
+// numberingMap returns the rendered number of every chapter and subchapter. Numbers exist only in
+// the rendered heading; the stored titles stay number-free.
+func numberingMap(manifest *model.Manifest) map[model.ID]string {
+	numbers := map[model.ID]string{}
+	if !manifest.Settings.Numbering.Enabled {
+		return numbers
+	}
+	chapterIndex := 0
+	for _, chapter := range manifest.Root.Children {
+		if chapter.Kind != model.KindChapter {
+			continue
+		}
+		chapterIndex++
+		numbers[chapter.ID] = fmt.Sprintf("%d.", chapterIndex)
+		subIndex := 0
+		for _, sub := range chapter.Children {
+			if sub.Kind != model.KindSubchapter {
+				continue
+			}
+			subIndex++
+			numbers[sub.ID] = fmt.Sprintf("%d.%d", chapterIndex, subIndex)
+		}
+	}
+	return numbers
+}
+
+func heading(level int, number, title string) string {
 	if level < 1 {
 		level = 1
 	}
 	if level > 6 {
 		level = 6
 	}
-	return strings.Repeat("#", level) + " " + title
+	text := title
+	if number != "" {
+		text = number + " " + title
+	}
+	return strings.Repeat("#", level) + " " + text
 }
 
-func nodeSection(manifest *model.Manifest, bodies map[model.ID]string, node *model.Node, level int) string {
+// anchorLine emits an explicit anchor, so the link target never depends on the rendered number.
+func anchorLine(anchor string) string {
+	return `<a id="` + anchor + `"></a>`
+}
+
+func nodeSection(manifest *model.Manifest, bodies map[model.ID]string, node *model.Node, level int, anchors, numbers map[model.ID]string) string {
 	if node.Kind == model.KindLink {
 		return ""
 	}
-	sections := []string{heading(level, node.Title)}
+	sections := make([]string, 0, 4)
+	if anchor := anchors[node.ID]; anchor != "" {
+		sections = append(sections, anchorLine(anchor))
+	}
+	sections = append(sections, heading(level, numbers[node.ID], node.Title))
 	if blocks := joinBlocks(blockTexts(manifest, bodies, node.Blocks)); blocks != "" {
 		sections = append(sections, blocks)
 	}
@@ -244,16 +295,16 @@ func nodeSection(manifest *model.Manifest, bodies map[model.ID]string, node *mod
 	return strings.Join(sections, "\n\n")
 }
 
-func subtree(manifest *model.Manifest, bodies map[model.ID]string, node *model.Node, level int) string {
+func subtree(manifest *model.Manifest, bodies map[model.ID]string, node *model.Node, level int, anchors, numbers map[model.ID]string) string {
 	parts := make([]string, 0)
-	if section := nodeSection(manifest, bodies, node, level); section != "" {
+	if section := nodeSection(manifest, bodies, node, level, anchors, numbers); section != "" {
 		parts = append(parts, section)
 	}
 	for _, child := range node.Children {
 		if child.Kind == model.KindLink {
 			continue
 		}
-		parts = append(parts, subtree(manifest, bodies, child, level+1))
+		parts = append(parts, subtree(manifest, bodies, child, level+1, anchors, numbers))
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -323,14 +374,23 @@ func indexMarkdown(entries []entry) string {
 }
 
 func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string) ([]File, error) {
+	assigner := refs.NewAssigner()
+	anchors := map[model.ID]string{}
+	fileOf := map[model.ID]string{}
+	assignAnchors(manifest.Root.Children, assigner, anchors, fileOf, "README.md")
+	numbers := numberingMap(manifest)
 	entries := indexEntries(manifest, func(node *model.Node) string {
 		if node.Kind == model.KindLink {
 			return ""
 		}
-		return "#" + Slug(node.Title)
+		anchor := anchors[node.ID]
+		if anchor == "" {
+			return ""
+		}
+		return "#" + anchor
 	})
 	sections := []string{
-		heading(1, manifest.Root.Title),
+		heading(1, "", manifest.Root.Title),
 	}
 	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
 		sections = append(sections, rootBlocks)
@@ -340,12 +400,13 @@ func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string) ([]Fil
 		if child.Kind == model.KindLink {
 			continue
 		}
-		sections = append(sections, subtree(manifest, bodies, child, 2))
+		sections = append(sections, subtree(manifest, bodies, child, 2, anchors, numbers))
 	}
 	if footerText := footer(manifest, bodies); footerText != "" {
 		sections = append(sections, footerText)
 	}
 	content := marker(manifest.ID, model.OutputMonolith) + strings.Join(sections, "\n\n")
+	content = expandRefs(content, "README.md", manifest, anchors, fileOf)
 	return []File{{Path: "README.md", Content: strings.TrimRight(content, "\n") + "\n"}}, nil
 }
 
@@ -353,26 +414,29 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string) ([]Fil
 	used := map[string]struct{}{"readme": {}}
 	files := make([]File, 0, len(manifest.Root.Children)+1)
 	fileOf := map[model.ID]string{}
+	anchors := map[model.ID]string{}
+	refFiles := map[model.ID]string{}
+	numbers := numberingMap(manifest)
 	for _, chapter := range manifest.Root.Children {
 		if chapter.Kind == model.KindLink {
 			continue
 		}
-		fileOf[chapter.ID] = uniqueSlug(Slug(chapter.Title), used) + ".md"
+		file := uniqueSlug(Slug(chapter.Title), used) + ".md"
+		fileOf[chapter.ID] = file
+		assignAnchors([]*model.Node{chapter}, refs.NewAssigner(), anchors, refFiles, file)
 	}
 	entries := indexEntries(manifest, func(node *model.Node) string {
 		if node.Kind == model.KindLink {
 			return ""
 		}
-		if file, ok := fileOf[node.ID]; ok {
-			return file
-		}
-		parent, ok := chapterOf(manifest, node.ID)
-		if !ok {
+		anchor := anchors[node.ID]
+		file := refFiles[node.ID]
+		if anchor == "" || file == "" {
 			return ""
 		}
-		return fileOf[parent] + "#" + Slug(node.Title)
+		return file + "#" + anchor
 	})
-	indexSections := []string{heading(1, manifest.Root.Title)}
+	indexSections := []string{heading(1, "", manifest.Root.Title)}
 	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
 		indexSections = append(indexSections, rootBlocks)
 	}
@@ -381,6 +445,7 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string) ([]Fil
 		indexSections = append(indexSections, footerText)
 	}
 	indexContent := marker(manifest.ID, model.OutputChapter) + strings.Join(indexSections, "\n\n")
+	indexContent = expandRefs(indexContent, "README.md", manifest, anchors, refFiles)
 	files = append(files, File{Path: "README.md", Content: strings.TrimRight(indexContent, "\n") + "\n"})
 
 	for index, chapter := range manifest.Root.Children {
@@ -400,33 +465,18 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string) ([]Fil
 			}
 		}
 		nav := fmt.Sprintf("[← Previous](%s) · [Index](README.md) · [Next →](%s)", previous, next)
-		content := marker(manifest.ID, model.OutputChapter) + nav + "\n\n" + subtree(manifest, bodies, chapter, 1)
+		content := marker(manifest.ID, model.OutputChapter) + nav + "\n\n" +
+			subtree(manifest, bodies, chapter, 1, anchors, numbers)
+		content = expandRefs(content, fileOf[chapter.ID], manifest, anchors, refFiles)
 		files = append(files, File{Path: fileOf[chapter.ID], Content: strings.TrimRight(content, "\n") + "\n"})
 	}
 	return files, nil
 }
 
-func chapterOf(manifest *model.Manifest, id model.ID) (model.ID, bool) {
-	for _, chapter := range manifest.Root.Children {
-		found := false
-		chapter.Walk(func(node *model.Node, depth int, parent *model.Node) bool {
-			if node.ID == id {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found || chapter.ID == id {
-			return chapter.ID, true
-		}
-	}
-	return model.ZeroID, false
-}
-
 func renderParts(manifest *model.Manifest, bodies map[model.ID]string) ([]File, error) {
 	parts := make([]string, 0)
 	seen := map[string]struct{}{}
-	fileOf := map[string]string{}
+	partFile := map[string]string{}
 	used := map[string]struct{}{"readme": {}}
 	for _, chapter := range manifest.Root.Children {
 		if chapter.Kind != model.KindChapter {
@@ -438,28 +488,33 @@ func renderParts(manifest *model.Manifest, bodies map[model.ID]string) ([]File, 
 		if _, exists := seen[chapter.Part]; !exists {
 			seen[chapter.Part] = struct{}{}
 			parts = append(parts, chapter.Part)
-			fileOf[chapter.Part] = uniqueSlug(Slug(chapter.Part), used) + ".md"
+			partFile[chapter.Part] = uniqueSlug(Slug(chapter.Part), used) + ".md"
+		}
+	}
+	anchors := map[model.ID]string{}
+	refFiles := map[model.ID]string{}
+	numbers := numberingMap(manifest)
+	for _, part := range parts {
+		assigner := refs.NewAssigner()
+		for _, chapter := range manifest.Root.Children {
+			if chapter.Kind != model.KindChapter || chapter.Part != part {
+				continue
+			}
+			assignAnchors([]*model.Node{chapter}, assigner, anchors, refFiles, partFile[part])
 		}
 	}
 	entries := indexEntries(manifest, func(node *model.Node) string {
 		if node.Kind == model.KindLink {
 			return ""
 		}
-		chapter, ok := chapterOf(manifest, node.ID)
-		if !ok {
+		anchor := anchors[node.ID]
+		file := refFiles[node.ID]
+		if anchor == "" || file == "" {
 			return ""
 		}
-		parent, found := manifest.FindNode(chapter)
-		if !found {
-			return ""
-		}
-		file := fileOf[parent.Part]
-		if node.ID == chapter {
-			return file + "#" + Slug(node.Title)
-		}
-		return file + "#" + Slug(node.Title)
+		return file + "#" + anchor
 	})
-	indexSections := []string{heading(1, manifest.Root.Title)}
+	indexSections := []string{heading(1, "", manifest.Root.Title)}
 	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
 		indexSections = append(indexSections, rootBlocks)
 	}
@@ -468,29 +523,76 @@ func renderParts(manifest *model.Manifest, bodies map[model.ID]string) ([]File, 
 		indexSections = append(indexSections, footerText)
 	}
 	indexContent := marker(manifest.ID, model.OutputPart) + strings.Join(indexSections, "\n\n")
+	indexContent = expandRefs(indexContent, "README.md", manifest, anchors, refFiles)
 	files := []File{{Path: "README.md", Content: strings.TrimRight(indexContent, "\n") + "\n"}}
 
 	for index, part := range parts {
 		previous := "README.md"
 		if index > 0 {
-			previous = fileOf[parts[index-1]]
+			previous = partFile[parts[index-1]]
 		}
 		next := "README.md"
 		if index+1 < len(parts) {
-			next = fileOf[parts[index+1]]
+			next = partFile[parts[index+1]]
 		}
 		nav := fmt.Sprintf("[← Previous](%s) · [Index](README.md) · [Next →](%s)", previous, next)
-		sections := []string{nav, heading(1, part)}
+		sections := []string{nav, heading(1, "", part)}
 		for _, chapter := range manifest.Root.Children {
 			if chapter.Kind != model.KindChapter || chapter.Part != part {
 				continue
 			}
-			sections = append(sections, subtree(manifest, bodies, chapter, 2))
+			sections = append(sections, subtree(manifest, bodies, chapter, 2, anchors, numbers))
 		}
 		content := marker(manifest.ID, model.OutputPart) + strings.Join(sections, "\n\n")
-		files = append(files, File{Path: fileOf[part], Content: strings.TrimRight(content, "\n") + "\n"})
+		content = expandRefs(content, partFile[part], manifest, anchors, refFiles)
+		files = append(files, File{Path: partFile[part], Content: strings.TrimRight(content, "\n") + "\n"})
 	}
 	return files, nil
+}
+
+// assignAnchors assigns a unique anchor per node within one rendered file.
+func assignAnchors(nodes []*model.Node, assigner *refs.Assigner, anchors, fileOf map[model.ID]string, file string) {
+	var walk func(node *model.Node)
+	walk = func(node *model.Node) {
+		if node.Kind != model.KindLink {
+			anchors[node.ID] = assigner.Next(node.Title)
+			fileOf[node.ID] = file
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	for _, node := range nodes {
+		walk(node)
+	}
+}
+
+// expandRefs turns [[id:N]] into a link to the derived anchor. A dangling reference stays as
+// written and is reported by Check.
+func expandRefs(content, file string, manifest *model.Manifest, anchors, fileOf map[model.ID]string) string {
+	return refs.Pattern.ReplaceAllStringFunc(content, func(match string) string {
+		groups := refs.Pattern.FindStringSubmatch(match)
+		if len(groups) != 2 {
+			return match
+		}
+		id, ok := refs.ParseID(groups[1])
+		if !ok {
+			return match
+		}
+		target, found := refs.Resolve(manifest, id)
+		if !found {
+			return match
+		}
+		anchor := anchors[id]
+		if anchor == "" {
+			return match
+		}
+		href := "#" + anchor
+		if targetFile := fileOf[id]; targetFile != "" && targetFile != file {
+			href = targetFile + "#" + anchor
+		}
+		return "[" + target.Title + "](" + href + ")"
+	})
 }
 
 // SyncOptions controls a sync run.
@@ -647,6 +749,54 @@ func (service *Service) Check(book model.BookID) ([]Finding, error) {
 	bodies, err := loadBodies(paths)
 	if err != nil {
 		return nil, err
+	}
+
+	for id, body := range bodies {
+		for _, match := range refs.Pattern.FindAllStringSubmatch(body, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			refID, ok := refs.ParseID(match[1])
+			if !ok {
+				continue
+			}
+			if _, found := refs.Resolve(manifest, refID); !found {
+				findings = append(findings, Finding{
+					Code:     "refs.dangling",
+					Message:  fmt.Sprintf("block %s references missing id %s", id, match[1]),
+					Blocking: true,
+				})
+			}
+		}
+	}
+	manifest.Walk(func(node *model.Node, depth int, parent *model.Node) bool {
+		if node.Kind == model.KindLink && node.Ref != nil {
+			for _, refID := range []model.ID{node.Ref.Node, node.Ref.Block} {
+				if refID.IsZero() {
+					continue
+				}
+				if _, found := refs.Resolve(manifest, refID); !found {
+					findings = append(findings, Finding{
+						Code:     "refs.dangling",
+						Message:  fmt.Sprintf("link %s references missing id %s", node.ID, refID),
+						Blocking: true,
+					})
+				}
+			}
+		}
+		return true
+	})
+	for _, id := range manifest.PlacedBlocks() {
+		if !manifest.IsLocked(id) || manifest.BlockType(id) != "UILayout" {
+			continue
+		}
+		if _, layoutErr := renderAsciiUI(filepath.Join(paths.Dir, "layouts"), id, service.Overrides); layoutErr != nil {
+			code := "render.missing-layout"
+			if coded, ok := layoutErr.(interface{ ErrorCode() string }); ok {
+				code = coded.ErrorCode()
+			}
+			findings = append(findings, Finding{Code: code, Message: layoutErr.Error(), Blocking: true})
+		}
 	}
 	for id, body := range bodies {
 		if issues := prose.CheckProse(body); len(issues) > 0 {

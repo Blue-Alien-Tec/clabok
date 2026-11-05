@@ -149,7 +149,7 @@ func TestRenderChapters(t *testing.T) {
 		t.Fatalf("files %v", names)
 	}
 	index := s.file(t, result, "README.md")
-	for _, want := range []string{"[One](one.md)", "  - [Sub](one.md#sub)", "[Two](two.md)", "Footer"} {
+	for _, want := range []string{"[One](one.md#one)", "  - [Sub](one.md#sub)", "[Two](two.md#two)", "Footer"} {
 		if !strings.Contains(index, want) {
 			t.Fatalf("missing %q in index\n%s", want, index)
 		}
@@ -360,11 +360,242 @@ func TestCheckFindsBodyHeading(t *testing.T) {
 	}
 }
 
+func TestRenderAsciiUIAnchor(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	manifestPath := filepath.Join(s.paths.Dir, lifecycle.ManifestMember)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Root.Children[0].Blocks = append(manifest.Root.Children[0].Blocks, 50)
+	manifest.SetMeta(50, model.BlockMeta{Type: "UILayout", Locked: true})
+	encoded, err := manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAtomic(manifestPath, encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.paths.BlocksDir, "50.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specDir := filepath.Join(s.paths.Dir, "layouts", "asciiui")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "50.asciiui"), []byte("legend true\nbutton Buy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	if !strings.Contains(content, "<!-- asciiui:50 -->") || !strings.Contains(content, "[ Buy ]") {
+		t.Fatalf("ascii drawing missing\n%s", content)
+	}
+	if !strings.Contains(content, "Buy: Button") {
+		t.Fatalf("generic legend missing\n%s", content)
+	}
+
+	s.service.Overrides = map[string]string{"button": "UIButton"}
+	result, err = s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Files[0].Content, "Buy: UIButton") {
+		t.Fatalf("override missing\n%s", result.Files[0].Content)
+	}
+}
+
+func TestCheckMissingLayout(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	manifestPath := filepath.Join(s.paths.Dir, lifecycle.ManifestMember)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Root.Children[0].Blocks = append(manifest.Root.Children[0].Blocks, 51)
+	manifest.SetMeta(51, model.BlockMeta{Type: "UILayout", Locked: true})
+	encoded, err := manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAtomic(manifestPath, encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.paths.BlocksDir, "51.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.service.Render("fixture"); err == nil {
+		t.Fatal("expected render.missing-layout")
+	} else if coded, ok := err.(interface{ ErrorCode() string }); !ok || coded.ErrorCode() != "render.missing-layout" {
+		t.Fatalf("unexpected error %v", err)
+	}
+	findings, err := s.service.Check("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findings {
+		if finding.Code == "render.missing-layout" && finding.Blocking {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("findings %+v", findings)
+	}
+}
+
+func setManifest(t *testing.T, paths store.BookPaths, mutate func(*model.Manifest)) {
+	t.Helper()
+	path := filepath.Join(paths.Dir, lifecycle.ManifestMember)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutate(manifest)
+	encoded, err := manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAtomic(path, encoded); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNumberingKeepsAnchors(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	setManifest(t, s.paths, func(manifest *model.Manifest) {
+		manifest.Settings.Numbering.Enabled = true
+	})
+	result, err := s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	for _, want := range []string{"## 1. One", "### 1.1 Sub", `<a id="one"></a>`, `<a id="sub"></a>`, "[One](#one)"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("numbered render missing %q\n%s", want, content)
+		}
+	}
+
+	setManifest(t, s.paths, func(manifest *model.Manifest) {
+		manifest.Settings.Numbering.Enabled = false
+	})
+	result, err = s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = result.Files[0].Content
+	for _, want := range []string{"## One", "### Sub", `<a id="one"></a>`, "[One](#one)"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("plain render missing %q\n%s", want, content)
+		}
+	}
+}
+
+func TestNumberingFollowsOrder(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	setManifest(t, s.paths, func(manifest *model.Manifest) {
+		manifest.Settings.Numbering.Enabled = true
+		children := manifest.Root.Children
+		children[0], children[1] = children[1], children[0]
+	})
+	result, err := s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	if !strings.Contains(content, "## 1. Two") || !strings.Contains(content, "## 2. One") {
+		t.Fatalf("numbers do not follow the order\n%s", content)
+	}
+	if !strings.Contains(content, "[One](#one)") || !strings.Contains(content, "[Two](#two)") {
+		t.Fatalf("anchors changed with the order\n%s", content)
+	}
+}
+
+func TestAnchorCollision(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	setManifest(t, s.paths, func(manifest *model.Manifest) {
+		manifest.Root.Children[1].Children = []*model.Node{
+			{ID: 22, Kind: model.KindSubchapter, Title: "Sub"},
+		}
+	})
+	result, err := s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	if !strings.Contains(content, `<a id="sub"></a>`) || !strings.Contains(content, `<a id="sub-2"></a>`) {
+		t.Fatalf("collision not resolved\n%s", content)
+	}
+}
+
+func TestRefsExpand(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	if err := os.WriteFile(filepath.Join(s.paths.BlocksDir, "11.md"), []byte("See [[id:20]].\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Files[0].Content, "[Two](#two)") {
+		t.Fatalf("monolith ref not expanded\n%s", result.Files[0].Content)
+	}
+
+	setManifest(t, s.paths, func(manifest *model.Manifest) {
+		manifest.Settings.Output = model.OutputChapter
+	})
+	result, err = s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chapter := s.file(t, result, "one.md")
+	if !strings.Contains(chapter, "[Two](two.md#two)") {
+		t.Fatalf("cross-file ref not expanded\n%s", chapter)
+	}
+}
+
+func TestDanglingRefFinding(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	if err := os.WriteFile(filepath.Join(s.paths.BlocksDir, "11.md"), []byte("[[id:999]]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := s.service.Check("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findings {
+		if finding.Code == "refs.dangling" && finding.Blocking {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("findings %+v", findings)
+	}
+}
+
 func TestSlug(t *testing.T) {
 	cases := map[string]string{
 		"One":            "one",
 		"Part 1: Basics": "part-1-basics",
-		"Ärger & Co":     "rger-co",
+		"Ärger & Co":     "ärger-co",
 		"":               "section",
 	}
 	for input, want := range cases {

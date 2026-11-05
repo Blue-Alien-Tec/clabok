@@ -82,6 +82,7 @@ func Register(registry *cli.Registry) {
 	registry.Add(moveCommand())
 	registry.Add(removeCommand())
 	registry.Add(blockTypeCommand())
+	registry.Add(rekeyCommand())
 	registry.Add(settingsCommand())
 }
 
@@ -249,6 +250,48 @@ func removeCommand() *cli.Command {
 			receipt, removeErr := service.Remove(bookID, target, recursive, env.Globals.DryRun)
 			if removeErr != nil {
 				return nil, MapError(removeErr)
+			}
+			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
+		},
+	}
+}
+
+func rekeyCommand() *cli.Command {
+	var book string
+	return &cli.Command{
+		Name:     "rekey",
+		Summary:  "change a node or block id and rewrite references",
+		Usage:    "pecia rekey --book <id> <old> <new>",
+		Mutating: true,
+		Flags: func(env *cli.Env) *flag.FlagSet {
+			set := env.NewFlagSet("rekey")
+			set.StringVar(&book, "book", "", "book id")
+			return set
+		},
+		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
+			if len(args) != 2 {
+				return nil, cli.Usage("usage.invalid-arguments", "rekey takes the old and the new id").
+					WithHint("pecia rekey --book <id> <old> <new>")
+			}
+			bookID, bookErr := requireBook(book)
+			if bookErr != nil {
+				return nil, bookErr
+			}
+			oldID, oldErr := requireID(args[0], "old")
+			if oldErr != nil {
+				return nil, oldErr
+			}
+			newID, newErr := requireID(args[1], "new")
+			if newErr != nil {
+				return nil, newErr
+			}
+			service, serviceErr := newService(env)
+			if serviceErr != nil {
+				return nil, serviceErr
+			}
+			receipt, rekeyErr := service.Rekey(bookID, oldID, newID, env.Globals.DryRun)
+			if rekeyErr != nil {
+				return nil, MapError(rekeyErr)
 			}
 			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
 		},

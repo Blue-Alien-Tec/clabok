@@ -1,6 +1,6 @@
 # S10 — Numbering, Anchors and References
 
-Status: draft, not planned.
+Status: implemented (2026-11-05). Delivery slices: S10a (numbering, anchors, references, delivered) and S10b (rekey, delivered). Cross-book rekey joins S11; the numbering hierarchy is fixed (chapters 1., subchapters 1.1).
 Phase: 5. Depends on: S09 (render pipeline, heading emission). Blocks: S11, S12.
 PLAN refs: §3 (8), §3.7 (numbering, anchors, references, reorder, rekey), §3.14 (rekey), §6
 (references by stable ID, anchors derived).
