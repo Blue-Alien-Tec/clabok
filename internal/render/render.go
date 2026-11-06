@@ -233,6 +233,12 @@ func (service *Service) Render(book model.BookID) (Result, error) {
 func (service *Service) render(source *bookSource) (Result, error) {
 	manifest := source.manifest
 	bodies := source.bodies
+	// A generated repository layout only exists while the project is a git work tree. Without git
+	// the layout blocks disappear and a chapter that held only the generated block is omitted from
+	// the index, the navigation and the output.
+	if !repolayout.Available(service.ProjectDir) {
+		pruneUnavailableLayout(manifest)
+	}
 	// A locked UILayout block is a render anchor: its body is the generated drawing, not prose.
 	for _, id := range manifest.PlacedBlocks() {
 		if !manifest.IsLocked(id) || manifest.BlockType(id) != "UILayout" {
@@ -292,6 +298,53 @@ func (service *Service) badgeMarkdown(manifest *model.Manifest) string {
 
 // repoLayoutBody renders the generated repository tree for one locked RepoLayout block. A missing
 // git work tree is an informative no-op, never a render error.
+// pruneUnavailableLayout removes generated layout blocks when the project is not a git work tree.
+// Authored content in the same chapter stays; a chapter that held only the generated block is
+// removed so it leaves the index, the navigation and the output.
+func pruneUnavailableLayout(manifest *model.Manifest) {
+	layoutOnly := map[model.ID]bool{}
+	manifest.Walk(func(node *model.Node, depth int, parent *model.Node) bool {
+		hasLayout := false
+		others := 0
+		for _, id := range node.Blocks {
+			if manifest.BlockType(id) == "RepoLayout" {
+				hasLayout = true
+				continue
+			}
+			others++
+		}
+		if hasLayout && others == 0 && len(node.Children) == 0 {
+			layoutOnly[node.ID] = true
+		}
+		return true
+	})
+	keepBlocks := func(blocks []model.ID) []model.ID {
+		kept := blocks[:0]
+		for _, id := range blocks {
+			if manifest.BlockType(id) == "RepoLayout" {
+				continue
+			}
+			kept = append(kept, id)
+		}
+		return kept
+	}
+	var prune func(nodes []*model.Node) []*model.Node
+	prune = func(nodes []*model.Node) []*model.Node {
+		out := nodes[:0]
+		for _, node := range nodes {
+			if layoutOnly[node.ID] {
+				continue
+			}
+			node.Children = prune(node.Children)
+			node.Blocks = keepBlocks(node.Blocks)
+			out = append(out, node)
+		}
+		return out
+	}
+	manifest.Root.Blocks = keepBlocks(manifest.Root.Blocks)
+	manifest.Root.Children = prune(manifest.Root.Children)
+}
+
 func (service *Service) repoLayoutBody(id model.ID, manifest *model.Manifest) string {
 	if manifest.Layout == nil {
 		return "_Repository layout is not configured._"
@@ -793,7 +846,9 @@ func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index 
 	if legend := statusLegendMarkdown(manifest); legend != "" {
 		sections = append(sections, legend)
 	}
-	sections = append(sections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
+	if len(entries) > 0 {
+		sections = append(sections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
+	}
 	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
 		sections = append(sections, "## Document Index", documentIndex)
 	}
@@ -847,7 +902,9 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string, index 
 	if legend := statusLegendMarkdown(manifest); legend != "" {
 		indexSections = append(indexSections, legend)
 	}
-	indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
+	if len(entries) > 0 {
+		indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
+	}
 	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
 		indexSections = append(indexSections, "## Document Index", documentIndex)
 	}
@@ -926,7 +983,9 @@ func renderParts(manifest *model.Manifest, bodies map[model.ID]string, index []I
 	if legend := statusLegendMarkdown(manifest); legend != "" {
 		indexSections = append(indexSections, legend)
 	}
-	indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
+	if len(entries) > 0 {
+		indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
+	}
 	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
 		indexSections = append(indexSections, "## Document Index", documentIndex)
 	}

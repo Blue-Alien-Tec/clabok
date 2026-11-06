@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -167,5 +168,23 @@ func TestGatePolicies(t *testing.T) {
 	report = gate.Evaluate(context.Background(), 10, "teh cat")
 	if !started || report.Degraded == "" || len(report.Findings) != 0 || report.Blocked() {
 		t.Fatalf("degraded report %+v (started %v)", report, started)
+	}
+}
+
+func TestPrepareText(t *testing.T) {
+	input := "Prose `--id` and text.\n```text\n./... --id\n```\nAfter."
+	prepared := prepareText(input)
+	if strings.Contains(prepared.text, "--id") || strings.Contains(prepared.text, "./...") {
+		t.Fatalf("code survived the prose view: %q", prepared.text)
+	}
+	if !strings.Contains(prepared.text, "Prose") || !strings.Contains(prepared.text, "After.") {
+		t.Fatalf("prose was removed: %q", prepared.text)
+	}
+	codeAt := strings.Index(prepared.text, "code")
+	if codeAt < 0 || !prepared.inCode(prepared.original(codeAt)) {
+		t.Fatalf("the code span is not mapped: %q", prepared.text)
+	}
+	if prepared.original(len(prepared.text)) != len(input) {
+		t.Fatalf("the sentinel does not point at the body end")
 	}
 }

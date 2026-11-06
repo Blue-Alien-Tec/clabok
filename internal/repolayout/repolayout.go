@@ -2,8 +2,8 @@
 //
 // The tree comes from `git ls-files`, never from the local working copy, so untracked and ignored
 // paths never render. Root, Exclude and Notes are repository-relative; the rendered labels are
-// relative to Root. A missing git work tree is ErrNoGit, which the renderer turns into an
-// informative no-op instead of an error.
+// relative to Root. A missing git work tree is ErrNoGit; the renderer omits the generated blocks, and
+// a chapter that contains only the generated block disappears from the index, navigation and output.
 package repolayout
 
 import (
@@ -29,6 +29,13 @@ type node struct {
 	repoPath string
 	name     string
 	dir      bool
+}
+
+// Available reports whether the project directory is a git work tree.
+func Available(projectDir string) bool {
+	command := exec.Command("git", "-C", projectDir, "rev-parse", "--is-inside-work-tree")
+	output, err := command.Output()
+	return err == nil && strings.TrimSpace(string(output)) == "true"
 }
 
 // Render returns the tree for the configured layout.

@@ -56,6 +56,23 @@ func TestBuildDepthAndExclude(t *testing.T) {
 	}
 }
 
+func TestAvailable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	if Available(t.TempDir()) {
+		t.Fatal("a plain directory must not be a work tree")
+	}
+	directory := t.TempDir()
+	command := exec.Command("git", "-C", directory, "init", "-q")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	if !Available(directory) {
+		t.Fatal("an initialized repository must be a work tree")
+	}
+}
+
 func TestRenderWithoutGit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not available")

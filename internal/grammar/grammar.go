@@ -111,7 +111,8 @@ type matchesPayload struct {
 // Check sends the text and returns the unsuppressed findings in server order.
 func (client *Client) Check(ctx context.Context, text string) ([]Finding, error) {
 	form := url.Values{}
-	form.Set("text", text)
+	prepared := prepareText(text)
+	form.Set("text", prepared.text)
 	form.Set("language", Language)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.Endpoint,
 		strings.NewReader(form.Encode()))
@@ -133,7 +134,12 @@ func (client *Client) Check(ctx context.Context, text string) ([]Finding, error)
 	}
 	findings := make([]Finding, 0, len(payload.Matches))
 	for _, match := range payload.Matches {
-		offending := segment(text, match.Offset, match.Length)
+		start := prepared.original(match.Offset)
+		end := prepared.original(match.Offset + match.Length)
+		if start < 0 || end <= start || prepared.inCode(start) {
+			continue
+		}
+		offending := segment(text, start, end-start)
 		replacements := make([]string, 0, len(match.Replacements))
 		for _, replacement := range match.Replacements {
 			replacements = append(replacements, replacement.Value)
@@ -141,9 +147,9 @@ func (client *Client) Check(ctx context.Context, text string) ([]Finding, error)
 		if client.suppressed(offending, replacements) {
 			continue
 		}
-		line, column := position(text, match.Offset)
+		line, column := position(text, start)
 		findings = append(findings, Finding{
-			Line: line, Column: column, Offset: match.Offset, Length: match.Length,
+			Line: line, Column: column, Offset: start, Length: end - start,
 			Rule: match.Rule.ID, Message: match.Message, Offending: offending,
 			Replacements: replacements,
 		})
@@ -264,6 +270,97 @@ func position(text string, offset int) (int, int) {
 		column++
 	}
 	return line, column
+}
+
+// codeSpan is one original code range that the prose check must ignore.
+type codeSpan struct {
+	start int
+	end   int
+}
+
+// preparedText is the prose view sent to the language check plus the map back to the original body.
+// Fenced blocks are dropped; inline code becomes the word "code"; the map keeps every finding on
+// real prose with its original offsets.
+type preparedText struct {
+	text    string
+	offsets []int
+	spans   []codeSpan
+}
+
+// prepareText removes code from the check without losing the offsets. The language check is about
+// prose; a command example or an identifier must not produce a prose finding.
+func prepareText(text string) preparedText {
+	var builder strings.Builder
+	offsets := make([]int, 0, len(text))
+	spans := make([]codeSpan, 0)
+	original := 0
+	copyBytes := func(start, end int) {
+		for index := start; index < end; index++ {
+			builder.WriteByte(text[index])
+			offsets = append(offsets, index)
+		}
+	}
+	inFence := false
+	for _, line := range strings.SplitAfter(text, "\n") {
+		lineStart := original
+		original += len(line)
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inFence = !inFence
+			builder.WriteByte('\n')
+			offsets = append(offsets, lineStart+len(line)-1)
+			continue
+		}
+		if inFence {
+			builder.WriteByte('\n')
+			offsets = append(offsets, lineStart+len(line)-1)
+			continue
+		}
+		for index := 0; index < len(line); {
+			if line[index] != '`' {
+				copyBytes(lineStart+index, lineStart+index+1)
+				index++
+				continue
+			}
+			end := index + 1
+			for end < len(line) && line[end] != '`' {
+				end++
+			}
+			if end >= len(line) {
+				copyBytes(lineStart+index, lineStart+index+1)
+				index++
+				continue
+			}
+			spans = append(spans, codeSpan{start: lineStart + index, end: lineStart + end + 1})
+			for _, character := range []byte("code") {
+				builder.WriteByte(character)
+				offsets = append(offsets, lineStart+index)
+			}
+			index = end + 1
+		}
+	}
+	offsets = append(offsets, len(text))
+	return preparedText{text: builder.String(), offsets: offsets, spans: spans}
+}
+
+// original maps one offset of the prepared text back to the body.
+func (prepared preparedText) original(index int) int {
+	if index < 0 {
+		return -1
+	}
+	if index >= len(prepared.offsets) {
+		return prepared.offsets[len(prepared.offsets)-1]
+	}
+	return prepared.offsets[index]
+}
+
+// inCode reports whether an original offset lies inside a replaced code span.
+func (prepared preparedText) inCode(index int) bool {
+	for _, span := range prepared.spans {
+		if index >= span.start && index < span.end {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadTerms reads the store-level term list. A missing file is an empty list.

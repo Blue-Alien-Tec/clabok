@@ -430,9 +430,82 @@ func TestRepoLayoutBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Files[0].Content,
-		"_Repository layout unavailable: no git work tree._") {
-		t.Fatalf("missing the no-git line:\n%s", result.Files[0].Content)
+	content = result.Files[0].Content
+	if strings.Contains(content, "Repository layout unavailable") || strings.Contains(content, "repolayout:50") {
+		t.Fatalf("a layout without git must be omitted:\n%s", content)
+	}
+	if !strings.Contains(content, "Body 11") {
+		t.Fatalf("the authored block of the same chapter must stay:\n%s", content)
+	}
+}
+
+func TestLayoutOnlyChapterOmittedWithoutGit(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children = append(manifest.Root.Children, &model.Node{
+			ID: 40, Kind: model.KindChapter, Title: "Generated Tree", Blocks: []model.ID{50},
+		})
+		manifest.SetMeta(50, model.BlockMeta{Type: "RepoLayout", Locked: true})
+		manifest.Layout = &model.LayoutConfig{Root: ".", Depth: 2}
+	})
+	if err := os.WriteFile(filepath.Join(scene.paths.BlocksDir, "50.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scene.service.ProjectDir = t.TempDir()
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Files[0].Content, "Generated Tree") {
+		t.Fatalf("a layout-only chapter must be omitted without git:\n%s", result.Files[0].Content)
+	}
+}
+
+func TestLayoutOnlyChapterRendersWithGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	project := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", project}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	runGit("init", "-q")
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children = append(manifest.Root.Children, &model.Node{
+			ID: 40, Kind: model.KindChapter, Title: "Generated Tree", Blocks: []model.ID{50},
+		})
+		manifest.SetMeta(50, model.BlockMeta{Type: "RepoLayout", Locked: true})
+		manifest.Layout = &model.LayoutConfig{Root: ".", Depth: 2}
+	})
+	if err := os.WriteFile(filepath.Join(scene.paths.BlocksDir, "50.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scene.service.ProjectDir = project
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Files[0].Content, "Generated Tree") {
+		t.Fatalf("a layout chapter must render with git:\n%s", result.Files[0].Content)
+	}
+}
+
+func TestEmptyIndexIsOmitted(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children = nil
+	})
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Files[0].Content, "## Index") {
+		t.Fatalf("an empty index must not render:\n%s", result.Files[0].Content)
 	}
 }
 
