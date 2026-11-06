@@ -2,6 +2,7 @@ package render
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -374,6 +375,64 @@ func TestLibraryBadges(t *testing.T) {
 	}
 	if strings.Contains(result.Files[0].Content, "img.shields.io") {
 		t.Fatal("a non-library book must not render badges")
+	}
+}
+
+func TestRepoLayoutBlock(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	project := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", project}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	runGit("init", "-q")
+	if err := os.MkdirAll(filepath.Join(project, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "src", "main.go"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "src/main.go")
+
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children[0].Blocks = append(manifest.Root.Children[0].Blocks, 50)
+		manifest.SetMeta(50, model.BlockMeta{Type: "RepoLayout", Locked: true})
+		manifest.Layout = &model.LayoutConfig{
+			Root: ".", Depth: 2, Notes: map[string]string{"src": "The Go sources."},
+		}
+	})
+	if err := os.WriteFile(filepath.Join(scene.paths.BlocksDir, "50.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scene.service.ProjectDir = project
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	for _, want := range []string{
+		"<!-- repolayout:50 -->",
+		"```text\nsrc/  The Go sources.\n```",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("missing %q in\n%s", want, content)
+		}
+	}
+
+	scene.service.ProjectDir = t.TempDir()
+	result, err = scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Files[0].Content,
+		"_Repository layout unavailable: no git work tree._") {
+		t.Fatalf("missing the no-git line:\n%s", result.Files[0].Content)
 	}
 }
 

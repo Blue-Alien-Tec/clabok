@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/config"
+	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
 	"github.com/Blue-Alien-Tec/clabok/internal/idspace"
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
@@ -30,12 +32,13 @@ func (payload getPayload) Text() string {
 }
 
 type writePayload struct {
-	DryRun  bool   `json:"dryRun"`
-	Block   string `json:"block"`
-	Created bool   `json:"created,omitempty"`
-	Changed bool   `json:"changed"`
-	Lines   int    `json:"lines"`
-	Bytes   int    `json:"bytes"`
+	DryRun  bool            `json:"dryRun"`
+	Block   string          `json:"block"`
+	Created bool            `json:"created,omitempty"`
+	Changed bool            `json:"changed"`
+	Lines   int             `json:"lines"`
+	Bytes   int             `json:"bytes"`
+	Grammar *grammar.Report `json:"grammar,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -50,15 +53,43 @@ func (payload writePayload) Text() string {
 	if payload.Created {
 		created = " (new block)"
 	}
-	return fmt.Sprintf("%sblock %s%s: %d line(s), %d byte(s)", prefix, payload.Block, created, payload.Lines, payload.Bytes)
+	line := fmt.Sprintf("%sblock %s%s: %d line(s), %d byte(s)",
+		prefix, payload.Block, created, payload.Lines, payload.Bytes)
+	if payload.Grammar != nil {
+		line += grammarText(*payload.Grammar)
+	}
+	return line
+}
+
+func grammarText(report grammar.Report) string {
+	var builder strings.Builder
+	if report.Degraded != "" {
+		fmt.Fprintf(&builder, "\ngrammar: %s", report.Degraded)
+	}
+	if len(report.Findings) > 0 {
+		fmt.Fprintf(&builder, "\ngrammar: %d finding(s)", len(report.Findings))
+		for _, finding := range report.Findings {
+			fmt.Fprintf(&builder, "\n  %d. line %d:%d %s: %s",
+				finding.Index, finding.Line, finding.Column, finding.Rule, finding.Message)
+		}
+	}
+	return builder.String()
+}
+
+func reportPtr(report grammar.Report) *grammar.Report {
+	if !report.Checked && report.Degraded == "" && len(report.Findings) == 0 {
+		return nil
+	}
+	return &report
 }
 
 type replacePayload struct {
-	DryRun       bool   `json:"dryRun"`
-	Block        string `json:"block"`
-	Replacements int    `json:"replacements"`
-	Lines        int    `json:"lines"`
-	Bytes        int    `json:"bytes"`
+	DryRun       bool            `json:"dryRun"`
+	Block        string          `json:"block"`
+	Replacements int             `json:"replacements"`
+	Lines        int             `json:"lines"`
+	Bytes        int             `json:"bytes"`
+	Grammar      *grammar.Report `json:"grammar,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -69,7 +100,11 @@ func (payload replacePayload) Text() string {
 	if payload.DryRun {
 		prefix = "dry run: "
 	}
-	return fmt.Sprintf("%sblock %s: %d replacement(s)", prefix, payload.Block, payload.Replacements)
+	line := fmt.Sprintf("%sblock %s: %d replacement(s)", prefix, payload.Block, payload.Replacements)
+	if payload.Grammar != nil {
+		line += grammarText(*payload.Grammar)
+	}
+	return line
 }
 
 type rowPayload struct {
@@ -212,6 +247,7 @@ func setCommand(name, summary string, op mode) *cli.Command {
 			return &cli.Result{Data: writePayload{
 				DryRun: env.Globals.DryRun, Block: result.Block.String(), Created: result.Created,
 				Changed: result.Changed, Lines: result.Lines, Bytes: result.Bytes,
+				Grammar: reportPtr(result.Grammar),
 			}}, nil
 		},
 	}
@@ -267,6 +303,7 @@ func replaceCommand() *cli.Command {
 			return &cli.Result{Data: replacePayload{
 				DryRun: env.Globals.DryRun, Block: result.Block.String(),
 				Replacements: result.Replacements, Lines: result.Lines, Bytes: result.Bytes,
+				Grammar: reportPtr(result.Grammar),
 			}}, nil
 		},
 	}
@@ -312,11 +349,18 @@ func listCommand() *cli.Command {
 }
 
 func newService(env *cli.Env) (*Service, *cli.Error) {
+	values, configErr := config.Load(env)
+	if configErr != nil {
+		return nil, configErr
+	}
 	life, layout, err := lifecycle.FromEnv(env)
 	if err != nil {
 		return nil, err
 	}
-	return NewWithAllocator(life, idspace.New(life, layout)), nil
+	service := NewWithAllocator(life, idspace.New(life, layout))
+	service.Grammar = grammar.NewGate(values.GrammarEndpoint,
+		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()))
+	return service, nil
 }
 
 func requireBook(raw string) (model.BookID, *cli.Error) {
@@ -415,6 +459,10 @@ func MapError(err error) *cli.Error {
 		case "body.expectation-failed":
 			return cli.Reject(bodyErr.Code, "%s", bodyErr.Message).
 				WithHint("count the matches with `pecia body get` and pass the exact number")
+		case "body.grammar-blocked":
+			return cli.Reject(bodyErr.Code, "%s", bodyErr.Message).
+				WithHint("fix the findings or set grammar.policy to warn in clabok.json").
+				WithDetails(bodyErr.Details)
 		}
 	}
 	return cli.AsError(err)

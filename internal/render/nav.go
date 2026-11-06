@@ -13,6 +13,15 @@ type Navigation struct {
 	// LibraryHref is the href of the library README relative to the current book, or "" when no
 	// library is registered.
 	LibraryHref string
+	// Books are the other registered books, in library order, with hrefs relative to the current
+	// book's README.
+	Books []BookLink
+}
+
+// BookLink is one direct sibling-book link in the navigation strip.
+type BookLink struct {
+	Title string
+	Href  string
 }
 
 const (
@@ -28,19 +37,27 @@ func navJoin(parts []string) string {
 	return strings.Join(parts, navSeparator)
 }
 
-// readmeNav returns the top and bottom navigation of a book README. The library jumps to its
-// Document Index; every other book jumps to the library and, in split modes, to its first document.
+// readmeNav returns the top and bottom navigation of a book README. Every registered book appears
+// as a direct link, in library order; the current book is not linked to itself. The library jumps to
+// its Document Index.
 func readmeNav(nav Navigation, index []IndexEntry, first string) (top, bottom string) {
-	if nav.IsLibrary {
-		if len(index) == 0 {
-			return "", ""
+	books := make([]string, 0, len(nav.Books))
+	for _, book := range nav.Books {
+		if book.Title == "" || book.Href == "" {
+			continue
 		}
-		return navDocumentLink, navDocumentLink
+		books = append(books, "["+plainTitle(book.Title)+"]("+book.Href+")")
 	}
-	topParts := make([]string, 0, 1)
+	if nav.IsLibrary {
+		parts := append(books, navDocumentLink)
+		text := navJoin(parts)
+		return text, text
+	}
+	topParts := make([]string, 0, 1+len(books))
 	if nav.LibraryHref != "" {
 		topParts = append(topParts, "["+navLibrary+"]("+nav.LibraryHref+")")
 	}
+	topParts = append(topParts, books...)
 	bottomParts := append([]string(nil), topParts...)
 	if first != "" {
 		bottomParts = append(bottomParts, "["+navFirst+"]("+first+")")

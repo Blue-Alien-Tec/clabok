@@ -22,6 +22,7 @@ type rollbackValues struct {
 
 type grammarValues struct {
 	Endpoint string `json:"endpoint"`
+	Policy   string `json:"policy"`
 }
 
 type daemonValues struct {
@@ -68,7 +69,8 @@ func (payload showPayload) Text() string {
 	fmt.Fprintf(&builder, "rollback: undo=%d book=%d\n",
 		payload.Values.Rollback.UndoLimit, payload.Values.Rollback.BookPointLimit)
 	fmt.Fprintf(&builder, "concurrency: %s\n", payload.Values.Concurrency.Mode)
-	fmt.Fprintf(&builder, "grammar: %s\n", payload.Values.Grammar.Endpoint)
+	fmt.Fprintf(&builder, "grammar: policy=%s endpoint=%s\n",
+		payload.Values.Grammar.Policy, payload.Values.Grammar.Endpoint)
 	fmt.Fprintf(&builder, "asciiui: %d override(s)\n", len(payload.Values.Asciiui.Types))
 	return builder.String()
 }
@@ -191,7 +193,7 @@ func runShow(env *cli.Env, args []string) (*cli.Result, error) {
 			Temp:     rootValues{Root: values.TempRoot},
 			Docs:     rootValues{Root: values.DocsRoot},
 			Rollback: rollbackValues{UndoLimit: values.UndoLimit, BookPointLimit: values.BookPointLimit},
-			Grammar:  grammarValues{Endpoint: values.GrammarEndpoint},
+			Grammar:  grammarValues{Endpoint: values.GrammarEndpoint, Policy: values.GrammarPolicy},
 			Concurrency: concurrencyValues{
 				Mode:   values.ConcurrencyMode,
 				Daemon: daemonValues{Socket: values.DaemonSocket},

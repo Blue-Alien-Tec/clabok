@@ -1,6 +1,7 @@
 package editorial
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -8,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/config"
+	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
 	"github.com/Blue-Alien-Tec/clabok/internal/idspace"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
@@ -21,17 +24,19 @@ func Register(registry *cli.Registry) {
 	registry.Add(asciiuiCommand())
 	registry.Add(statusCommand())
 	registry.Add(badgeCommand())
+	registry.Add(layoutCommand())
 }
 
 type payload struct {
-	DryRun  bool     `json:"dryRun"`
-	Book    string   `json:"book"`
-	Kind    string   `json:"kind"`
-	Target  string   `json:"target,omitempty"`
-	Block   string   `json:"block,omitempty"`
-	Parent  string   `json:"parent,omitempty"`
-	Order   []string `json:"order,omitempty"`
-	Changed bool     `json:"changed"`
+	DryRun  bool            `json:"dryRun"`
+	Book    string          `json:"book"`
+	Kind    string          `json:"kind"`
+	Target  string          `json:"target,omitempty"`
+	Block   string          `json:"block,omitempty"`
+	Parent  string          `json:"parent,omitempty"`
+	Order   []string        `json:"order,omitempty"`
+	Changed bool            `json:"changed"`
+	Grammar *grammar.Report `json:"grammar,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -46,7 +51,58 @@ func (result payload) Text() string {
 	if result.Target != "" {
 		line += " " + result.Target
 	}
+	if result.Grammar != nil {
+		line += grammarReportText(*result.Grammar)
+	}
 	return line + "\n"
+}
+
+// evaluateProse runs the grammar gate for an authored prose body. Every prose write path calls it,
+// so there is no way around the check; a server that cannot be started degrades to a skip report.
+func evaluateProse(env *cli.Env, text string) (grammar.Report, *cli.Error) {
+	if strings.TrimSpace(text) == "" {
+		return grammar.Report{}, nil
+	}
+	values, configErr := config.Load(env)
+	if configErr != nil {
+		return grammar.Report{}, configErr
+	}
+	_, layout, lifeErr := lifecycle.FromEnv(env)
+	if lifeErr != nil {
+		return grammar.Report{}, lifeErr
+	}
+	gate := grammar.NewGate(values.GrammarEndpoint,
+		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()))
+	return gate.Evaluate(context.Background(), 0, text), nil
+}
+
+func proseRejection(report grammar.Report) *cli.Error {
+	return cli.Reject("body.grammar-blocked", "the grammar check found %d finding(s)",
+		len(report.Findings)).
+		WithHint("fix the findings or set grammar.policy to warn in clabok.json").
+		WithDetails(report)
+}
+
+func grammarPtr(report grammar.Report) *grammar.Report {
+	if !report.Checked && report.Degraded == "" && len(report.Findings) == 0 {
+		return nil
+	}
+	return &report
+}
+
+func grammarReportText(report grammar.Report) string {
+	var builder strings.Builder
+	if report.Degraded != "" {
+		fmt.Fprintf(&builder, "\ngrammar: %s", report.Degraded)
+	}
+	if len(report.Findings) > 0 {
+		fmt.Fprintf(&builder, "\ngrammar: %d finding(s)", len(report.Findings))
+		for _, finding := range report.Findings {
+			fmt.Fprintf(&builder, "\n  %d. line %d:%d %s: %s",
+				finding.Index, finding.Line, finding.Column, finding.Rule, finding.Message)
+		}
+	}
+	return builder.String()
 }
 
 func proseCommand() *cli.Command {
@@ -78,6 +134,7 @@ func proseCommand() *cli.Command {
 				return nil, idErr
 			}
 			var prose string
+			var report grammar.Report
 			switch args[0] {
 			case "set":
 				value, textErr := readText(text, file)
@@ -85,6 +142,13 @@ func proseCommand() *cli.Command {
 					return nil, textErr
 				}
 				prose = value
+				report, textErr = evaluateProse(env, prose)
+				if textErr != nil {
+					return nil, textErr
+				}
+				if report.Blocked() {
+					return nil, proseRejection(report)
+				}
 			case "clear":
 				if text != "" || file != "" {
 					return nil, cli.Usage("usage.invalid-arguments",
@@ -102,7 +166,9 @@ func proseCommand() *cli.Command {
 			if proseErr != nil {
 				return nil, cli.AsError(proseErr)
 			}
-			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
+			result := payloadOf(receipt, env.Globals.DryRun)
+			result.Grammar = grammarPtr(report)
+			return &cli.Result{Data: result}, nil
 		},
 	}
 }
@@ -160,11 +226,20 @@ func regionCommand() *cli.Command {
 				if bodyErr != nil {
 					return nil, bodyErr
 				}
+				report, gateErr := evaluateProse(env, body)
+				if gateErr != nil {
+					return nil, gateErr
+				}
+				if report.Blocked() {
+					return nil, proseRejection(report)
+				}
 				receipt, footerErr := service.SetFooter(bookID, body, env.Globals.DryRun)
 				if footerErr != nil {
 					return nil, cli.AsError(footerErr)
 				}
-				return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
+				result := payloadOf(receipt, env.Globals.DryRun)
+				result.Grammar = grammarPtr(report)
+				return &cli.Result{Data: result}, nil
 			case "notes", "remove":
 				targetKind, kindErr := parseTargetKind(target)
 				if kindErr != nil {
@@ -188,11 +263,20 @@ func regionCommand() *cli.Command {
 				if bodyErr != nil {
 					return nil, bodyErr
 				}
+				report, gateErr := evaluateProse(env, body)
+				if gateErr != nil {
+					return nil, gateErr
+				}
+				if report.Blocked() {
+					return nil, proseRejection(report)
+				}
 				receipt, noteErr := service.AddNote(bookID, targetKind, id, body, env.Globals.DryRun)
 				if noteErr != nil {
 					return nil, cli.AsError(noteErr)
 				}
-				return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
+				result := payloadOf(receipt, env.Globals.DryRun)
+				result.Grammar = grammarPtr(report)
+				return &cli.Result{Data: result}, nil
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
 					"unknown region action %q; use set, clear, notes or remove", args[0])

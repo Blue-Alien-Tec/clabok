@@ -1,6 +1,6 @@
 # S13 — Grammar Gate and Term List
 
-Status: draft, not planned.
+Status: implemented (S13a–S13d delivered 2026-11-06; plan in [plans/13-grammar-and-terms.md](plans/13-grammar-and-terms.md)).
 Phase: 7. Depends on: S02 (grammar endpoint), S08 (prose-writing commands, temp). Blocks: none.
 PLAN refs: §3.14 (terms and grammar), §3.7 (LanguageTool daemon state stays in the OS temp
 directory), §3.11 (grammar endpoint), §6 (grammar gate on prose writes, confirmation flow).
@@ -47,7 +47,7 @@ tool-owned, confirmation-gated artifact so that no prose write and no term chang
 | 7 | Server lifecycle: `serve` starts or attaches to the one shared server, `server-stop`, `server-info`; concurrent checks share one server; idle timeout is configurable | §3.11, §3.14 |
 | 8 | Daemon state (state file, lock, log) stays in the OS temp directory and is never part of the store | §3.7 |
 | 9 | The gate runs inside the body-write path defined by S08; it never writes by itself | §3.14 |
-| 10 | Offline and failure behaviour is explicit and stable: an unreachable server yields a warning and the configured policy applies to a finding-free result | §3.14 |
+| 10 | Offline and failure behaviour is explicit and stable: an unreachable server triggers a start; if that is impossible the check degrades to a one-line warning and a finding-free result | §3.14 |
 
 ## 3. Out of scope
 
@@ -72,11 +72,12 @@ tool-owned, confirmation-gated artifact so that no prose write and no term chang
 
 ## 5. Acceptance criteria
 
-1. With policy `block`, a prose write that produces a finding is refused and the body is unchanged;
-   with `warn` it is written and the findings are reported on stderr/stdout per the output contract;
-   with `off` no check runs.
-2. With no server reachable, the configured policy still applies to a finding-free result and the
-   command reports the degraded check exactly once (no repeated warnings per finding).
+1. With policy `block`, a prose write on any prose path that produces a finding is refused and the
+   body is unchanged; with `warn` it is written and the findings are reported on stderr/stdout per
+   the output contract. There is no `off`.
+2. When the server is missing, the gate starts it and checks once more. If it cannot be started, the
+   command reports the degraded check exactly once (no repeated warnings per finding) and the write
+   proceeds as a finding-free result.
 3. Applying selected findings changes only the chosen findings, atomically, with a rollback package.
 4. `terms set` and `terms delete` never modify `terms.txt`; they return a pending ID and a reason.
 5. `terms commit` without the explicit confirmation fails; with it, the term list is updated once and

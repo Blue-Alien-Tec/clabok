@@ -76,6 +76,16 @@ func validate(document *file) []Issue {
 			})
 		}
 	}
+	if document.Grammar != nil && document.Grammar.Policy != nil {
+		policy := *document.Grammar.Policy
+		if policy != "block" && policy != "warn" {
+			issues = append(issues, Issue{
+				Code:    "config.invalid-policy",
+				Key:     "grammar.policy",
+				Message: "expected block or warn, got " + policy,
+			})
+		}
+	}
 	if document.Asciiui != nil {
 		names := make([]string, 0, len(document.Asciiui.Types))
 		for name := range document.Asciiui.Types {

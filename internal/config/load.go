@@ -27,6 +27,7 @@ type Values struct {
 	UndoLimit       int
 	BookPointLimit  int
 	GrammarEndpoint string
+	GrammarPolicy   string
 	ConcurrencyMode string
 	DaemonSocket    string
 	AsciiUITypes    map[string]string
@@ -135,6 +136,7 @@ func resolve(document *file, location Location, globals cli.Globals) *Values {
 		UndoLimit:       builtin.UndoLimit,
 		BookPointLimit:  builtin.BookPointLimit,
 		GrammarEndpoint: builtin.GrammarEndpoint,
+		GrammarPolicy:   builtin.GrammarPolicy,
 		ConcurrencyMode: builtin.ConcurrencyMode,
 		DaemonSocket:    builtin.DaemonSocket,
 		AsciiUITypes:    map[string]string{},
@@ -150,6 +152,9 @@ func resolve(document *file, location Location, globals cli.Globals) *Values {
 	}
 	if endpoint := document.grammarEndpoint(); endpoint != "" {
 		values.GrammarEndpoint = endpoint
+	}
+	if policy := document.grammarPolicy(); policy != "" {
+		values.GrammarPolicy = policy
 	}
 	if mode := document.concurrencyMode(); mode != "" {
 		values.ConcurrencyMode = mode

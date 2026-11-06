@@ -1,6 +1,6 @@
 # S12 Implementation Plan — Editorial State and Generated Content
 
-Status: planned (2026-11-05)
+Status: delivered (2026-11-06)
 Scope: [../12-editorial-state-and-generated-content.md](../12-editorial-state-and-generated-content.md)
 Normative source: [../../PLAN.md](../../PLAN.md) §3.14, §3.7, §3.11, §3.2.
 
@@ -23,15 +23,17 @@ Normative source: [../../PLAN.md](../../PLAN.md) §3.14, §3.7, §3.11, §3.2.
 | **S12d** | Badge detectors, overrides and the generated badge region | Repository facts |
 | **S12e** | Repository-layout block from `git ls-files`, per-path prose | Last; may be a follow-up if it does not fit |
 
-S12e is the explicitly deferred part of the scope. If it slips, S12 still ships the editorial core.
+S12e was the explicitly deferred part of the scope. It landed after the M6 close as the first task of
+the next planning segment, so S12 is complete without a second bump.
 
-Delivered: S12a (2026-11-05, corrected 2026-11-06), S12b and S12c (2026-11-06) and S12d (2026-11-06,
-the last slice of this planning segment).
+Delivered: S12a (2026-11-05, corrected 2026-11-06), S12b and S12c (2026-11-06), S12d (2026-11-06,
+the last slice of the M6 segment) and S12e (2026-11-06, as the first task of the next segment).
 
-Delivery decision (2026-11-06): S12d closes this segment, then M6 is closed with the `1.2.0-dev`
-bump. The deferred M5 `1.1.0-dev` bump stays deferred by the owner decision. S12e (repository-layout
-block) moves to the next planning segment as its first task; the plan already allows S12 to ship
-without it.
+Delivery decision (2026-11-06): M6 was closed with S12d and the `1.2.0-dev` bump. S12e
+(repository-layout block) landed immediately after as the first task of the next planning segment,
+without another bump, because the policy bumps only at a milestone close. It stays local and rides in
+the M7 commit (no commit without a bump). The deferred M5 `1.1.0-dev` bump stays deferred by the
+owner decision.
 
 ## 2. Decisions
 
@@ -147,9 +149,31 @@ pecia badge show   --book <id>
 
 ### D8 — Layout (S12e)
 
-Opt-in per book, generated from `git ls-files` (tracked paths only), with depth/include/exclude and
-per-path prose. No git repository is an informative no-op. The block is generated, not stored as
-authoring prose. This is the last slice and may move to a follow-up.
+Opt-in per book, generated from `git ls-files` (tracked paths only), with root, depth, exclusions and
+per-path prose. The block is generated, never stored as authoring prose.
+
+`Manifest.Layout` holds `root`, `depth` (0 means the default 2), `exclude` (repository-relative) and
+`notes` (one-line prose per repository-relative path). A locked `RepoLayout` block is the render
+anchor; validation pairs it with the config and rejects a second anchor.
+
+`internal/repolayout` runs `git ls-files -z` in the project directory, keeps the tracked directories
+below the root, prunes excluded branches, honours the depth and renders an indented directory tree:
+casefold-sorted, with the notes in an aligned column. Individual files are not listed, so the block
+shows the repository's shape rather than a file inventory. Labels are root-relative;
+excludes and notes are repository-relative. No git work tree is `ErrNoGit`; the renderer emits an
+informative line instead of failing. The tree is rendered inside a fenced `text` block between
+`repolayout` markers and participates in the input hash.
+
+Commands (open-only, dry-run aware):
+
+```
+pecia layout add     --book <id> --parent <node> --path <dir> [--depth <n>]
+pecia layout set     --book <id> [--path <dir>] [--depth <n>]
+pecia layout exclude --book <id> --path <p>
+pecia layout include --book <id> --path <p>
+pecia layout note    --book <id> --path <p> (--note <t> | --file <path|-> | --clear)
+pecia layout show    --book <id>
+```
 
 ### D9 — ASCII UI authoring (S12b)
 
@@ -220,7 +244,20 @@ a one-node override. `widget=` names a UI widget type, never a content or domain
 6. Tests: detector fixtures, model validation, structure lifecycle, render (library only, above the
    title, unresolved omitted) and the CLI end-to-end.
 
-## 7. Acceptance mapping
+## 7. S12e tasks
+
+1. `model.LayoutConfig` and `Manifest.Layout`; validation of paths, depth, notes and the single
+   `RepoLayout` anchor.
+2. `internal/repolayout`: tracked paths from `git ls-files`, root/depth/exclude filtering, the
+   deterministic tree with aligned notes, and `ErrNoGit`.
+3. `structure.AddRepoLayout`, `SetRepoLayout`, `RepoLayout` and the `repo-layout` step.
+4. `layout add|set|exclude|include|note|show` registered from `editorial`.
+5. Render the generated tree for a locked `RepoLayout` block inside a fenced `text` block; the tree
+   participates in the input hash; no git is an informative line.
+6. Tests: pure tree (depth, exclude, notes, order), no-git, a fixture git repository, model,
+   structure, render and the CLI end-to-end.
+
+## 8. Acceptance mapping
 
 | Scope criterion | Slice |
 |---|---|
@@ -237,7 +274,7 @@ a one-node override. `widget=` names a UI widget type, never a content or domain
 S12b (ASCII UI authoring on locked `UILayout` blocks) has no separate scope criterion; it closes the
 authoring gap of the existing ASCII UI render feature.
 
-## 8. Verification
+## 9. Verification
 
 `gofmt -l .`, `go vet ./...`, `go build ./...`, `go test ./... -count=1`; then `pecia sync --check`
 and `check` on both books. The version bump and CI remain deferred by the owner decision.

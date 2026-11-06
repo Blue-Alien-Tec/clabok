@@ -82,17 +82,31 @@ func (service *Service) CrossResolvers(registry *store.Registry, current model.B
 }
 
 // NavigationFor returns the navigation context of one book. fromDir is its output directory relative
-// to the project root.
-func NavigationFor(registry *store.Registry, current model.BookID, fromDir string) Navigation {
+// to the project root; index is the library Document Index in registry order.
+func NavigationFor(registry *store.Registry, index []IndexEntry, current model.BookID, fromDir string) Navigation {
+	if registry == nil {
+		return Navigation{}
+	}
 	library, ok := registry.Library()
 	if !ok {
 		return Navigation{}
 	}
+	currentEntry, _ := registry.Find(current)
+	currentTarget := path.Clean(path.Join(currentEntry.Path, "README.md"))
+	books := make([]BookLink, 0, len(index))
+	for _, entry := range index {
+		target := path.Clean(path.Join(library.Path, entry.Href))
+		if current != library.ID && target == currentTarget {
+			continue
+		}
+		books = append(books, BookLink{Title: entry.Title, Href: relHref(fromDir, target)})
+	}
 	if current == library.ID {
-		return Navigation{IsLibrary: true}
+		return Navigation{IsLibrary: true, Books: books}
 	}
 	return Navigation{
 		LibraryHref: relHref(fromDir, path.Join(library.Path, "README.md")),
+		Books:       books,
 	}
 }
 

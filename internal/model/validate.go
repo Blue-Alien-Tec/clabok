@@ -85,6 +85,7 @@ func (manifest *Manifest) Validate() *ValidationError {
 	validator.validateBlockMeta()
 	validator.validateStatus()
 	validator.validateBadges()
+	validator.validateLayout()
 	validator.validateSettings()
 	if len(validator.issues) == 0 {
 		return nil
@@ -440,6 +441,56 @@ func (validator *manifestValidator) validateBadges() {
 			continue
 		}
 		seen[badge.ID] = index
+	}
+}
+
+// validateLayout checks the generated repository-layout configuration and its single anchor.
+func (validator *manifestValidator) validateLayout() {
+	manifest := validator.manifest
+	blocks := make([]ID, 0, 1)
+	for _, id := range manifest.PlacedBlocks() {
+		if manifest.BlockType(id) == "RepoLayout" {
+			blocks = append(blocks, id)
+		}
+	}
+	if len(blocks) > 1 {
+		validator.add("model.layout-count", "blockMeta",
+			"a book has at most one RepoLayout block")
+	}
+	if len(blocks) > 0 && manifest.Layout == nil {
+		validator.add("model.layout-missing-config", "layout",
+			"a RepoLayout block needs a layout config")
+	}
+	if manifest.Layout == nil {
+		return
+	}
+	config := manifest.Layout
+	if !ValidRepoPath(config.Root) {
+		validator.add("model.invalid-layout", "layout.root", "invalid repository path %q", config.Root)
+	}
+	if config.Depth < 0 {
+		validator.add("model.invalid-layout", "layout.depth", "depth must not be negative")
+	}
+	for index, path := range config.Exclude {
+		if path == "" || path == "." || !ValidRepoPath(path) {
+			validator.add("model.invalid-layout", fmt.Sprintf("layout.exclude[%d]", index),
+				"invalid repository path %q", path)
+		}
+	}
+	paths := make([]string, 0, len(config.Notes))
+	for path := range config.Notes {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if path == "" || path == "." || !ValidRepoPath(path) {
+			validator.add("model.invalid-layout", "layout.notes["+path+"]",
+				"invalid repository path %q", path)
+			continue
+		}
+		if message := ValidateProse(config.Notes[path]); message != "" {
+			validator.add("model.invalid-layout", "layout.notes["+path+"]", "%s", message)
+		}
 	}
 }
 

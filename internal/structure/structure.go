@@ -76,6 +76,7 @@ type Step struct {
 	Value      string
 	Ref        *model.Ref
 	Badge      *model.Badge
+	Layout     *model.LayoutConfig
 }
 
 // mutation is the pure result of one step: the receipt plus the file effects the commit applies.
@@ -323,6 +324,48 @@ func (service *Service) Badges(book model.BookID) ([]model.Badge, error) {
 	return append([]model.Badge(nil), manifest.Badges...), nil
 }
 
+// AddRepoLayout creates the locked RepoLayout block and its configuration in one atomic step.
+func (service *Service) AddRepoLayout(book model.BookID, parent model.ID, config model.LayoutConfig, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.add-repo-layout", []Step{
+		{Op: "add-locked", Type: "RepoLayout", Placement: Append(parent)},
+		{Op: "repo-layout", Layout: &config},
+	}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// SetRepoLayout replaces the layout configuration of an existing RepoLayout block.
+func (service *Service) SetRepoLayout(book model.BookID, config model.LayoutConfig, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.repo-layout",
+		[]Step{{Op: "repo-layout", Layout: &config}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// RepoLayout reads the layout configuration and its anchor block. The book must be open.
+func (service *Service) RepoLayout(book model.BookID) (model.LayoutConfig, model.ID, error) {
+	_, manifest, err := service.load(book)
+	if err != nil {
+		return model.LayoutConfig{}, model.ZeroID, err
+	}
+	config := model.LayoutConfig{}
+	if manifest.Layout != nil {
+		config = *manifest.Layout.Clone()
+	}
+	anchor := model.ZeroID
+	for _, id := range manifest.PlacedBlocks() {
+		if manifest.BlockType(id) == "RepoLayout" {
+			anchor = id
+			break
+		}
+	}
+	return config, anchor, nil
+}
+
 // SetBlockType sets or clears the optional type of a block. A locked block rejects the change.
 func (service *Service) SetBlockType(book model.BookID, block model.ID, value string, dryRun bool) (Receipt, error) {
 	receipts, err := service.run(book, "block.type",
@@ -506,6 +549,8 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 		return applyBadge(manifest, step)
 	case "badge-remove":
 		return applyBadgeRemove(manifest, step)
+	case "repo-layout":
+		return applyRepoLayout(manifest, step)
 	case "rename":
 		return applyRename(manifest, step)
 	case "move":
@@ -945,6 +990,101 @@ func badgeIndex(manifest *model.Manifest, id string) int {
 		}
 	}
 	return -1
+}
+
+func applyRepoLayout(manifest *model.Manifest, step Step) (mutation, error) {
+	if step.Layout == nil {
+		return mutation{}, fail("structure.invalid-layout", "a layout config is required")
+	}
+	if !hasRepoLayoutBlock(manifest) {
+		return mutation{}, fail("structure.layout-missing-block",
+			"add the layout block with `pecia layout add` first")
+	}
+	config := model.LayoutConfig{
+		Root:  normalizeRepoPath(step.Layout.Root),
+		Depth: step.Layout.Depth,
+	}
+	if !model.ValidRepoPath(config.Root) {
+		return mutation{}, fail("structure.invalid-layout", "invalid root %q", step.Layout.Root)
+	}
+	if config.Depth < 0 {
+		return mutation{}, fail("structure.invalid-layout", "depth must not be negative")
+	}
+	seen := map[string]bool{}
+	for _, raw := range step.Layout.Exclude {
+		path := normalizeRepoPath(raw)
+		if path == "." || !model.ValidRepoPath(path) {
+			return mutation{}, fail("structure.invalid-layout", "invalid exclude %q", raw)
+		}
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		config.Exclude = append(config.Exclude, path)
+	}
+	sort.Strings(config.Exclude)
+	if len(step.Layout.Notes) > 0 {
+		config.Notes = make(map[string]string, len(step.Layout.Notes))
+		for raw, text := range step.Layout.Notes {
+			path := normalizeRepoPath(raw)
+			if path == "." || !model.ValidRepoPath(path) {
+				return mutation{}, fail("structure.invalid-layout", "invalid note path %q", raw)
+			}
+			prose := strings.TrimSpace(text)
+			if prose == "" {
+				continue
+			}
+			if message := model.ValidateProse(prose); message != "" {
+				return mutation{}, fail("structure.invalid-layout", "%s", message)
+			}
+			config.Notes[path] = prose
+		}
+	}
+	changed := !layoutEqual(manifest.Layout, &config)
+	manifest.Layout = &config
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Kind: "layout", Index: -1, Changed: changed,
+	}}, nil
+}
+
+func layoutEqual(left, right *model.LayoutConfig) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.Root != right.Root || left.Depth != right.Depth ||
+		len(left.Exclude) != len(right.Exclude) || len(left.Notes) != len(right.Notes) {
+		return false
+	}
+	for index := range left.Exclude {
+		if left.Exclude[index] != right.Exclude[index] {
+			return false
+		}
+	}
+	for path, text := range left.Notes {
+		if right.Notes[path] != text {
+			return false
+		}
+	}
+	return true
+}
+
+func hasRepoLayoutBlock(manifest *model.Manifest) bool {
+	for _, id := range manifest.PlacedBlocks() {
+		if manifest.BlockType(id) == "RepoLayout" {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRepoPath(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\\", "/")
+	value = strings.Trim(value, "/")
+	if value == "" {
+		return "."
+	}
+	return value
 }
 
 // requireLayoutBlock rejects a target that is not a placed, locked UILayout block.

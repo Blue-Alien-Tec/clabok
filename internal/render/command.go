@@ -212,12 +212,16 @@ func runSyncBook(env *cli.Env, book model.BookID, out string, check, write, prun
 		return nil, crossErr
 	}
 	service.CrossLink, service.CrossBook = cross.forBook(book, relativeDir(values.ProjectDir, target))
-	service.Navigation = NavigationFor(registry, book, relativeDir(values.ProjectDir, target))
-	if registered && entry.Kind == store.KindLibrary && catalog != nil {
-		index, indexErr := catalog(env)
+	var index []IndexEntry
+	if catalog != nil {
+		built, indexErr := catalog(env)
 		if indexErr != nil {
 			return nil, indexErr
 		}
+		index = built
+	}
+	service.Navigation = NavigationFor(registry, index, book, relativeDir(values.ProjectDir, target))
+	if registered && entry.Kind == store.KindLibrary {
 		service.LibraryIndex = index
 	}
 	dryRun := !write || env.Globals.DryRun
@@ -290,7 +294,7 @@ func RunLibrarySync(env *cli.Env, check, write, prune, force bool) (*cli.Result,
 			service.LibraryIndex = index
 		}
 		service.CrossLink, service.CrossBook = cross.forBook(entry.ID, entry.Path)
-		service.Navigation = NavigationFor(registry, entry.ID, entry.Path)
+		service.Navigation = NavigationFor(registry, index, entry.ID, entry.Path)
 		bookPayload := libraryBookPayload{ID: string(entry.ID), Path: entry.Path, Kind: entry.Kind}
 		syncResult, syncErr := service.Sync(entry.ID, target, options)
 		if syncErr != nil {

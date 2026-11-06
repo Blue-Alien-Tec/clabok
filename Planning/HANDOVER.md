@@ -5,23 +5,21 @@ Normative source: [../PLAN.md](../PLAN.md). Scope map: [README.md](README.md).
 
 ## 1. Where the project stands
 
-- Scopes S01–S12d are implemented. Milestones M1–M4 are delivered. M5 (S11) is implemented and
+- Scopes S01–S13 are implemented. Milestones M1–M4 are delivered. M5 (S11) is implemented and
   pushed on 2026-11-05 **without a version bump and without a CI run**, per the owner decision; the
-  `1.1.0-dev` bump and the resulting CI run are deferred. M6 (S12a–S12d) is implemented and the
-  `1.2.0-dev` bump is applied; the milestone commit/push is pending.
-- The version is `1.2.0-dev` in `internal/buildinfo/buildinfo.go` (M6 close). Changing it is the only
+  `1.1.0-dev` bump and the resulting CI run are deferred. M6 (S12a–S12d) is committed on `main`
+  (`249b3b5`, `1.2.0-dev`). M7 (S12e + S13) is implemented with the `1.3.0-dev` bump; this commit
+  closes it.
+- The version is `1.3.0-dev` in `internal/buildinfo/buildinfo.go` (M7 close). Changing it is the only
   CI trigger; do it only when the CI run is wanted.
 - The previous `HEAD` was `529151d` ("Record the M4 handover and pre-plan the remaining scopes");
-  the S11 work is the current commit on `origin/main`. The M4 commit is `5e9fe95`.
-- The working tree carries the S12 editorial work (uncommitted): `internal/editorial`, the prose,
-  region, asciiui, status and badge commands, manifest v3 with `Node.ProseBlock`, the status
-  vocabulary and assignment fields, declared repository badges, the table book index, and the ASCII
-  UI layout authoring with its open/close packing. The index-prose schema was corrected on
-  2026-11-06 (the text is a block, not a node field). `_CLABOK/` is the working store and is
-  gitignored.
-- Next: the S12d slice is done and the `1.2.0-dev` bump is applied. Commit/push the M6 milestone when
-  the owner asks; the deferred M5 `1.1.0-dev` bump stays deferred. S12e (repository-layout block) is
-  the first task of the next planning segment.
+  the S11 work is on `origin/main`. The M4 commit is `5e9fe95`; M6 is `249b3b5`.
+- The M7 commit carries the S12e and S13a–S13d work: the generated repository-layout block,
+  `internal/repolayout`, the `layout` command and its validation; the grammar client, findings,
+  `grammar.policy`, the body-write gate, `grammar check`, `grammar apply`, the term list and the
+  LanguageTool server lifecycle (`serve`, `server-info`, `server-stop`). `_CLABOK/` is the working
+  store and is gitignored.
+- Next: S14 (M8, `1.4.0-dev`).
 
 ## 2. Non-negotiable workflow rules
 
@@ -55,7 +53,7 @@ internal/buildinfo        Product, CLI, Version (ldflags target)
 internal/cli              envelope, exit codes 0/1/2/3, reject, hints, dry-run, Texter
 internal/jsonstrict       strict JSON (BOM, duplicate keys, trailing data, unknown fields)
 internal/config           clabok.json, discovery, precedence, six config commands
-internal/model            Manifest v2, nodes, regions, BlockMeta, IDs, validators
+internal/model            Manifest v3, nodes, regions, BlockMeta, status, badges, layout, validators
 internal/store            deterministic container, layout, registry v2, hashes, atomic writes
 internal/rollback         undo/book/body packages, caps, names
 internal/coordinator      shared/exclusive locks (file + AF_UNIX daemon), serve
@@ -71,13 +69,16 @@ internal/refs             title anchors, assigner, target resolution, [[id:N]]
 internal/render           pure renderer (open or closed source), sync, check, library-wide sync
 internal/library          registry defaults, book new/move/rename/unregister, Document Index
 internal/idspace          library ID ledger, global allocation, Peek
-internal/editorial        prose, region, asciiui, status and badge commands (footer, notes, layout)
+internal/editorial        prose, region, asciiui, status, badge and layout commands
+internal/repolayout       tracked-directory tree from git ls-files, depth/exclude, per-path notes
+internal/grammar          LanguageTool client, findings, policy gate, check, apply, server lifecycle
 ```
 
 ## 5. Contracts a new scope must use
 
-- **Model** (`internal/model`): `Manifest` version 2, `BlockMeta{Type, Locked}`, `Validate()`
-  aggregates `model.Issue`s. `Settings.Normalized()` fills index depth and output.
+- **Model** (`internal/model`): `Manifest` version 3 (`Node.ProseBlock`, `Node.Status`,
+  `BlockMeta.Status`, `Status`, `Badges`, `Layout`), `Validate()` aggregates `model.Issue`s.
+  `Settings.Normalized()` fills index depth and output.
 - **Store** (`internal/store`): `Container` (STORE, fixed time, checksums), `Layout`
   (`<root>/<id>/<id>.book`, `blocks/`, `layouts/`, `state.json`, `library.json`, `ids.json`,
   `terms.txt`, `open.json`, `rollback/<id>/`, `.coordinator/`), `Registry` **version 2**
@@ -110,8 +111,9 @@ internal/editorial        prose, region, asciiui, status and badge commands (foo
   Split modes with `toc` enabled emit a per-file `**Contents**` before the H1; link entries render
   as links. Navigation is visually DocEngine-identical: `← Previous`, `Index`, `Next →` at the top
   and bottom of split files with `---` rules (absent directions omitted); a book README carries
-  `[← Library]` plus `[First document →]` in split modes; the library README carries
-  `[Document Index](#document-index)` at the top and bottom. The footer sits above the bottom
+  `[← Library]`, every other registered book as a direct link (library order, the current book is
+  omitted) and `[First document →]` in split modes; the library README lists the registered books
+  before `[Document Index](#document-index)` at the top and bottom. The footer sits above the bottom
   navigation. The book index shape is derived from the data: a list without index prose and status,
   a `Document | Description` table once prose (or status) exists; a `part` starts a new table group,
   hierarchy is a `&emsp;` indent, and the per-file `**Contents**` ToC stays a list without prose.
@@ -152,6 +154,38 @@ internal/editorial        prose, region, asciiui, status and badge commands (foo
   above the H1, as shields.io images wrapped in their link; the resolved values are part of the
   input hash, so a `go.mod`, `LICENSE` or `.git/config` change dirties the README. `check` reports
   `badge-unresolved` as a non-blocking finding.
+- **Layout** (`internal/repolayout`, `internal/editorial/layout.go`): `Manifest.Layout` holds the
+  root, the depth (0 means 2), repository-relative excludes and one-line notes. A locked
+  `RepoLayout` block is the single anchor; `layout add|set|exclude|include|note|show` authors it.
+  Rendering runs `git ls-files -z` in the project directory, keeps the tracked directories only
+  (individual files are not listed), prunes excluded branches, honours the depth and emits the
+  directory tree inside a fenced `text` block between `repolayout` markers. The tree participates in
+  the input hash. No git work tree renders an informative line, never an error.
+- **Grammar** (`internal/grammar`): `Client` posts to `grammar.endpoint` (default
+  `http://127.0.0.1:8081/v2/check`, `en-US`, 5s timeout), maps the LanguageTool matches to
+  `Finding`s (index, block, line, column, offset, rule, message, replacements) and suppresses terms
+  case-insensitively. `Gate.Evaluate` applies `grammar.policy` (`block`, `warn`; there is no `off`)
+  and, when the endpoint is unreachable, starts the shared server on demand and checks once more;
+  only a start that is impossible degrades to a single `grammar check skipped: …` line. The gate runs
+  before the snapshot on every prose write path: `body set|append|prepend`, `body replace`,
+  `prose set`, `region set`, `region notes` and `layout note`. `block` rejects with
+  `body.grammar-blocked` and the findings as details. `grammar check` is read-only, covers a block, a
+  file and raw text, and also starts the server on demand. `grammar apply` re-checks the body,
+  applies `--all-safe` or the selected 1-based findings right-to-left by offset, writes once through
+  `SnapshotBody`/`WriteAtomic`, guards `--expect`, re-checks the result and reports the remaining
+  findings; every replacement is server-provided, so the repair path does not block a partial fix.
+  Terms live in `<store>/terms.txt` (one per line, case-insensitive, first form kept); requests live
+  in `<store>/pending-terms.json` and never touch the list. `terms set|delete` create a pending
+  request with a reason and return its id; `terms pending` lists; `terms commit --id --confirm` is
+  the only writer; `terms discard` removes a request; `terms list` reads the list. A finding is
+  suppressed when its offending text or a replacement contains a term case-insensitively.
+  `grammar serve` derives the base URL from the local endpoint, discovers the jar via `--jar`,
+  `CLABOK_LANGUAGETOOL_JAR`/`LANGUAGETOOL_JAR` or the `language_tool_python` caches, starts
+  `java -cp <jar> org.languagetool.server.HTTPServer --port <port> --allow-origin *` detached and
+  waits for `/v2/languages`; the state, lock and log live in `os.TempDir()/clabok-grammar`
+  (`CLABOK_GRAMMAR_STATE_DIR` overrides it in tests). `server-info` probes, `server-stop` stops the
+  recorded pid. `TestLanguageToolLive` starts the real server through `Serve` and is skipped when
+  Java or a jar is missing.
 - **Asciiui** (`internal/asciiui`): `Parse`, `Validate`, `Render`, `Defaults`, `Resolve`; specs live
   at `layouts/asciiui/<blockID>.asciiui` in the container/extract. The drawing is rendered inside a
   fenced `text` code block between the `asciiui` markers, so Markdown keeps its spaces and line
@@ -206,17 +240,15 @@ internal/editorial        prose, region, asciiui, status and badge commands (foo
   triggered. Bump to `1.1.0-dev` in a follow-up commit when the CI run is wanted.
 - **Apply has no content step.** S07b planned it for S08; S08 defined the body commands but no
   `apply` body op exists. Decide in a later scope; the gate (S13) must then cover it.
-- **Editorial state is partial.** S12a delivers manifest v3, index prose, the footer and notes
-  commands and their rendering; S12b delivers the ASCII UI authoring commands, the locked layout
-  anchor and the open/close packing of the specs; S12c delivers the status system, assignments, the
-  index status column and the legend; S12d delivers the badge detectors, the badge commands and the
-  library badge line. S12e remains: the repository-layout block, deferred to the next planning
-  segment.
+- **S12 is complete.** S12a–S12d are committed on `249b3b5` with the `1.2.0-dev` bump; S12e (the
+  repository-layout block) is part of the M7 commit.
 - **Index prose is a block reference.** S12a originally stored the prose as the node text field
   `Node.Prose`, which contradicts `PLAN.md` §3 statement 5. Since 2026-11-06 the text lives in a
   block referenced by `Node.ProseBlock` and owned by a `prose` region; the node carries no prose
   text. This is a schema correction, not a new feature.
-- **No grammar/terms code** exists; the body write path is the single hook point.
+- **S13 is complete.** S13a–S13d deliver the grammar client, the gate on every prose path,
+  `grammar check|apply`, the term list with the confirmation gate, and the LanguageTool server
+  lifecycle; the M7 commit carries them with the `1.3.0-dev` bump.
 - **No TUI** exists.
 - **Legacy books** under `Assets/Docs` are untouched and unreadable by CLABOK (no import/adopt).
 - The daemon never auto-starts; `pecia serve` is explicit. The grammar server (S13) is a separate
@@ -226,9 +258,8 @@ internal/editorial        prose, region, asciiui, status and badge commands (foo
 
 ## 8. Starting the next session
 
-1. Read this file, `README.md` §4/§4.1 and the S12 scope document.
-2. `git status` shows the uncommitted S12 work; `HEAD` is the S11 commit; `Version` is `1.2.0-dev`.
+1. Read this file, `README.md` §4/§4.1 and the S14 scope document (S13 is complete).
+2. `git status` is clean after the M7 push; `HEAD` is the M7 commit; `Version` is `1.3.0-dev`.
 3. Run `go test ./... -count=1` and `go build -o pecia.exe ./cmd/pecia`, then
    `.\pecia.exe sync --check` (must be clean).
-4. Commit and push the M6 milestone when the owner asks. S12e (repository-layout block) is the first
-   task of the next planning segment.
+4. Plan S14 (M8); its close bumps to `1.4.0-dev`.

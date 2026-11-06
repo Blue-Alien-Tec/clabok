@@ -10,6 +10,7 @@ import (
 
 func TestStatusEndToEnd(t *testing.T) {
 	directory := t.TempDir()
+	quietGrammar(t, directory)
 	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
 	runOK(t, directory, "book", "new", "--title", "Guide")
 	runOK(t, directory, "book", "open", "guide")

@@ -2,6 +2,9 @@ package editorial
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,8 +75,22 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
+// quietGrammar points the project at an empty fake server so tests that exercise editorial content
+// do not start the real LanguageTool. The production gate always checks; the fake keeps the suite
+// offline and fast.
+func quietGrammar(t *testing.T, directory string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"matches":[]}`)
+	}))
+	t.Cleanup(server.Close)
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+}
+
 func TestEditorialCommandsEndToEnd(t *testing.T) {
 	directory := t.TempDir()
+	quietGrammar(t, directory)
 	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
 	runOK(t, directory, "book", "new", "--title", "Guide")
 	runOK(t, directory, "book", "open", "guide")
@@ -105,6 +122,7 @@ func TestEditorialCommandsEndToEnd(t *testing.T) {
 
 func TestEditorialDryRunWritesNothing(t *testing.T) {
 	directory := t.TempDir()
+	quietGrammar(t, directory)
 	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
 	runOK(t, directory, "book", "new", "--title", "Guide")
 	runOK(t, directory, "book", "open", "guide")

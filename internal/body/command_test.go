@@ -2,6 +2,9 @@ package body
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +64,14 @@ func prepareProject(t *testing.T) string {
 	}
 	if code, _, stderr := run(t, directory, "book", "open", "fixture"); code != cli.ExitOK {
 		t.Fatalf("open failed: %s", stderr)
+	}
+	quiet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"matches":[]}`)
+	}))
+	t.Cleanup(quiet.Close)
+	if code, _, stderr := run(t, directory, "config", "set", "grammar.endpoint", quiet.URL); code != cli.ExitOK {
+		t.Fatalf("grammar endpoint failed: %s", stderr)
 	}
 	return directory
 }

@@ -2,6 +2,9 @@ package library
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +73,18 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// quietGrammar points the project at an empty fake server so a body write in an unrelated test
+// never starts the real LanguageTool. Production always checks; the fake keeps the suite offline.
+func quietGrammar(t *testing.T, directory string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"matches":[]}`)
+	}))
+	t.Cleanup(server.Close)
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
 }
 
 func layoutOf(t *testing.T, directory string) store.Layout {
@@ -312,6 +327,7 @@ func TestMoveKeepsIdentity(t *testing.T) {
 
 	runOK(t, directory, "book", "open", "alpha")
 	chapter := dataOf(t, runOK(t, directory, "add", "--book", "alpha", "--title", "Chapter"))["target"].(string)
+	quietGrammar(t, directory)
 	block := dataOf(t, runOK(t, directory, "body", "set", "--book", "alpha", "0",
 		"--parent", root, "--body", "Moved body"))["block"].(string)
 	reference := dataOf(t, runOK(t, directory, "body", "set", "--book", "alpha", "0",
@@ -338,6 +354,7 @@ func TestDuplicateOwnedIDsAreRejected(t *testing.T) {
 
 	runOK(t, directory, "book", "open", "alpha")
 	alphaRoot := readManifest(t, directory, "alpha").Root.ID.String()
+	quietGrammar(t, directory)
 	duplicate := dataOf(t, runOK(t, directory, "body", "set", "--book", "alpha", "0",
 		"--parent", alphaRoot, "--body", "Alpha body"))["block"].(string)
 
@@ -381,6 +398,7 @@ func TestCrossBookReferenceResolves(t *testing.T) {
 
 	runOK(t, directory, "book", "open", "beta")
 	chapter := dataOf(t, runOK(t, directory, "add", "--book", "beta", "--title", "Beta Chapter"))["target"].(string)
+	quietGrammar(t, directory)
 	block := dataOf(t, runOK(t, directory, "body", "set", "--book", "beta", "0",
 		"--parent", chapter, "--body", "Beta body"))["block"].(string)
 
@@ -395,6 +413,14 @@ func TestCrossBookReferenceResolves(t *testing.T) {
 	readme := readFile(t, filepath.Join(directory, "Docs", "alpha", "README.md"))
 	if !strings.Contains(readme, "[Beta Chapter](../beta/README.md#beta-chapter)") {
 		t.Fatalf("the cross-book reference did not expand:\n%s", readme)
+	}
+	if !strings.Contains(readme, "[← Library](../../README.md) · [Beta](../beta/README.md)") {
+		t.Fatalf("the sibling book is missing from the navigation:\n%s", readme)
+	}
+	libraryReadme := readFile(t, filepath.Join(directory, "README.md"))
+	if !strings.Contains(libraryReadme,
+		"[Alpha](Docs/alpha/README.md) · [Beta](Docs/beta/README.md) · [Document Index](#document-index)") {
+		t.Fatalf("the library navigation does not list the books:\n%s", libraryReadme)
 	}
 	runOK(t, directory, "check", "--book", "alpha")
 }
@@ -486,6 +512,7 @@ func TestSyncDriftGate(t *testing.T) {
 
 	root := readManifest(t, directory, "guide").Root.ID.String()
 	runOK(t, directory, "book", "open", "guide")
+	quietGrammar(t, directory)
 	runOK(t, directory, "body", "set", "--book", "guide", "0", "--parent", root, "--body", "Changed")
 	runOK(t, directory, "book", "close", "guide")
 

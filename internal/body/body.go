@@ -6,6 +6,7 @@
 package body
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/prose"
@@ -28,6 +30,7 @@ import (
 type Error struct {
 	Code    string
 	Message string
+	Details any
 }
 
 // Error returns the human message.
@@ -60,6 +63,7 @@ type WriteResult struct {
 	Lines   int
 	Bytes   int
 	Changed bool
+	Grammar grammar.Report
 }
 
 // Pair is one replacement.
@@ -82,6 +86,7 @@ type ReplaceResult struct {
 	Replacements int
 	Lines        int
 	Bytes        int
+	Grammar      grammar.Report
 }
 
 // Row is one entry of the body list.
@@ -99,6 +104,8 @@ type Row struct {
 type Service struct {
 	Lifecycle *lifecycle.Lifecycle
 	Structure *structure.Service
+	// Grammar is the prose gate. A nil gate skips the check.
+	Grammar *grammar.Gate
 }
 
 // New returns a body service. It uses the cooperative random allocator; production commands wire
@@ -229,8 +236,13 @@ func (service *Service) Replace(book model.BookID, block model.ID, pairs []Pair,
 		if err != nil {
 			return ReplaceResult{}, err
 		}
+		report := service.evaluate(block, next)
+		if report.Blocked() {
+			return ReplaceResult{}, grammarBlocked(report)
+		}
 		return ReplaceResult{
 			Block: block, Replacements: count, Lines: lineCount(next), Bytes: len(next),
+			Grammar: report,
 		}, nil
 	}
 
@@ -253,6 +265,10 @@ func (service *Service) Replace(book model.BookID, block model.ID, pairs []Pair,
 	if err != nil {
 		return ReplaceResult{}, err
 	}
+	report := service.evaluate(block, next)
+	if report.Blocked() {
+		return ReplaceResult{}, grammarBlocked(report)
+	}
 	if _, err := service.Lifecycle.SnapshotBody(book, block, "body.replace"); err != nil {
 		return ReplaceResult{}, err
 	}
@@ -261,6 +277,7 @@ func (service *Service) Replace(book model.BookID, block model.ID, pairs []Pair,
 	}
 	return ReplaceResult{
 		Block: block, Replacements: count, Lines: lineCount(next), Bytes: len(next),
+		Grammar: report,
 	}, nil
 }
 
@@ -277,6 +294,10 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 		if issues := CheckProse(result); len(issues) > 0 {
 			return WriteResult{}, headingError(issues)
 		}
+		report := service.evaluate(0, result)
+		if report.Blocked() {
+			return WriteResult{}, grammarBlocked(report)
+		}
 		if dryRun {
 			receipt, addErr := service.Structure.AddBlock(book, parent, true)
 			if addErr != nil {
@@ -284,7 +305,7 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 			}
 			return WriteResult{
 				Block: receipt.Target, Created: true, Changed: true,
-				Lines: lineCount(result), Bytes: len(result),
+				Lines: lineCount(result), Bytes: len(result), Grammar: report,
 			}, nil
 		}
 		receipt, addErr := service.Structure.AddBlock(book, parent, false)
@@ -297,6 +318,7 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 		return WriteResult{
 			Block: receipt.Target, Created: true, Changed: true,
 			Lines: lineCount(result), Bytes: len(result),
+			Grammar: withBlock(report, receipt.Target),
 		}, nil
 	}
 
@@ -319,8 +341,12 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 		if issues := CheckProse(next); len(issues) > 0 {
 			return WriteResult{}, headingError(issues)
 		}
+		report := service.evaluate(block, next)
+		if report.Blocked() {
+			return WriteResult{}, grammarBlocked(report)
+		}
 		return WriteResult{
-			Block: block, Changed: true, Lines: lineCount(next), Bytes: len(next),
+			Block: block, Changed: true, Lines: lineCount(next), Bytes: len(next), Grammar: report,
 		}, nil
 	}
 
@@ -343,6 +369,10 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 	if issues := CheckProse(next); len(issues) > 0 {
 		return WriteResult{}, headingError(issues)
 	}
+	report := service.evaluate(block, next)
+	if report.Blocked() {
+		return WriteResult{}, grammarBlocked(report)
+	}
 	if _, err := service.Lifecycle.SnapshotBody(book, block, reason); err != nil {
 		return WriteResult{}, err
 	}
@@ -350,8 +380,31 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 		return WriteResult{}, err
 	}
 	return WriteResult{
-		Block: block, Changed: true, Lines: lineCount(next), Bytes: len(next),
+		Block: block, Changed: true, Lines: lineCount(next), Bytes: len(next), Grammar: report,
 	}, nil
+}
+
+// evaluate runs the grammar gate. A service without a gate skips the check.
+func (service *Service) evaluate(block model.ID, text string) grammar.Report {
+	if service.Grammar == nil {
+		return grammar.Report{}
+	}
+	return service.Grammar.Evaluate(context.Background(), block, text)
+}
+
+func grammarBlocked(report grammar.Report) error {
+	return &Error{
+		Code:    "body.grammar-blocked",
+		Message: fmt.Sprintf("the grammar check found %d finding(s)", len(report.Findings)),
+		Details: report,
+	}
+}
+
+func withBlock(report grammar.Report, block model.ID) grammar.Report {
+	for index := range report.Findings {
+		report.Findings[index].Block = block
+	}
+	return report
 }
 
 func (service *Service) writeNewBlock(book model.BookID, block model.ID, text string) error {

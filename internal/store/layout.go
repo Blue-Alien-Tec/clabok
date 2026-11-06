@@ -11,6 +11,7 @@ const (
 	registryFile   = "library.json"
 	idsFile        = "ids.json"
 	termsFile      = "terms.txt"
+	pendingTerms   = "pending-terms.json"
 	rollbackDir    = "rollback"
 	containerExt   = ".book"
 	blocksDir      = "blocks"
@@ -47,6 +48,9 @@ func (layout Layout) IDs() string { return filepath.Join(layout.Root, idsFile) }
 
 // Terms is the term list file.
 func (layout Layout) Terms() string { return filepath.Join(layout.Root, termsFile) }
+
+// TermsPending is the pending term-request store.
+func (layout Layout) TermsPending() string { return filepath.Join(layout.Root, pendingTerms) }
 
 // RollbackRoot holds the rollback packages, grouped by book.
 func (layout Layout) RollbackRoot() string { return filepath.Join(layout.Root, rollbackDir) }

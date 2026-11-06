@@ -9,7 +9,10 @@ import (
 
 func TestReadmeNavigation(t *testing.T) {
 	libraryScene := newScene(t, model.OutputMonolith)
-	libraryScene.service.Navigation = Navigation{IsLibrary: true}
+	libraryScene.service.Navigation = Navigation{
+		IsLibrary: true,
+		Books:     []BookLink{{Title: "Guide", Href: "Docs/guide/README.md"}},
+	}
 	libraryScene.service.LibraryIndex = []IndexEntry{
 		{Title: "Guide", Href: "Docs/guide/README.md"},
 	}
@@ -18,24 +21,29 @@ func TestReadmeNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	library := result.Files[0].Content
-	if strings.Count(library, "[Document Index](#document-index)") != 2 {
-		t.Fatalf("the library navigation must appear at the top and bottom:\n%s", library)
+	libraryNav := "[Guide](Docs/guide/README.md) · [Document Index](#document-index)"
+	if strings.Count(library, libraryNav) != 2 {
+		t.Fatalf("the library navigation must list the books and appear twice:\n%s", library)
 	}
-	if strings.Index(library, "[Document Index](#document-index)") > strings.Index(library, "# Book") {
+	if strings.Index(library, libraryNav) > strings.Index(library, "# Book") {
 		t.Fatal("the top library navigation must precede the title")
 	}
 
 	bookScene := newScene(t, model.OutputMonolith)
-	bookScene.service.Navigation = Navigation{LibraryHref: "../README.md"}
+	bookScene.service.Navigation = Navigation{
+		LibraryHref: "../README.md",
+		Books:       []BookLink{{Title: "Other", Href: "../other/README.md"}},
+	}
 	bookResult, err := bookScene.service.Render("fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
 	book := bookResult.Files[0].Content
-	if strings.Count(book, "[← Library](../README.md)") != 2 {
-		t.Fatalf("the book navigation must appear at the top and bottom:\n%s", book)
+	bookNav := "[← Library](../README.md) · [Other](../other/README.md)"
+	if strings.Count(book, bookNav) != 2 {
+		t.Fatalf("the book navigation must list the sibling and appear twice:\n%s", book)
 	}
-	if !strings.Contains(book, "---\n\n[← Library](../README.md)") {
+	if !strings.Contains(book, "---\n\n[← Library](../README.md) · [Other](../other/README.md)") {
 		t.Fatalf("the bottom navigation needs its rule:\n%s", book)
 	}
 }

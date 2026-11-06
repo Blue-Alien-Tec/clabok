@@ -1,8 +1,8 @@
 # S12 — Editorial State and Generated Content
 
-Status: in progress (S12a delivered 2026-11-05; block-reference correction and index table
-2026-11-06; S12b, S12c and S12d delivered 2026-11-06, with S12d as the last slice of this segment;
-S12e deferred to the next planning segment as its first task).
+Status: implemented (S12a delivered 2026-11-05, corrected 2026-11-06; S12b–S12d delivered
+2026-11-06 and M6 closed with `1.2.0-dev`; S12e delivered 2026-11-06 as the first task of the
+next segment, without another bump).
 Phase: 7. Depends on: S09 (render placement contract). Blocks: none, but S11 is its first consumer.
 PLAN refs: §3.14 (regions, footer, notes, index prose, status, badges, layout block), §3 (4), §3 (5),
 §3.11 (asciiui types are an S09 concern).
@@ -41,7 +41,8 @@ Pre-planned decisions:
 - Status is opt-in per book, tool-owned vocabulary, rendered through the placement contract.
   Delivered 2026-11-06: the fixed vocabulary, the per-node/block assignment, the index status column
   and the legend; a disabled book renders nothing and keeps its assignments.
-- Badges and the layout block stay last; the layout block is deferred and uses `git ls-files`.
+- Badges and the layout block are delivered last; the layout block reads `git ls-files` and renders
+  a tracked-path tree through a locked `RepoLayout` anchor.
 
 ## 1. Goal
 
@@ -60,7 +61,7 @@ instead of hand-written markup, while removing the header and preamble regions f
 | 5 | Header and preamble are not part of the model and have no code path | §3.14 |
 | 6 | Status system: opt-in per book; the tool owns the vocabulary (states, assignments, legend, badges) and renders it structurally; authors never write the status markup | §3.14 |
 | 7 | Badges: generated from repository facts; an explicit message overrides the detector; the generated badge region is never hand-edited | §3.14 |
-| 8 | Layout block: opt-in, deferred from the first delivery; generated from `git ls-files`; without git it is a no-op, not an error; a command authors it from a path and a depth; endpoints and branches can be excluded afterwards; per-path prose is authored through commands; the generated tree is never hand-edited | §3.14 |
+| 8 | Layout block: opt-in; generated from `git ls-files`; without git it is a no-op, not an error; a command authors it from a path and a depth; endpoints and branches can be excluded afterwards; per-path prose is authored through commands; the generated tree is never hand-edited. Delivered 2026-11-06: a locked `RepoLayout` anchor, `layout add|set|exclude|include|note|show`, depth/exclusion filtering and an informative no-git line | §3.14 |
 | 9 | Index prose: each index entry can carry an optional block reference (`proseBlock`); the prose is a block in the block pool, authored through a command and rendered by S09 | §3.14, §3 (5) |
 | 10 | Every authored change goes through a command with dry-run, rollback and open-book requirement | §6 |
 | 11 | Removal of region content is a command; there is no hand editing of a generated file | §3.14 |

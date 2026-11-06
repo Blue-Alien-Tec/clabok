@@ -20,6 +20,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/prose"
 	"github.com/Blue-Alien-Tec/clabok/internal/refs"
+	"github.com/Blue-Alien-Tec/clabok/internal/repolayout"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
@@ -246,6 +247,13 @@ func (service *Service) render(source *bookSource) (Result, error) {
 		bodies[id] = "<!-- asciiui:" + id.String() + " -->\n```text\n" + drawing +
 			"\n```\n<!-- /asciiui:" + id.String() + " -->\n"
 	}
+	// A locked RepoLayout block is generated from the tracked repository tree.
+	for _, id := range manifest.PlacedBlocks() {
+		if !manifest.IsLocked(id) || manifest.BlockType(id) != "RepoLayout" {
+			continue
+		}
+		bodies[id] = service.repoLayoutBody(id, manifest)
+	}
 	mode := manifest.Settings.Output
 	badges := ""
 	if service.Navigation.IsLibrary {
@@ -280,6 +288,26 @@ func (service *Service) badgeMarkdown(manifest *model.Manifest) string {
 		images = append(images, image)
 	}
 	return strings.Join(images, " ")
+}
+
+// repoLayoutBody renders the generated repository tree for one locked RepoLayout block. A missing
+// git work tree is an informative no-op, never a render error.
+func (service *Service) repoLayoutBody(id model.ID, manifest *model.Manifest) string {
+	if manifest.Layout == nil {
+		return "_Repository layout is not configured._"
+	}
+	tree, err := repolayout.Render(service.ProjectDir, manifest.Layout)
+	if errors.Is(err, repolayout.ErrNoGit) {
+		return "_Repository layout unavailable: no git work tree._"
+	}
+	if err != nil {
+		return "_Repository layout unavailable._"
+	}
+	if tree == "" {
+		return "_No tracked files under the configured root._"
+	}
+	return "<!-- repolayout:" + id.String() + " -->\n```text\n" + tree +
+		"\n```\n<!-- /repolayout:" + id.String() + " -->\n"
 }
 
 func renderAsciiUI(specData []byte, id model.ID, overrides map[string]string) (string, error) {
@@ -1210,7 +1238,18 @@ func (service *Service) inputMembers(source *bookSource) map[string][]byte {
 		}
 		members["library-index"] = []byte(builder.String())
 	}
-	members["nav"] = []byte(fmt.Sprintf("%t|%s", service.Navigation.IsLibrary, service.Navigation.LibraryHref))
+	navHash := fmt.Sprintf("%t|%s", service.Navigation.IsLibrary, service.Navigation.LibraryHref)
+	for _, book := range service.Navigation.Books {
+		navHash += "|" + book.Title + "|" + book.Href
+	}
+	members["nav"] = []byte(navHash)
+	if source.manifest.Layout != nil {
+		tree, err := repolayout.Render(service.ProjectDir, source.manifest.Layout)
+		if err != nil {
+			tree = "unavailable"
+		}
+		members["repo-layout"] = []byte(tree)
+	}
 	if len(source.manifest.Badges) > 0 {
 		values, unresolved := badge.ResolveAll(service.ProjectDir, source.manifest.Badges)
 		var builder strings.Builder

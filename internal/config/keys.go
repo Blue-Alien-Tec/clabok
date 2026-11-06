@@ -128,6 +128,24 @@ var keyBindings = map[string]binding{
 			}
 		},
 	},
+	"grammar.policy": {
+		name:         "grammar.policy",
+		defaultValue: builtin.GrammarPolicy,
+		get: func(document *file) (any, bool) {
+			if document.Grammar != nil && document.Grammar.Policy != nil {
+				return *document.Grammar.Policy, true
+			}
+			return nil, false
+		},
+		set: func(document *file, raw string) *cli.Error {
+			return setPolicy(&document.Grammar, raw)
+		},
+		unset: func(document *file) {
+			if document.Grammar != nil {
+				document.Grammar.Policy = nil
+			}
+		},
+	},
 	"concurrency.mode": {
 		name:         "concurrency.mode",
 		defaultValue: builtin.ConcurrencyMode,
@@ -240,6 +258,22 @@ func setEndpoint(section **grammarSection, raw string) *cli.Error {
 		*section = &grammarSection{}
 	}
 	(*section).Endpoint = &value
+	return nil
+}
+
+func setPolicy(section **grammarSection, raw string) *cli.Error {
+	value := strings.TrimSpace(unquote(raw))
+	switch value {
+	case "block", "warn":
+	default:
+		return cli.Usage("usage.invalid-value",
+			"grammar.policy: expected block or warn, got %q", raw).
+			WithDetails(map[string]any{"key": "grammar.policy", "expected": []string{"block", "warn"}})
+	}
+	if *section == nil {
+		*section = &grammarSection{}
+	}
+	(*section).Policy = &value
 	return nil
 }
 

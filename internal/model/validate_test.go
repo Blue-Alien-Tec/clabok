@@ -275,6 +275,41 @@ func TestBadgeRules(t *testing.T) {
 	expectCode(t, manifest, "model.invalid-badge")
 }
 
+func TestLayoutRules(t *testing.T) {
+	manifest := validManifest()
+	manifest.BlockMeta = map[ID]BlockMeta{11: {Type: "RepoLayout", Locked: true}}
+	manifest.Layout = &LayoutConfig{
+		Root: ".", Depth: 2, Notes: map[string]string{"internal": "The Go sources."},
+	}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("valid layout: %v", err.Issues)
+	}
+
+	manifest = validManifest()
+	manifest.BlockMeta = map[ID]BlockMeta{11: {Type: "RepoLayout", Locked: true}}
+	expectCode(t, manifest, "model.layout-missing-config")
+
+	manifest = validManifest()
+	manifest.BlockMeta = map[ID]BlockMeta{11: {Type: "RepoLayout", Locked: true}}
+	manifest.Layout = &LayoutConfig{Root: "../escape", Depth: 2}
+	expectCode(t, manifest, "model.invalid-layout")
+
+	manifest = validManifest()
+	manifest.BlockMeta = map[ID]BlockMeta{11: {Type: "RepoLayout", Locked: true}}
+	manifest.Layout = &LayoutConfig{
+		Root: ".", Depth: 2, Notes: map[string]string{"internal": "line one\nline two"},
+	}
+	expectCode(t, manifest, "model.invalid-layout")
+
+	manifest = validManifest()
+	manifest.BlockMeta = map[ID]BlockMeta{
+		11: {Type: "RepoLayout", Locked: true},
+		12: {Type: "RepoLayout", Locked: true},
+	}
+	manifest.Layout = &LayoutConfig{Root: ".", Depth: 2}
+	expectCode(t, manifest, "model.layout-count")
+}
+
 func TestBlockMeta(t *testing.T) {
 	manifest := validManifest()
 	manifest.SetMeta(11, BlockMeta{Type: "UILayout", Locked: true})

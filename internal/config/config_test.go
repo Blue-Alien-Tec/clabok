@@ -139,6 +139,8 @@ func TestStrictDecoding(t *testing.T) {
 		{`{"version":1,"store":{"root":""}}`, "config.invalid"},
 		{`{"version":1,"concurrency":{"mode":"carrier"},"rollback":{"undoLimit":-1}}`, "config.invalid"},
 		{`{"version":1,"grammar":{"endpoint":"not a url"}}`, "config.invalid"},
+		{`{"version":1,"grammar":{"policy":"maybe"}}`, "config.invalid"},
+		{`{"version":1,"grammar":{"policy":"off"}}`, "config.invalid"},
 	}
 	for _, testCase := range cases {
 		project := t.TempDir()

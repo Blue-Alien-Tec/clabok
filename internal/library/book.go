@@ -435,11 +435,11 @@ func (service *Service) refreshLibrary(registry *store.Registry, force bool) *cl
 // the library book, the Document Index.
 func (service *Service) preparedRender(registry *store.Registry, entry store.RegistryEntry) (*render.Service, *cli.Error) {
 	renderService := service.renderService()
+	index, indexErr := service.Index()
+	if indexErr != nil {
+		return nil, indexErr
+	}
 	if entry.Kind == store.KindLibrary {
-		index, indexErr := service.Index()
-		if indexErr != nil {
-			return nil, indexErr
-		}
 		renderService.LibraryIndex = index
 	}
 	link, book, crossErr := renderService.CrossResolvers(registry, entry.ID, entry.Path)
@@ -447,7 +447,7 @@ func (service *Service) preparedRender(registry *store.Registry, entry store.Reg
 		return nil, crossErr
 	}
 	renderService.CrossLink, renderService.CrossBook = link, book
-	renderService.Navigation = render.NavigationFor(registry, entry.ID, entry.Path)
+	renderService.Navigation = render.NavigationFor(registry, index, entry.ID, entry.Path)
 	return renderService, nil
 }
 

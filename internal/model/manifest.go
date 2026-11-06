@@ -55,6 +55,7 @@ type Manifest struct {
 	BlockMeta map[ID]BlockMeta `json:"blockMeta,omitempty"`
 	Status    *StatusConfig    `json:"status,omitempty"`
 	Badges    []Badge          `json:"badges,omitempty"`
+	Layout    *LayoutConfig    `json:"layout,omitempty"`
 	Settings  Settings         `json:"settings"`
 }
 
@@ -191,6 +192,7 @@ func (manifest *Manifest) Clone() *Manifest {
 		clone.Badges = make([]Badge, len(manifest.Badges))
 		copy(clone.Badges, manifest.Badges)
 	}
+	clone.Layout = manifest.Layout.Clone()
 	if manifest.BlockMeta != nil {
 		clone.BlockMeta = make(map[ID]BlockMeta, len(manifest.BlockMeta))
 		for id, meta := range manifest.BlockMeta {
