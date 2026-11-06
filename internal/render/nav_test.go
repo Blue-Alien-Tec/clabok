@@ -80,3 +80,17 @@ func TestSplitFileNavigation(t *testing.T) {
 		t.Fatalf("the chapter README misses the first-document link:\n%s", readme)
 	}
 }
+
+func TestLibraryNavigationWithoutBooks(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	scene.service.Navigation = Navigation{IsLibrary: true}
+	scene.service.LibraryIndex = nil
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	if strings.Contains(content, "Document Index") {
+		t.Fatalf("an empty library must not link to a missing Document Index:\n%s", content)
+	}
+}

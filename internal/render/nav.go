@@ -49,7 +49,13 @@ func readmeNav(nav Navigation, index []IndexEntry, first string) (top, bottom st
 		books = append(books, "["+plainTitle(book.Title)+"]("+book.Href+")")
 	}
 	if nav.IsLibrary {
-		parts := append(books, navDocumentLink)
+		parts := append([]string(nil), books...)
+		if len(index) > 0 {
+			parts = append(parts, navDocumentLink)
+		}
+		if len(parts) == 0 {
+			return "", ""
+		}
 		text := navJoin(parts)
 		return text, text
 	}
