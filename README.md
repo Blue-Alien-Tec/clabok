@@ -3,7 +3,7 @@
 
 [CLABOK Planning](Docs/clabok-planning/README.md) · [UI Layout Demos](Docs/ui-layout-demos/README.md) · [Document Index](#document-index)
 
-[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 1.3.0-dev](https://img.shields.io/badge/version-1.3.0--dev-green?style=flat-square)
+[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 1.4.0-dev](https://img.shields.io/badge/version-1.4.0--dev-green?style=flat-square)
 
 # CLABOK
 
@@ -18,6 +18,7 @@ Status: initial Go scaffold. The full documentation is authored with CLABOK itse
 
 - [Checks](#checks)
 - [Repository Layout](#repository-layout)
+- [Terminal UI](#terminal-ui)
 
 ## Document Index
 
@@ -66,6 +67,7 @@ internal/           The Go packages, one directory per concern.
   config/
   coordinator/
   editorial/        Editorial commands for prose, regions, layouts, status and badges.
+  grammar/          Grammar client, policy gate, apply and server lifecycle.
   idspace/
   jsonstrict/
   library/
@@ -74,6 +76,7 @@ internal/           The Go packages, one directory per concern.
   prose/
   refs/
   render/           Pure renderers, navigation and sync.
+  repolayout/       Tracked-path tree for the layout block.
   rollback/
   search/
   store/            Container, store layout and atomic writes.
@@ -85,6 +88,27 @@ Planning/           Scope documents, implementation plans and the handover.
 scripts/            CI helper scripts.
 ```
 <!-- /repolayout:9199884908051995923 -->
+
+
+<a id="terminal-ui"></a>
+
+## Terminal UI
+
+The interactive terminal surface runs only in a terminal. It drives the same core operations as the
+command line; automation and CI keep using the CLI.
+
+```text
+up/down - move in the tree or body
+enter - focus the body pane
+e - edit the selected body
+n / N - new node / chapter (prompt)
+b - new block
+J / K - move the selected block down / up
+s / c - sync / check
+r - reload
+o / x - open / close the book
+q - quit
+```
 
 
 [CLABOK Planning](Docs/clabok-planning/README.md) · [UI Layout Demos](Docs/ui-layout-demos/README.md) · [Document Index](#document-index)

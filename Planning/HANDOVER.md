@@ -5,21 +5,24 @@ Normative source: [../PLAN.md](../PLAN.md). Scope map: [README.md](README.md).
 
 ## 1. Where the project stands
 
-- Scopes S01–S13 are implemented. Milestones M1–M4 are delivered. M5 (S11) is implemented and
+- Scopes S01–S14 are implemented. Milestones M1–M4 are delivered. M5 (S11) is implemented and
   pushed on 2026-11-05 **without a version bump and without a CI run**, per the owner decision; the
   `1.1.0-dev` bump and the resulting CI run are deferred. M6 (S12a–S12d) is committed on `main`
-  (`249b3b5`, `1.2.0-dev`). M7 (S12e + S13) is implemented with the `1.3.0-dev` bump; this commit
-  closes it.
-- The version is `1.3.0-dev` in `internal/buildinfo/buildinfo.go` (M7 close). Changing it is the only
+  (`249b3b5`, `1.2.0-dev`). M7 (S12e + S13) is committed on `main` (`db3cf3e`, `1.3.0-dev`). M8
+  (S14) is implemented with the `1.4.0-dev` bump; this commit closes the planned ladder.
+- The version is `1.4.0-dev` in `internal/buildinfo/buildinfo.go` (M8 close). Changing it is the only
   CI trigger; do it only when the CI run is wanted.
 - The previous `HEAD` was `529151d` ("Record the M4 handover and pre-plan the remaining scopes");
-  the S11 work is on `origin/main`. The M4 commit is `5e9fe95`; M6 is `249b3b5`.
+  the S11 work is on `origin/main`. The M4 commit is `5e9fe95`; M6 is `249b3b5`; M7 is `db3cf3e`.
 - The M7 commit carries the S12e and S13a–S13d work: the generated repository-layout block,
   `internal/repolayout`, the `layout` command and its validation; the grammar client, findings,
   `grammar.policy`, the body-write gate, `grammar check`, `grammar apply`, the term list and the
   LanguageTool server lifecycle (`serve`, `server-info`, `server-stop`). `_CLABOK/` is the working
   store and is gitignored.
-- Next: S14 (M8, `1.4.0-dev`).
+- The M8 commit carries S14a–S14c: `internal/tui` with the view model, intents, the key map, the
+  ASCII view renderer, the controller over the core services, the draft-preserving `$EDITOR`
+  handoff, `pecia tui` with the TTY guard and the rendered key-map chapter.
+- Next: the planned scope ladder is complete. New work starts with a new scope and plan.
 
 ## 2. Non-negotiable workflow rules
 
@@ -72,6 +75,7 @@ internal/idspace          library ID ledger, global allocation, Peek
 internal/editorial        prose, region, asciiui, status, badge and layout commands
 internal/repolayout       tracked-directory tree from git ls-files, depth/exclude, per-path notes
 internal/grammar          LanguageTool client, findings, policy gate, check, apply, server lifecycle
+internal/tui              view model, intents, ASCII renderer, controller and `pecia tui`
 ```
 
 ## 5. Contracts a new scope must use
@@ -249,7 +253,12 @@ internal/grammar          LanguageTool client, findings, policy gate, check, app
 - **S13 is complete.** S13a–S13d deliver the grammar client, the gate on every prose path,
   `grammar check|apply`, the term list with the confirmation gate, and the LanguageTool server
   lifecycle; the M7 commit carries them with the `1.3.0-dev` bump.
-- **No TUI** exists.
+- **S14 is complete.** S14a–S14c deliver the view model, intents, ASCII renderer, the controller over
+  the core services, the draft-preserving `$EDITOR` handoff, `pecia tui` with the TTY guard and the
+  key-map chapter. The M8 commit carries S14 and the `1.4.0-dev` bump.
+- **TUI interaction is line-based.** The loop reads one command per line and redraws the screen; raw
+  keypresses and a richer console experience are a follow-up. The CLI remains the complete
+  automation surface.
 - **Legacy books** under `Assets/Docs` are untouched and unreadable by CLABOK (no import/adopt).
 - The daemon never auto-starts; `pecia serve` is explicit. The grammar server (S13) is a separate
   process.
@@ -258,8 +267,8 @@ internal/grammar          LanguageTool client, findings, policy gate, check, app
 
 ## 8. Starting the next session
 
-1. Read this file, `README.md` §4/§4.1 and the S14 scope document (S13 is complete).
-2. `git status` is clean after the M7 push; `HEAD` is the M7 commit; `Version` is `1.3.0-dev`.
+1. Read this file, `README.md` §4/§4.1 and the remaining plan (S01–S14 are implemented).
+2. `git status` is clean after the M8 push; `HEAD` is the M8 commit; `Version` is `1.4.0-dev`.
 3. Run `go test ./... -count=1` and `go build -o pecia.exe ./cmd/pecia`, then
    `.\pecia.exe sync --check` (must be clean).
-4. Plan S14 (M8); its close bumps to `1.4.0-dev`.
+4. The planned scope ladder is complete; start new work with a new scope and plan.

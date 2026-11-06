@@ -156,7 +156,7 @@
 | &emsp;[Acceptance criteria](#acceptance-criteria-13) |  |
 | &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-13) |  |
 | &emsp;[Risks and constraints](#risks-and-constraints-13) |  |
-| [S14 — Terminal UI](#s14-terminal-ui) | ![status: Draft](https://img.shields.io/badge/status-Draft-lightgrey?style=flat-square) |
+| [S14 — Terminal UI](#s14-terminal-ui) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
 | &emsp;[Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05-4) |  |
 | &emsp;[Goal](#goal-14) |  |
 | &emsp;[In scope](#in-scope-14) |  |
@@ -935,7 +935,7 @@ session has to resolve.
 | [S11](11-library-docs-and-cutover.md) | Library book, documentation location and cut-over | 6 | S02, S04, S05, S09, S10 | implemented | §3.1, §3.6, §3.8, §3.9 |
 | [S12](12-editorial-state-and-generated-content.md) | Editorial state and generated content | 7 | S09 | implemented | §3.14, §3 (4) |
 | [S13](13-grammar-and-terms.md) | Grammar gate and term list | 7 | S02, S08 | implemented | §3.14 (terms and grammar), §3.11 (grammar endpoint) |
-| [S14](14-tui.md) | Terminal UI | 8 | S07, S08, S09 | draft | §3.10 (TUI) |
+| [S14](14-tui.md) | Terminal UI | 8 | S07, S08, S09 | implemented | §3.10 (TUI) |
 
 
 <a id="delivery-order-and-milestones"></a>
@@ -3014,7 +3014,7 @@ tool-owned, confirmation-gated artifact so that no prose write and no term chang
 
 <a id="s14-terminal-ui"></a>
 
-## S14 — Terminal UI ![status: Draft](https://img.shields.io/badge/status-Draft-lightgrey?style=flat-square)
+## S14 — Terminal UI ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: draft, not planned.
 Phase: 8. Depends on: S07 (structure), S08 (body), S09 (render), plus S05/S06 behaviour at runtime.

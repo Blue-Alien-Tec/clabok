@@ -52,7 +52,7 @@ session has to resolve.
 | [S11](11-library-docs-and-cutover.md) | Library book, documentation location and cut-over | 6 | S02, S04, S05, S09, S10 | implemented | §3.1, §3.6, §3.8, §3.9 |
 | [S12](12-editorial-state-and-generated-content.md) | Editorial state and generated content | 7 | S09 | implemented | §3.14, §3 (4) |
 | [S13](13-grammar-and-terms.md) | Grammar gate and term list | 7 | S02, S08 | implemented | §3.14 (terms and grammar), §3.11 (grammar endpoint) |
-| [S14](14-tui.md) | Terminal UI | 8 | S07, S08, S09 | draft | §3.10 (TUI) |
+| [S14](14-tui.md) | Terminal UI | 8 | S07, S08, S09 | implemented | §3.10 (TUI) |
 
 ## 4. Delivery order and milestones
 

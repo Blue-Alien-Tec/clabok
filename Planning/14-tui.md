@@ -1,6 +1,6 @@
 # S14 — Terminal UI
 
-Status: draft, not planned.
+Status: implemented (S14a–S14c delivered 2026-11-06; plan in [plans/14-tui.md](plans/14-tui.md)).
 Phase: 8. Depends on: S07 (structure), S08 (body), S09 (render), plus S05/S06 behaviour at runtime.
 Blocks: none.
 PLAN refs: §3.10 (TUI included, one tooling surface), §3.13 (package responsibility), §3.11 (config).
