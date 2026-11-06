@@ -210,6 +210,9 @@ func (life *Lifecycle) Close(id model.BookID) (CloseResult, error) {
 	if err := os.RemoveAll(paths.BlocksDir); err != nil {
 		return CloseResult{}, fail("lifecycle.write-failed", "%v", err)
 	}
+	if err := os.RemoveAll(paths.LayoutsDir); err != nil {
+		return CloseResult{}, fail("lifecycle.write-failed", "%v", err)
+	}
 	if err := os.Remove(filepath.Join(paths.Dir, ManifestMember)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return CloseResult{}, fail("lifecycle.write-failed", "%v", err)
 	}
@@ -399,6 +402,15 @@ func (life *Lifecycle) buildContainer(paths store.BookPaths) (*store.Container, 
 	}
 	for id, body := range book.Bodies {
 		if err := container.Write("blocks/"+id.String()+".md", []byte(body)); err != nil {
+			return nil, err
+		}
+	}
+	layouts, layoutErr := collectLayouts(paths)
+	if layoutErr != nil {
+		return nil, layoutErr
+	}
+	for name, data := range layouts {
+		if err := container.Write(name, data); err != nil {
 			return nil, err
 		}
 	}
@@ -599,11 +611,50 @@ func CollectMembers(paths store.BookPaths) (map[string][]byte, error) {
 		}
 		members["blocks/"+entry.Name()] = data
 	}
+	layouts, layErr := collectLayouts(paths)
+	if layErr != nil {
+		return nil, layErr
+	}
+	for name, data := range layouts {
+		members[name] = data
+	}
+	return members, nil
+}
+
+// collectLayouts reads the extracted ASCII UI specs as container members under
+// layouts/asciiui/<blockID>.asciiui.
+func collectLayouts(paths store.BookPaths) (map[string][]byte, error) {
+	members := map[string][]byte{}
+	directory := filepath.Join(paths.LayoutsDir, "asciiui")
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return members, nil
+		}
+		return nil, fail("lifecycle.read-failed", "%v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".asciiui") {
+			continue
+		}
+		id, parseErr := model.ParseID(strings.TrimSuffix(entry.Name(), ".asciiui"))
+		if parseErr != nil || id.IsZero() {
+			continue
+		}
+		data, fileErr := os.ReadFile(filepath.Join(directory, entry.Name()))
+		if fileErr != nil {
+			return nil, fail("lifecycle.read-failed", "%v", fileErr)
+		}
+		members["layouts/asciiui/"+entry.Name()] = data
+	}
 	return members, nil
 }
 
 func replaceExtracted(paths store.BookPaths, members map[string][]byte) error {
 	if err := os.RemoveAll(paths.BlocksDir); err != nil {
+		return fail("lifecycle.write-failed", "%v", err)
+	}
+	if err := os.RemoveAll(paths.LayoutsDir); err != nil {
 		return fail("lifecycle.write-failed", "%v", err)
 	}
 	if err := os.Remove(filepath.Join(paths.Dir, ManifestMember)); err != nil && !errors.Is(err, os.ErrNotExist) {

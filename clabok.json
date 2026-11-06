@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "asciiui": {
+    "types": {
+      "button": "UIButton",
+      "image": "UIImage",
+      "label": "UILabel"
+    }
+  }
+}

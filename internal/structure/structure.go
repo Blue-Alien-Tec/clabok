@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,7 @@ func Append(parent model.ID) Placement {
 type Receipt struct {
 	Book    model.BookID
 	Target  model.ID
+	Block   model.ID
 	Kind    string
 	Parent  model.ID
 	Index   int
@@ -63,15 +65,17 @@ type Receipt struct {
 
 // Step is one declarative mutation.
 type Step struct {
-	Op        string
-	Title     string
-	Type      string
-	Target    model.ID
-	Placement Placement
-	Recursive bool
-	Key       string
-	Value     string
-	Ref       *model.Ref
+	Op         string
+	Title      string
+	Type       string
+	TargetKind model.TargetKind
+	Target     model.ID
+	Placement  Placement
+	Recursive  bool
+	Key        string
+	Value      string
+	Ref        *model.Ref
+	Badge      *model.Badge
 }
 
 // mutation is the pure result of one step: the receipt plus the file effects the commit applies.
@@ -79,6 +83,8 @@ type mutation struct {
 	receipt Receipt
 	created []model.ID
 	removed []model.ID
+	bodies  map[model.ID]string
+	layouts map[model.ID][]byte
 }
 
 // Service applies structure mutations to open books.
@@ -127,6 +133,57 @@ func (service *Service) AddLink(book model.BookID, title string, ref *model.Ref,
 	return receipts[0], nil
 }
 
+// SetProse sets or clears the one-line index prose of a node. The text lives in a block that the
+// node references through ProseBlock; an empty text removes the block.
+func (service *Service) SetProse(book model.BookID, node model.ID, prose string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.prose",
+		[]Step{{Op: "prose", Target: node, Value: prose}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// SetFooter replaces the book footer with one block. An empty body clears the footer.
+func (service *Service) SetFooter(book model.BookID, body string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.footer",
+		[]Step{{Op: "footer", Value: body}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// ClearFooter removes the footer region and its block.
+func (service *Service) ClearFooter(book model.BookID, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.footer-clear",
+		[]Step{{Op: "footer-clear"}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// AddNote appends a note block to the target's notes region.
+func (service *Service) AddNote(book model.BookID, targetKind model.TargetKind, target model.ID, body string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.note",
+		[]Step{{Op: "note", TargetKind: targetKind, Target: target, Value: body}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// RemoveNote removes the whole notes region of a target.
+func (service *Service) RemoveNote(book model.BookID, targetKind model.TargetKind, target model.ID, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.note-remove",
+		[]Step{{Op: "note-remove", TargetKind: targetKind, Target: target}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
 // AddLockedBlock creates a block with a type and locks it. It is the primitive for tool-owned
 // content such as the ASCII UI layout anchor.
 func (service *Service) AddLockedBlock(book model.BookID, parent model.ID, blockType string, dryRun bool) (Receipt, error) {
@@ -136,6 +193,134 @@ func (service *Service) AddLockedBlock(book model.BookID, parent model.ID, block
 		return Receipt{}, err
 	}
 	return receipts[0], nil
+}
+
+// AddLayoutBlock creates a locked UILayout block and stores its ASCII UI spec in the same atomic
+// step, so a layout anchor never exists without its drawing.
+func (service *Service) AddLayoutBlock(book model.BookID, parent model.ID, spec string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.add-layout",
+		[]Step{{Op: "add-layout", Type: "UILayout", Placement: Append(parent), Value: spec}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// SetLayout replaces the ASCII UI spec of an existing locked UILayout block.
+func (service *Service) SetLayout(book model.BookID, block model.ID, spec string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.layout",
+		[]Step{{Op: "layout", Target: block, Value: spec}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// RemoveLayout removes a locked UILayout block together with its spec.
+func (service *Service) RemoveLayout(book model.BookID, block model.ID, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.layout-remove",
+		[]Step{{Op: "layout-remove", Target: block}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// SetStatus assigns an editorial state to a node or a block. An empty state clears it.
+func (service *Service) SetStatus(book model.BookID, target model.ID, state string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.status",
+		[]Step{{Op: "status", Target: target, Value: state}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// SetStatusEnabled switches the status system of a book on or off. Assignments stay; a disabled
+// system renders nothing and ignores them.
+func (service *Service) SetStatusEnabled(book model.BookID, enabled, dryRun bool) (Receipt, error) {
+	value := "off"
+	if enabled {
+		value = "on"
+	}
+	receipts, err := service.run(book, "struct.status-config",
+		[]Step{{Op: "status-config", Value: value}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// StatusAssignment is one assigned state.
+type StatusAssignment struct {
+	ID     model.ID
+	Target string
+	Status string
+}
+
+// StatusSummary is the read-only view of the status system.
+type StatusSummary struct {
+	Enabled     bool
+	Assignments []StatusAssignment
+}
+
+// StatusSummary reads the current status configuration. The book must be open.
+func (service *Service) StatusSummary(book model.BookID) (StatusSummary, error) {
+	_, manifest, err := service.load(book)
+	if err != nil {
+		return StatusSummary{}, err
+	}
+	summary := StatusSummary{Enabled: manifest.StatusEnabled()}
+	manifest.Walk(func(node *model.Node, depth int, parent *model.Node) bool {
+		if node.Status != "" {
+			summary.Assignments = append(summary.Assignments, StatusAssignment{
+				ID: node.ID, Target: "node", Status: node.Status,
+			})
+		}
+		return true
+	})
+	blocks := make([]model.ID, 0, len(manifest.BlockMeta))
+	for id := range manifest.BlockMeta {
+		blocks = append(blocks, id)
+	}
+	sort.Slice(blocks, func(left, right int) bool { return blocks[left] < blocks[right] })
+	for _, id := range blocks {
+		if meta := manifest.BlockMeta[id]; meta.Status != "" {
+			summary.Assignments = append(summary.Assignments, StatusAssignment{
+				ID: id, Target: "block", Status: meta.Status,
+			})
+		}
+	}
+	return summary, nil
+}
+
+// SetBadge adds or replaces a badge of the library README. The badge id is the key.
+func (service *Service) SetBadge(book model.BookID, badge model.Badge, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.badge",
+		[]Step{{Op: "badge", Badge: &badge}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// RemoveBadge removes a declared badge by its id.
+func (service *Service) RemoveBadge(book model.BookID, id string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.badge-remove",
+		[]Step{{Op: "badge-remove", Value: id}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// Badges reads the declared badges. The book must be open.
+func (service *Service) Badges(book model.BookID) ([]model.Badge, error) {
+	_, manifest, err := service.load(book)
+	if err != nil {
+		return nil, err
+	}
+	return append([]model.Badge(nil), manifest.Badges...), nil
 }
 
 // SetBlockType sets or clears the optional type of a block. A locked block rejects the change.
@@ -220,6 +405,8 @@ func (service *Service) run(book model.BookID, reason string, steps []Step, dryR
 	ids := newIDs(manifest, allocator)
 	receipts := make([]Receipt, 0, len(steps))
 	var created, removed []model.ID
+	bodies := make(map[model.ID]string)
+	layouts := make(map[model.ID][]byte)
 	for _, step := range steps {
 		result, stepErr := step.apply(manifest, ids)
 		if stepErr != nil {
@@ -228,6 +415,12 @@ func (service *Service) run(book model.BookID, reason string, steps []Step, dryR
 		receipts = append(receipts, result.receipt)
 		created = append(created, result.created...)
 		removed = append(removed, result.removed...)
+		for id, body := range result.bodies {
+			bodies[id] = body
+		}
+		for id, spec := range result.layouts {
+			layouts[id] = spec
+		}
 	}
 	if err := validate(manifest); err != nil {
 		return nil, err
@@ -242,16 +435,44 @@ func (service *Service) run(book model.BookID, reason string, steps []Step, dryR
 		if err := os.Remove(bodyPath(paths, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fail("structure.write-failed", "%v", err)
 		}
+		if err := os.Remove(layoutPath(paths, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fail("structure.write-failed", "%v", err)
+		}
 	}
 	if err := service.save(paths, manifest); err != nil {
 		return nil, err
 	}
-	if len(created) > 0 {
+	for _, id := range created {
+		if _, exists := bodies[id]; !exists {
+			bodies[id] = ""
+		}
+	}
+	if len(bodies) > 0 {
 		if err := os.MkdirAll(paths.BlocksDir, 0o755); err != nil {
 			return nil, fail("structure.write-failed", "%v", err)
 		}
-		for _, id := range created {
-			if err := os.WriteFile(bodyPath(paths, id), nil, 0o644); err != nil {
+		writeIDs := make([]model.ID, 0, len(bodies))
+		for id := range bodies {
+			writeIDs = append(writeIDs, id)
+		}
+		sort.Slice(writeIDs, func(left, right int) bool { return writeIDs[left] < writeIDs[right] })
+		for _, id := range writeIDs {
+			if err := os.WriteFile(bodyPath(paths, id), []byte(bodies[id]), 0o644); err != nil {
+				return nil, fail("structure.write-failed", "%v", err)
+			}
+		}
+	}
+	if len(layouts) > 0 {
+		if err := os.MkdirAll(filepath.Join(paths.LayoutsDir, "asciiui"), 0o755); err != nil {
+			return nil, fail("structure.write-failed", "%v", err)
+		}
+		layoutIDs := make([]model.ID, 0, len(layouts))
+		for id := range layouts {
+			layoutIDs = append(layoutIDs, id)
+		}
+		sort.Slice(layoutIDs, func(left, right int) bool { return layoutIDs[left] < layoutIDs[right] })
+		for _, id := range layoutIDs {
+			if err := os.WriteFile(layoutPath(paths, id), layouts[id], 0o644); err != nil {
 				return nil, fail("structure.write-failed", "%v", err)
 			}
 		}
@@ -271,6 +492,20 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 		return applySetType(manifest, step)
 	case "add-locked":
 		return applyAddLockedBlock(manifest, ids, step)
+	case "add-layout":
+		return applyAddLayout(manifest, ids, step)
+	case "layout":
+		return applySetLayout(manifest, step)
+	case "layout-remove":
+		return applyRemoveLayout(manifest, step)
+	case "status":
+		return applyStatus(manifest, step)
+	case "status-config":
+		return applyStatusConfig(manifest, step)
+	case "badge":
+		return applyBadge(manifest, step)
+	case "badge-remove":
+		return applyBadgeRemove(manifest, step)
 	case "rename":
 		return applyRename(manifest, step)
 	case "move":
@@ -279,6 +514,16 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 		return applyRemove(manifest, step)
 	case "setting":
 		return applySetting(manifest, step)
+	case "prose":
+		return applyProse(manifest, ids, step)
+	case "footer":
+		return applyFooter(manifest, ids, step)
+	case "footer-clear":
+		return applyFooterClear(manifest, step)
+	case "note":
+		return applyNote(manifest, ids, step)
+	case "note-remove":
+		return applyNoteRemove(manifest, step)
 	default:
 		return mutation{}, fail("structure.unknown-op", "unknown step operation %q", step.Op)
 	}
@@ -352,6 +597,210 @@ func applyAddLink(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, 
 	}}, nil
 }
 
+func applyProse(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
+	node, ok := manifest.FindNode(step.Target)
+	if !ok {
+		return mutation{}, fail("structure.unknown-target", "node %s does not exist", step.Target)
+	}
+	text := strings.TrimSpace(step.Value)
+	if message := model.ValidateProse(text); message != "" {
+		return mutation{}, fail("structure.invalid-prose", "%s", message)
+	}
+	target := model.Target{Kind: model.TargetNode, ID: node.ID}
+	region := findRegion(manifest, model.RegionProse, target)
+	if text == "" {
+		if region == nil {
+			changed := !node.ProseBlock.IsZero()
+			node.ProseBlock = model.ZeroID
+			return mutation{receipt: Receipt{
+				Book: manifest.ID, Target: node.ID, Kind: "prose", Index: -1, Changed: changed,
+			}}, nil
+		}
+		removed := append([]model.ID(nil), region.Blocks...)
+		node.ProseBlock = model.ZeroID
+		removeRegion(manifest, region)
+		return mutation{
+			receipt: Receipt{Book: manifest.ID, Target: node.ID, Kind: "prose", Index: -1, Changed: true},
+			removed: removed,
+		}, nil
+	}
+	var blockID model.ID
+	var created, removed []model.ID
+	if region == nil {
+		regionID, err := ids.next()
+		if err != nil {
+			return mutation{}, err
+		}
+		blockID, err = ids.next()
+		if err != nil {
+			return mutation{}, err
+		}
+		region = &model.Region{ID: regionID, Kind: model.RegionProse, Target: target, Blocks: []model.ID{blockID}}
+		manifest.Regions = append(manifest.Regions, region)
+		created = []model.ID{blockID}
+	} else {
+		if len(region.Blocks) == 0 {
+			nextID, err := ids.next()
+			if err != nil {
+				return mutation{}, err
+			}
+			blockID = nextID
+			region.Blocks = []model.ID{blockID}
+			created = []model.ID{blockID}
+		} else {
+			blockID = region.Blocks[0]
+			removed = append(removed, region.Blocks[1:]...)
+			region.Blocks = []model.ID{blockID}
+		}
+	}
+	node.ProseBlock = blockID
+	return mutation{
+		receipt: Receipt{
+			Book: manifest.ID, Target: node.ID, Block: blockID, Kind: "prose",
+			Parent: region.ID, Index: 0, Order: []model.ID{blockID}, Changed: true,
+		},
+		created: created,
+		removed: removed,
+		bodies:  map[model.ID]string{blockID: text},
+	}, nil
+}
+
+func applyFooter(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
+	body := strings.TrimSpace(step.Value)
+	if body == "" {
+		return applyFooterClear(manifest, step)
+	}
+	target := model.Target{Kind: model.TargetBook}
+	region := findRegion(manifest, model.RegionFooter, target)
+	var removed []model.ID
+	if region == nil {
+		regionID, err := ids.next()
+		if err != nil {
+			return mutation{}, err
+		}
+		region = &model.Region{ID: regionID, Kind: model.RegionFooter, Target: target}
+		manifest.Regions = append(manifest.Regions, region)
+	} else {
+		removed = append(removed, region.Blocks...)
+		region.Blocks = nil
+	}
+	blockID, err := ids.next()
+	if err != nil {
+		return mutation{}, err
+	}
+	region.Blocks = []model.ID{blockID}
+	return mutation{
+		receipt: Receipt{
+			Book: manifest.ID, Target: blockID, Kind: "footer", Parent: region.ID, Index: 0,
+			Order: append([]model.ID(nil), region.Blocks...), Changed: true,
+		},
+		created: []model.ID{blockID},
+		removed: removed,
+		bodies:  map[model.ID]string{blockID: body},
+	}, nil
+}
+
+func applyFooterClear(manifest *model.Manifest, step Step) (mutation, error) {
+	region := findRegion(manifest, model.RegionFooter, model.Target{Kind: model.TargetBook})
+	if region == nil {
+		return mutation{receipt: Receipt{Book: manifest.ID, Kind: "footer", Index: -1, Changed: false}}, nil
+	}
+	removed := append([]model.ID(nil), region.Blocks...)
+	removeRegion(manifest, region)
+	return mutation{
+		receipt: Receipt{Book: manifest.ID, Target: region.ID, Kind: "footer", Index: -1, Changed: true},
+		removed: removed,
+	}, nil
+}
+
+func applyNote(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
+	body := strings.TrimSpace(step.Value)
+	if body == "" {
+		return mutation{}, fail("structure.empty-body", "a note needs a body")
+	}
+	if err := validateNoteTarget(manifest, step.TargetKind, step.Target); err != nil {
+		return mutation{}, err
+	}
+	target := model.Target{Kind: step.TargetKind, ID: step.Target}
+	region := findRegion(manifest, model.RegionNotes, target)
+	if region == nil {
+		regionID, err := ids.next()
+		if err != nil {
+			return mutation{}, err
+		}
+		region = &model.Region{ID: regionID, Kind: model.RegionNotes, Target: target}
+		manifest.Regions = append(manifest.Regions, region)
+	}
+	blockID, err := ids.next()
+	if err != nil {
+		return mutation{}, err
+	}
+	region.Blocks = append(region.Blocks, blockID)
+	return mutation{
+		receipt: Receipt{
+			Book: manifest.ID, Target: blockID, Kind: "note", Parent: region.ID,
+			Index: len(region.Blocks) - 1, Order: append([]model.ID(nil), region.Blocks...), Changed: true,
+		},
+		created: []model.ID{blockID},
+		bodies:  map[model.ID]string{blockID: body},
+	}, nil
+}
+
+func applyNoteRemove(manifest *model.Manifest, step Step) (mutation, error) {
+	target := model.Target{Kind: step.TargetKind, ID: step.Target}
+	region := findRegion(manifest, model.RegionNotes, target)
+	if region == nil {
+		return mutation{}, fail("structure.unknown-target",
+			"no notes for %s %s", step.TargetKind, step.Target)
+	}
+	removed := append([]model.ID(nil), region.Blocks...)
+	removeRegion(manifest, region)
+	return mutation{
+		receipt: Receipt{Book: manifest.ID, Target: region.ID, Kind: "note", Index: -1, Changed: true},
+		removed: removed,
+	}, nil
+}
+
+func findRegion(manifest *model.Manifest, kind model.RegionKind, target model.Target) *model.Region {
+	for _, region := range manifest.Regions {
+		if region != nil && region.Kind == kind && region.Target == target {
+			return region
+		}
+	}
+	return nil
+}
+
+func removeRegion(manifest *model.Manifest, region *model.Region) {
+	for index, candidate := range manifest.Regions {
+		if candidate == region {
+			manifest.Regions = append(manifest.Regions[:index], manifest.Regions[index+1:]...)
+			return
+		}
+	}
+}
+
+func validateNoteTarget(manifest *model.Manifest, kind model.TargetKind, id model.ID) error {
+	if id.IsZero() {
+		return fail("structure.invalid-target", "the target id must not be zero")
+	}
+	switch kind {
+	case model.TargetNode:
+		if _, ok := manifest.FindNode(id); !ok {
+			return fail("structure.unknown-target", "node %s does not exist", id)
+		}
+	case model.TargetBlock:
+		for _, placed := range manifest.PlacedBlocks() {
+			if placed == id {
+				return nil
+			}
+		}
+		return fail("structure.unknown-target", "block %s is not placed", id)
+	default:
+		return fail("structure.invalid-target", "notes target a node or a block, not %q", kind)
+	}
+	return nil
+}
+
 func applyAddLockedBlock(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
 	if step.Type == "" {
 		return mutation{}, fail("structure.invalid-type", "a locked block needs a type")
@@ -365,6 +814,152 @@ func applyAddLockedBlock(manifest *model.Manifest, ids *bookIDs, step Step) (mut
 	}
 	manifest.SetMeta(result.receipt.Target, model.BlockMeta{Type: step.Type, Locked: true})
 	return result, nil
+}
+
+func applyAddLayout(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
+	result, err := applyAddLockedBlock(manifest, ids, step)
+	if err != nil {
+		return mutation{}, err
+	}
+	result.receipt.Block = result.receipt.Target
+	result.layouts = map[model.ID][]byte{result.receipt.Target: []byte(step.Value)}
+	return result, nil
+}
+
+func applySetLayout(manifest *model.Manifest, step Step) (mutation, error) {
+	if err := requireLayoutBlock(manifest, step.Target); err != nil {
+		return mutation{}, err
+	}
+	return mutation{
+		receipt: Receipt{
+			Book: manifest.ID, Target: step.Target, Block: step.Target, Kind: "layout",
+			Index: -1, Changed: true,
+		},
+		layouts: map[model.ID][]byte{step.Target: []byte(step.Value)},
+	}, nil
+}
+
+func applyRemoveLayout(manifest *model.Manifest, step Step) (mutation, error) {
+	if err := requireLayoutBlock(manifest, step.Target); err != nil {
+		return mutation{}, err
+	}
+	result, err := applyRemove(manifest, Step{Op: "remove", Target: step.Target})
+	if err != nil {
+		return mutation{}, err
+	}
+	result.receipt.Kind = "layout"
+	result.receipt.Block = step.Target
+	return result, nil
+}
+
+func applyStatus(manifest *model.Manifest, step Step) (mutation, error) {
+	value := strings.TrimSpace(step.Value)
+	if value != "" {
+		if !manifest.StatusEnabled() {
+			return mutation{}, fail("structure.status-disabled",
+				"the book does not enable status")
+		}
+		if _, ok := model.FindStatus(value); !ok {
+			return mutation{}, fail("structure.unknown-status", "unknown status %q", value)
+		}
+	}
+	node, isNode := manifest.FindNode(step.Target)
+	_, _, isBlock := blockParent(manifest, step.Target)
+	if !isNode && !isBlock {
+		return mutation{}, fail("structure.unknown-target", "%s does not exist", step.Target)
+	}
+	changed := false
+	if isNode {
+		changed = node.Status != value
+		node.Status = value
+	} else {
+		meta := manifest.Meta(step.Target)
+		changed = meta.Status != value
+		meta.Status = value
+		manifest.SetMeta(step.Target, meta)
+	}
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Target: step.Target, Kind: "status", Index: -1, Changed: changed,
+	}}, nil
+}
+
+func applyStatusConfig(manifest *model.Manifest, step Step) (mutation, error) {
+	enabled := step.Value == "on"
+	changed := manifest.StatusEnabled() != enabled
+	if changed {
+		if enabled {
+			if manifest.Status == nil {
+				manifest.Status = &model.StatusConfig{}
+			}
+			manifest.Status.Enabled = true
+		} else {
+			manifest.Status.Enabled = false
+		}
+	}
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Kind: "status-config", Index: -1, Changed: changed,
+	}}, nil
+}
+
+func applyBadge(manifest *model.Manifest, step Step) (mutation, error) {
+	if step.Badge == nil {
+		return mutation{}, fail("structure.invalid-badge", "a badge is required")
+	}
+	badge := *step.Badge
+	badge.ID = strings.TrimSpace(badge.ID)
+	if badge.ID == "" {
+		return mutation{}, fail("structure.invalid-badge", "a badge id is required")
+	}
+	if message := model.ValidateTypeToken(badge.ID); message != "" {
+		return mutation{}, fail("structure.invalid-badge", "%s", message)
+	}
+	changed := true
+	if index := badgeIndex(manifest, badge.ID); index >= 0 {
+		changed = manifest.Badges[index] != badge
+		manifest.Badges[index] = badge
+	} else {
+		manifest.Badges = append(manifest.Badges, badge)
+	}
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Kind: "badge", Index: -1, Changed: changed,
+	}}, nil
+}
+
+func applyBadgeRemove(manifest *model.Manifest, step Step) (mutation, error) {
+	id := strings.TrimSpace(step.Value)
+	index := badgeIndex(manifest, id)
+	if index < 0 {
+		return mutation{receipt: Receipt{Book: manifest.ID, Kind: "badge", Index: -1, Changed: false}}, nil
+	}
+	manifest.Badges = append(manifest.Badges[:index], manifest.Badges[index+1:]...)
+	if len(manifest.Badges) == 0 {
+		manifest.Badges = nil
+	}
+	return mutation{receipt: Receipt{Book: manifest.ID, Kind: "badge", Index: -1, Changed: true}}, nil
+}
+
+func badgeIndex(manifest *model.Manifest, id string) int {
+	for index, badge := range manifest.Badges {
+		if badge.ID == id {
+			return index
+		}
+	}
+	return -1
+}
+
+// requireLayoutBlock rejects a target that is not a placed, locked UILayout block.
+func requireLayoutBlock(manifest *model.Manifest, id model.ID) error {
+	if id.IsZero() {
+		return fail("structure.invalid-target", "a block id is required")
+	}
+	if _, _, isBlock := blockParent(manifest, id); !isBlock {
+		return fail("structure.unknown-target", "block %s does not exist", id)
+	}
+	meta := manifest.Meta(id)
+	if !meta.Locked || meta.Type != "UILayout" {
+		return fail("structure.not-layout", "block %s is not a locked UILayout block", id)
+	}
+	return nil
 }
 
 func applySetType(manifest *model.Manifest, step Step) (mutation, error) {
@@ -682,6 +1277,10 @@ func validate(manifest *model.Manifest) error {
 
 func bodyPath(paths store.BookPaths, id model.ID) string {
 	return filepath.Join(paths.BlocksDir, id.String()+".md")
+}
+
+func layoutPath(paths store.BookPaths, id model.ID) string {
+	return filepath.Join(paths.LayoutsDir, "asciiui", id.String()+".asciiui")
 }
 
 // addDestination resolves the parent, index and unit kind for Add.

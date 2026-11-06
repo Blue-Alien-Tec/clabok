@@ -1,8 +1,10 @@
 # S12 — Editorial State and Generated Content
 
-Status: draft, not planned.
+Status: in progress (S12a delivered 2026-11-05; block-reference correction and index table
+2026-11-06; S12b, S12c and S12d delivered 2026-11-06, with S12d as the last slice of this segment;
+S12e deferred to the next planning segment as its first task).
 Phase: 7. Depends on: S09 (render placement contract). Blocks: none, but S11 is its first consumer.
-PLAN refs: §3.14 (regions, footer, notes, index prose, status, badges, layout block), §3 (4),
+PLAN refs: §3.14 (regions, footer, notes, index prose, status, badges, layout block), §3 (4), §3 (5),
 §3.11 (asciiui types are an S09 concern).
 
 ## 0. Current state and pre-planned decisions (2026-11-05)
@@ -18,16 +20,27 @@ PLAN refs: §3.14 (regions, footer, notes, index prose, status, badges, layout b
 
 Pre-planned decisions:
 
-- Manifest v3 adds one-line index prose per node (`prose`) and any status fields; one version bump
-  covers all S12 model additions.
+- Manifest v3 adds an optional index-prose **block reference** per node (`proseBlock`) and any status
+  fields; one version bump covers all S12 model additions. The prose itself is a block: `PLAN.md` §3
+  statement 5 says prose is written only into blocks, so the node carries the reference and never the
+  text.
+- The delivered S12a node text field `Node.Prose` was corrected on 2026-11-06: it contradicted
+  `PLAN.md` §3 statement 5. The text now lives in a block referenced by `proseBlock` and owned by a
+  `prose` region; there is no second prose form.
 - ASCII UI commands: `asciiui add --book <id> --parent <node> --file <spec>`,
   `asciiui set --book <id> --block <id> --file <spec>`, `asciiui remove --book <id> --block <id>`
   (delete the spec, then `remove` the locked block). The spec path is fixed, not configurable.
+  Delivered 2026-11-06: the spec and the block are written in one atomic step, and the lifecycle
+  packs the specs on close and extracts them on open.
 - Region commands: `region set --book <id> --kind footer --file <path|->`,
   `region notes --book <id> --target <node|block> --file <path|->`,
   `region remove --book <id> --target <node|block>`; the footer slot is one per book.
-- Index prose renders after the entry title; it never enters the ToC.
+- The index shape is a derived state, not a setting: a book without index prose and without status
+  renders the plain list; prose or status makes it the `Document | Description` table. The per-file
+  ToC stays a list and never carries prose.
 - Status is opt-in per book, tool-owned vocabulary, rendered through the placement contract.
+  Delivered 2026-11-06: the fixed vocabulary, the per-node/block assignment, the index status column
+  and the legend; a disabled book renders nothing and keeps its assignments.
 - Badges and the layout block stay last; the layout block is deferred and uses `git ls-files`.
 
 ## 1. Goal
@@ -48,7 +61,7 @@ instead of hand-written markup, while removing the header and preamble regions f
 | 6 | Status system: opt-in per book; the tool owns the vocabulary (states, assignments, legend, badges) and renders it structurally; authors never write the status markup | §3.14 |
 | 7 | Badges: generated from repository facts; an explicit message overrides the detector; the generated badge region is never hand-edited | §3.14 |
 | 8 | Layout block: opt-in, deferred from the first delivery; generated from `git ls-files`; without git it is a no-op, not an error; a command authors it from a path and a depth; endpoints and branches can be excluded afterwards; per-path prose is authored through commands; the generated tree is never hand-edited | §3.14 |
-| 9 | Index prose: each index entry can carry optional prose, authored and stored here, rendered by S09 | §3.14 |
+| 9 | Index prose: each index entry can carry an optional block reference (`proseBlock`); the prose is a block in the block pool, authored through a command and rendered by S09 | §3.14, §3 (5) |
 | 10 | Every authored change goes through a command with dry-run, rollback and open-book requirement | §6 |
 | 11 | Removal of region content is a command; there is no hand editing of a generated file | §3.14 |
 
@@ -88,7 +101,8 @@ instead of hand-written markup, while removing the header and preamble regions f
 6. The layout block renders a deterministic tree from a fixture repository, honours depth and
    exclusions, and is a no-op without git.
 7. `grep` over the code base finds no header or preamble region code path.
-8. Index prose round-trips through its command and renders on its entry (contract test with S09).
+8. The index-prose reference round-trips through its command and renders on its entry (contract test
+   with S09); the prose text is a block, and no node text field for prose exists in the schema.
 9. Every change in this scope creates a rollback package and respects the open-book requirement.
 
 ## 6. Design decisions for this scope's planning session
@@ -101,7 +115,8 @@ instead of hand-written markup, while removing the header and preamble regions f
 - Note ordering when several notes target the same node, and whether a note can target a region.
 - Footer command shape (set, clear, show) and whether the footer can contain multiple blocks (one slot
   can still hold an ordered list).
-- Whether index prose is a field on the node or a separate block in a book-level collection.
+- Settled by `PLAN.md` §3 statement 5: index prose is a block, and the node carries only the
+  reference. Do not reopen this as a field-versus-block question.
 - Where the generated marker for badges and layout lives, and how it interacts with S09's
   foreign-file protection.
 - Whether status is rendered as inline markers, a trailing legend, or both, and the exact rendering
@@ -115,6 +130,9 @@ instead of hand-written markup, while removing the header and preamble regions f
   documented in the tool output.
 - The footer and notes are blocks. Do not introduce a second region storage next to the block pool;
   `PLAN.md` removed the separate region sources deliberately.
+- Index prose is a block reference, never a node text field. A text field for rendered prose breaks
+  `PLAN.md` §3 statement 5 and reintroduces a prose path without block ID, per-block lock and
+  rollback.
 - Header and preamble must be gone, not deprecated. Grep for them in the acceptance test.
 
 ## Refinement (2026-11-05)

@@ -8,12 +8,14 @@ package render
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/asciiui"
+	"github.com/Blue-Alien-Tec/clabok/internal/badge"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/prose"
@@ -68,6 +70,8 @@ type Service struct {
 	// Navigation describes the current book's place in the library. It drives the README and
 	// per-file navigation.
 	Navigation Navigation
+	// ProjectDir holds the repository facts for the badge detectors.
+	ProjectDir string
 }
 
 // IndexEntry is one row of the library Document Index.
@@ -237,24 +241,45 @@ func (service *Service) render(source *bookSource) (Result, error) {
 		if drawErr != nil {
 			return Result{}, drawErr
 		}
-		bodies[id] = "<!-- asciiui:" + id.String() + " -->\n" + drawing +
-			"\n<!-- /asciiui:" + id.String() + " -->\n"
+		// The fence keeps the drawing's spaces and line breaks intact; Markdown would otherwise
+		// collapse the lines into one paragraph and turn "- item" lines into lists.
+		bodies[id] = "<!-- asciiui:" + id.String() + " -->\n```text\n" + drawing +
+			"\n```\n<!-- /asciiui:" + id.String() + " -->\n"
 	}
 	mode := manifest.Settings.Output
+	badges := ""
+	if service.Navigation.IsLibrary {
+		badges = service.badgeMarkdown(manifest)
+	}
 	var files []File
 	var err error
 	switch mode {
 	case model.OutputChapter:
-		files, err = renderChapters(manifest, bodies, service.LibraryIndex, service.CrossLink, service.CrossBook, service.Navigation)
+		files, err = renderChapters(manifest, bodies, service.LibraryIndex, service.CrossLink, service.CrossBook, service.Navigation, badges)
 	case model.OutputPart:
-		files, err = renderParts(manifest, bodies, service.LibraryIndex, service.CrossLink, service.CrossBook, service.Navigation)
+		files, err = renderParts(manifest, bodies, service.LibraryIndex, service.CrossLink, service.CrossBook, service.Navigation, badges)
 	default:
-		files, err = renderMonolith(manifest, bodies, service.LibraryIndex, service.CrossLink, service.CrossBook, service.Navigation)
+		files, err = renderMonolith(manifest, bodies, service.LibraryIndex, service.CrossLink, service.CrossBook, service.Navigation, badges)
 	}
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Files: files, Mode: mode}, nil
+}
+
+// badgeMarkdown renders the resolved badges of the library README. A badge without a value is
+// omitted; Check reports it as badge-unresolved.
+func (service *Service) badgeMarkdown(manifest *model.Manifest) string {
+	values, _ := badge.ResolveAll(service.ProjectDir, manifest.Badges)
+	images := make([]string, 0, len(values))
+	for _, value := range values {
+		image := fmt.Sprintf("![%s: %s](%s)", value.Label, value.Message, badge.BadgeURL(value))
+		if value.Link != "" {
+			image = "[" + image + "](" + value.Link + ")"
+		}
+		images = append(images, image)
+	}
+	return strings.Join(images, " ")
 }
 
 func renderAsciiUI(specData []byte, id model.ID, overrides map[string]string) (string, error) {
@@ -322,10 +347,48 @@ func marker(book model.BookID, mode model.OutputMode) string {
 	return fmt.Sprintf("%s\n<!-- book %s; mode %s -->\n\n", Marker, string(book), string(mode))
 }
 
+// statusBadge returns the shields.io badge for an assigned state, or "" when the book does not
+// enable status or the state is unknown. The badge is the structural marker: headings, index cells,
+// block markers and the legend all use it, so authors never write status markup.
+func statusBadge(manifest *model.Manifest, state string) string {
+	if !manifest.StatusEnabled() || state == "" {
+		return ""
+	}
+	status, exists := model.FindStatus(state)
+	if !exists {
+		return ""
+	}
+	label := url.PathEscape(status.Label)
+	color := status.Color
+	if color == "" {
+		color = "lightgrey"
+	}
+	return fmt.Sprintf("![status: %s](https://img.shields.io/badge/status-%s-%s?style=flat-square)",
+		status.Label, label, color)
+}
+
+// statusLegendMarkdown renders the tool-owned vocabulary as a two-column table.
+func statusLegendMarkdown(manifest *model.Manifest) string {
+	if !manifest.StatusEnabled() {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("**Status**\n\n")
+	builder.WriteString("| Status | Meaning |\n| --- | --- |\n")
+	for _, status := range model.Statuses {
+		fmt.Fprintf(&builder, "| %s | %s |\n",
+			statusBadge(manifest, status.ID), cell(status.Description))
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
 func blockTexts(manifest *model.Manifest, bodies map[model.ID]string, ids []model.ID) []string {
 	texts := make([]string, 0, len(ids))
 	for _, id := range ids {
 		text := bodies[id]
+		if badge := statusBadge(manifest, manifest.Meta(id).Status); badge != "" {
+			text = badge + "\n\n" + text
+		}
 		if notes := notesFor(manifest, bodies, model.TargetBlock, id); notes != "" {
 			text = joinNonEmpty(text, notes)
 		}
@@ -428,7 +491,11 @@ func nodeSection(manifest *model.Manifest, bodies map[model.ID]string, node *mod
 	if target, ok := layout[node.ID]; ok && target.Anchor != "" {
 		sections = append(sections, anchorLine(target.Anchor))
 	}
-	sections = append(sections, heading(level, numbers[node.ID], node.Title))
+	title := node.Title
+	if badge := statusBadge(manifest, node.Status); badge != "" {
+		title += " " + badge
+	}
+	sections = append(sections, heading(level, numbers[node.ID], title))
 	if blocks := joinBlocks(blockTexts(manifest, bodies, node.Blocks)); blocks != "" {
 		sections = append(sections, blocks)
 	}
@@ -464,13 +531,61 @@ func footer(manifest *model.Manifest, bodies map[model.ID]string) string {
 
 // entry is one index row.
 type entry struct {
-	title string
-	part  string
-	href  string
-	level int
+	title  string
+	part   string
+	prose  string
+	status string
+	href   string
+	level  int
 }
 
-func indexEntries(manifest *model.Manifest, href func(node *model.Node) string) []entry {
+// plainTitle reduces an inline-Markdown title to the plain text an index, ToC or reference link
+// shows. Headings keep their formatting; an entry must not, because a code span inside a link reads
+// like a nested link and a Markdown link inside a link is invalid.
+func plainTitle(title string) string {
+	title = unwrapInlineLinks(title)
+	title = strings.ReplaceAll(title, "`", "")
+	title = strings.ReplaceAll(title, "**", "")
+	title = strings.ReplaceAll(title, "__", "")
+	return strings.ReplaceAll(title, "~~", "")
+}
+
+// unwrapInlineLinks replaces [text](target) with text and ![alt](target) with alt. A construct that
+// does not parse is left untouched.
+func unwrapInlineLinks(text string) string {
+	var builder strings.Builder
+	for index := 0; index < len(text); index++ {
+		image := text[index] == '!' && index+1 < len(text) && text[index+1] == '['
+		if text[index] != '[' && !image {
+			builder.WriteByte(text[index])
+			continue
+		}
+		opening := index
+		if image {
+			index++
+		}
+		closing := strings.IndexByte(text[index:], ']')
+		if closing < 0 {
+			builder.WriteString(text[opening : index+1])
+			continue
+		}
+		closing += index
+		if closing+1 >= len(text) || text[closing+1] != '(' {
+			builder.WriteString(text[opening : index+1])
+			continue
+		}
+		end := strings.IndexByte(text[closing+2:], ')')
+		if end < 0 {
+			builder.WriteString(text[opening : index+1])
+			continue
+		}
+		builder.WriteString(text[index+1 : closing])
+		index = closing + 2 + end
+	}
+	return builder.String()
+}
+
+func indexEntries(manifest *model.Manifest, bodies map[model.ID]string, href func(node *model.Node) string) []entry {
 	entries := make([]entry, 0)
 	var walk func(children []*model.Node, level int)
 	walk = func(children []*model.Node, level int) {
@@ -480,12 +595,18 @@ func indexEntries(manifest *model.Manifest, href func(node *model.Node) string) 
 		for _, node := range children {
 			if node.Kind == model.KindLink {
 				if level == 1 {
-					entries = append(entries, entry{title: node.Title, href: href(node), level: 1})
+					entries = append(entries, entry{
+						title: plainTitle(node.Title), part: node.Part,
+						prose: proseText(bodies, node.ProseBlock), status: statusBadge(manifest, node.Status),
+						href: href(node), level: 1,
+					})
 				}
 				continue
 			}
 			entries = append(entries, entry{
-				title: node.Title, part: node.Part, href: href(node), level: level,
+				title: plainTitle(node.Title), part: node.Part,
+				prose: proseText(bodies, node.ProseBlock), status: statusBadge(manifest, node.Status),
+				href: href(node), level: level,
 			})
 			walk(node.Children, level+1)
 		}
@@ -494,25 +615,112 @@ func indexEntries(manifest *model.Manifest, href func(node *model.Node) string) 
 	return entries
 }
 
+// proseText returns the index prose of a node from the referenced block body.
+func proseText(bodies map[model.ID]string, block model.ID) string {
+	if block.IsZero() {
+		return ""
+	}
+	return strings.TrimSpace(bodies[block])
+}
+
+// cell escapes one Markdown table cell. A line break cannot occur in a title or in validated prose,
+// but a stray one must never break the table.
+func cell(text string) string {
+	text = strings.ReplaceAll(text, "|", `\|`)
+	text = strings.ReplaceAll(text, "\r\n", " ")
+	return strings.ReplaceAll(text, "\n", " ")
+}
+
+// indexTableMarkdown renders the index as a table. It is used when a status or index prose column
+// exists. The part value starts a new table group, so a part line can never be squeezed into a table
+// row.
+func indexTableMarkdown(entries []entry, withStatus, withDescription bool) string {
+	var builder strings.Builder
+	open := false
+	lastPart := ""
+	writeHeader := func() {
+		switch {
+		case withStatus && withDescription:
+			builder.WriteString("| Document | Status | Description |\n| --- | --- | --- |\n")
+		case withStatus:
+			builder.WriteString("| Document | Status |\n| --- | --- |\n")
+		default:
+			builder.WriteString("| Document | Description |\n| --- | --- |\n")
+		}
+	}
+	for _, item := range entries {
+		if item.level == 1 && item.part != lastPart {
+			if open {
+				builder.WriteString("\n")
+				open = false
+			}
+			if item.part != "" {
+				fmt.Fprintf(&builder, "**%s**\n\n", cell(plainTitle(item.part)))
+			}
+			lastPart = item.part
+		}
+		if !open {
+			writeHeader()
+			open = true
+		}
+		indent := strings.Repeat("&emsp;", item.level-1)
+		document := indent + cell(item.title)
+		if item.href != "" {
+			document = indent + "[" + cell(item.title) + "](" + item.href + ")"
+		}
+		switch {
+		case withStatus && withDescription:
+			fmt.Fprintf(&builder, "| %s | %s | %s |\n",
+				document, cell(item.status), cell(item.prose))
+		case withStatus:
+			fmt.Fprintf(&builder, "| %s | %s |\n", document, cell(item.status))
+		default:
+			fmt.Fprintf(&builder, "| %s | %s |\n", document, cell(item.prose))
+		}
+	}
+	return builder.String()
+}
+
+// indexMarkdown renders the index as a flat list. It serves the per-file ToC and every book index
+// that carries neither prose nor status.
 func indexMarkdown(entries []entry) string {
 	var builder strings.Builder
 	lastPart := ""
+	wroteRow := false
 	for _, item := range entries {
 		if item.level == 1 && item.part != "" && item.part != lastPart {
-			if lastPart != "" {
+			if wroteRow {
 				builder.WriteString("\n")
 			}
-			fmt.Fprintf(&builder, "**%s**\n\n", item.part)
+			fmt.Fprintf(&builder, "**%s**\n\n", cell(plainTitle(item.part)))
 			lastPart = item.part
 		}
 		indent := strings.Repeat("  ", item.level-1)
 		if item.href == "" {
 			fmt.Fprintf(&builder, "%s- %s\n", indent, item.title)
-			continue
+		} else {
+			fmt.Fprintf(&builder, "%s- [%s](%s)\n", indent, item.title, item.href)
 		}
-		fmt.Fprintf(&builder, "%s- [%s](%s)\n", indent, item.title, item.href)
+		wroteRow = true
 	}
 	return builder.String()
+}
+
+// bookIndexMarkdown picks the index shape from the data. A table is used when the book enables
+// status or an entry carries prose; a plain index stays a list. A column exists only when it has a
+// source (status on, prose present). The per-file ToC always uses the list renderer.
+func bookIndexMarkdown(entries []entry, statusEnabled bool) string {
+	hasProse := false
+	for _, item := range entries {
+		if item.prose != "" {
+			hasProse = true
+			break
+		}
+	}
+	if statusEnabled || hasProse {
+		return indexTableMarkdown(entries, statusEnabled, hasProse)
+	}
+	return indexMarkdown(entries)
 }
 
 // documentIndexMarkdown renders the library Document Index. It returns "" when no other book is
@@ -524,16 +732,15 @@ func documentIndexMarkdown(entries []IndexEntry) string {
 	var builder strings.Builder
 	builder.WriteString("| Book |\n| --- |\n")
 	for _, item := range entries {
-		title := strings.ReplaceAll(item.Title, "|", "\\|")
-		fmt.Fprintf(&builder, "| [%s](%s) |\n", title, item.Href)
+		fmt.Fprintf(&builder, "| [%s](%s) |\n", cell(plainTitle(item.Title)), item.Href)
 	}
 	return strings.TrimRight(builder.String(), "\n")
 }
 
-func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index []IndexEntry, cross CrossLinkFunc, crossBook CrossBookFunc, nav Navigation) ([]File, error) {
+func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index []IndexEntry, cross CrossLinkFunc, crossBook CrossBookFunc, nav Navigation, badges string) ([]File, error) {
 	layout := LayoutFor(manifest)
 	numbers := numberingMap(manifest)
-	entries := indexEntries(manifest, func(node *model.Node) string {
+	entries := indexEntries(manifest, bodies, func(node *model.Node) string {
 		if node.Kind == model.KindLink {
 			return linkHref(manifest, node, layout, cross, crossBook)
 		}
@@ -548,11 +755,17 @@ func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index 
 	if topNav != "" {
 		sections = append(sections, topNav)
 	}
+	if badges != "" {
+		sections = append(sections, badges)
+	}
 	sections = append(sections, heading(1, "", manifest.Root.Title))
 	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
 		sections = append(sections, rootBlocks)
 	}
-	sections = append(sections, "## Index", strings.TrimRight(indexMarkdown(entries), "\n"))
+	if legend := statusLegendMarkdown(manifest); legend != "" {
+		sections = append(sections, legend)
+	}
+	sections = append(sections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
 	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
 		sections = append(sections, "## Document Index", documentIndex)
 	}
@@ -576,11 +789,11 @@ func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index 
 	return []File{{Path: "README.md", Content: strings.TrimRight(content, "\n") + "\n"}}, nil
 }
 
-func renderChapters(manifest *model.Manifest, bodies map[model.ID]string, index []IndexEntry, cross CrossLinkFunc, crossBook CrossBookFunc, nav Navigation) ([]File, error) {
+func renderChapters(manifest *model.Manifest, bodies map[model.ID]string, index []IndexEntry, cross CrossLinkFunc, crossBook CrossBookFunc, nav Navigation, badges string) ([]File, error) {
 	files := make([]File, 0, len(manifest.Root.Children)+1)
 	layout := LayoutFor(manifest)
 	numbers := numberingMap(manifest)
-	entries := indexEntries(manifest, func(node *model.Node) string {
+	entries := indexEntries(manifest, bodies, func(node *model.Node) string {
 		if node.Kind == model.KindLink {
 			return linkHref(manifest, node, layout, cross, crossBook)
 		}
@@ -596,11 +809,17 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string, index 
 	if topNav != "" {
 		indexSections = append(indexSections, topNav)
 	}
+	if badges != "" {
+		indexSections = append(indexSections, badges)
+	}
 	indexSections = append(indexSections, heading(1, "", manifest.Root.Title))
 	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
 		indexSections = append(indexSections, rootBlocks)
 	}
-	indexSections = append(indexSections, "## Index", strings.TrimRight(indexMarkdown(entries), "\n"))
+	if legend := statusLegendMarkdown(manifest); legend != "" {
+		indexSections = append(indexSections, legend)
+	}
+	indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
 	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
 		indexSections = append(indexSections, "## Document Index", documentIndex)
 	}
@@ -640,7 +859,7 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string, index 
 	return files, nil
 }
 
-func renderParts(manifest *model.Manifest, bodies map[model.ID]string, index []IndexEntry, cross CrossLinkFunc, crossBook CrossBookFunc, nav Navigation) ([]File, error) {
+func renderParts(manifest *model.Manifest, bodies map[model.ID]string, index []IndexEntry, cross CrossLinkFunc, crossBook CrossBookFunc, nav Navigation, badges string) ([]File, error) {
 	for _, chapter := range manifest.Root.Children {
 		if chapter.Kind == model.KindChapter && strings.TrimSpace(chapter.Part) == "" {
 			return nil, fail("render.missing-part", "chapter %q has no part", chapter.Title)
@@ -653,7 +872,7 @@ func renderParts(manifest *model.Manifest, bodies map[model.ID]string, index []I
 	parts := partOrder(manifest)
 	layout := LayoutFor(manifest)
 	numbers := numberingMap(manifest)
-	entries := indexEntries(manifest, func(node *model.Node) string {
+	entries := indexEntries(manifest, bodies, func(node *model.Node) string {
 		if node.Kind == model.KindLink {
 			return linkHref(manifest, node, layout, cross, crossBook)
 		}
@@ -669,11 +888,17 @@ func renderParts(manifest *model.Manifest, bodies map[model.ID]string, index []I
 	if topNav != "" {
 		indexSections = append(indexSections, topNav)
 	}
+	if badges != "" {
+		indexSections = append(indexSections, badges)
+	}
 	indexSections = append(indexSections, heading(1, "", manifest.Root.Title))
 	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
 		indexSections = append(indexSections, rootBlocks)
 	}
-	indexSections = append(indexSections, "## Index", strings.TrimRight(indexMarkdown(entries), "\n"))
+	if legend := statusLegendMarkdown(manifest); legend != "" {
+		indexSections = append(indexSections, legend)
+	}
+	indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
 	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
 		indexSections = append(indexSections, "## Document Index", documentIndex)
 	}
@@ -744,7 +969,7 @@ func chapterTOC(manifest *model.Manifest, layout map[model.ID]LinkTarget, chapte
 		if !ok || target.Anchor == "" {
 			continue
 		}
-		entries = append(entries, entry{title: child.Title, href: "#" + target.Anchor, level: 1})
+		entries = append(entries, entry{title: plainTitle(child.Title), href: "#" + target.Anchor, level: 1})
 	}
 	if len(entries) == 0 {
 		return ""
@@ -760,14 +985,14 @@ func partTOC(manifest *model.Manifest, layout map[model.ID]LinkTarget, part stri
 			continue
 		}
 		if target, ok := layout[chapter.ID]; ok && target.Anchor != "" {
-			entries = append(entries, entry{title: chapter.Title, href: "#" + target.Anchor, level: 1})
+			entries = append(entries, entry{title: plainTitle(chapter.Title), href: "#" + target.Anchor, level: 1})
 		}
 		for _, child := range chapter.Children {
 			if child.Kind == model.KindLink {
 				continue
 			}
 			if target, ok := layout[child.ID]; ok && target.Anchor != "" {
-				entries = append(entries, entry{title: child.Title, href: "#" + target.Anchor, level: 2})
+				entries = append(entries, entry{title: plainTitle(child.Title), href: "#" + target.Anchor, level: 2})
 			}
 		}
 	}
@@ -838,11 +1063,11 @@ func expandRefs(content, file string, manifest *model.Manifest, layout map[model
 			if link.File == file && link.Anchor != "" {
 				href = "#" + link.Anchor
 			}
-			return "[" + target.Title + "](" + href + ")"
+			return "[" + plainTitle(target.Title) + "](" + href + ")"
 		}
 		if cross != nil {
 			if link, found := cross(id); found {
-				return "[" + link.Title + "](" + link.Href + ")"
+				return "[" + plainTitle(link.Title) + "](" + link.Href + ")"
 			}
 		}
 		return match
@@ -986,6 +1211,18 @@ func (service *Service) inputMembers(source *bookSource) map[string][]byte {
 		members["library-index"] = []byte(builder.String())
 	}
 	members["nav"] = []byte(fmt.Sprintf("%t|%s", service.Navigation.IsLibrary, service.Navigation.LibraryHref))
+	if len(source.manifest.Badges) > 0 {
+		values, unresolved := badge.ResolveAll(service.ProjectDir, source.manifest.Badges)
+		var builder strings.Builder
+		for _, value := range values {
+			fmt.Fprintf(&builder, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\n",
+				value.ID, value.Label, value.Message, value.Link, value.Source, value.Color)
+		}
+		for _, item := range unresolved {
+			fmt.Fprintf(&builder, "%s\x00%s\n", item.ID, item.Reason)
+		}
+		members["badges"] = []byte(builder.String())
+	}
 	return members
 }
 
@@ -1025,6 +1262,16 @@ func (service *Service) Check(book model.BookID) ([]Finding, error) {
 	}
 	bodies := source.bodies
 	layout := LayoutFor(manifest)
+	if len(manifest.Badges) > 0 {
+		_, unresolved := badge.ResolveAll(service.ProjectDir, manifest.Badges)
+		for _, item := range unresolved {
+			findings = append(findings, Finding{
+				Code:     "badge-unresolved",
+				Message:  fmt.Sprintf("badge %q: %s", item.ID, item.Reason),
+				Blocking: false,
+			})
+		}
+	}
 
 	for id, body := range bodies {
 		for _, match := range refs.Pattern.FindAllStringSubmatch(body, -1) {

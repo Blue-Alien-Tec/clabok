@@ -103,3 +103,339 @@ func TestPartNameCollisionRejected(t *testing.T) {
 		t.Fatalf("unexpected error %v", err)
 	}
 }
+
+func TestIndexListWithoutProse(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "**Basics**\n\n" +
+		"- [One](#one)\n" +
+		"  - [Sub](#sub)\n" +
+		"\n**Advanced**\n\n" +
+		"- [Two](#two)\n"
+	if !strings.Contains(result.Files[0].Content, want) {
+		t.Fatalf("index list mismatch:\n%s", result.Files[0].Content)
+	}
+	chapterTOC := chapterTOCForTest(t, scene)
+	if !strings.Contains(chapterTOC, "- [Sub](#sub)") ||
+		strings.Contains(chapterTOC, "|") {
+		t.Fatalf("the ToC must stay a list:\n%s", chapterTOC)
+	}
+}
+
+func TestIndexTableWithProse(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children[0].ProseBlock = 50
+		manifest.Regions = append(manifest.Regions, &model.Region{
+			ID: 46, Kind: model.RegionProse, Target: model.Target{Kind: model.TargetNode, ID: 10},
+			Blocks: []model.ID{50},
+		})
+	})
+	if err := os.WriteFile(filepath.Join(scene.paths.BlocksDir, "50.md"),
+		[]byte("Summary of one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "**Basics**\n\n" +
+		"| Document | Description |\n| --- | --- |\n" +
+		"| [One](#one) | Summary of one |\n" +
+		"| &emsp;[Sub](#sub) |  |\n" +
+		"\n**Advanced**\n\n" +
+		"| Document | Description |\n| --- | --- |\n" +
+		"| [Two](#two) |  |\n"
+	if !strings.Contains(result.Files[0].Content, want) {
+		t.Fatalf("index table mismatch:\n%s", result.Files[0].Content)
+	}
+	chapterTOC := chapterTOCForTest(t, scene)
+	if !strings.Contains(chapterTOC, "- [Sub](#sub)") ||
+		strings.Contains(chapterTOC, "|") {
+		t.Fatalf("the ToC must stay a list:\n%s", chapterTOC)
+	}
+}
+
+func chapterTOCForTest(t *testing.T, scene scene) string {
+	t.Helper()
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Settings.Output = model.OutputChapter
+		manifest.Settings.TOC.Enabled = true
+	})
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scene.file(t, result, "one.md")
+}
+
+func TestIndexProse(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children[0].ProseBlock = 50
+		manifest.Regions = append(manifest.Regions, &model.Region{
+			ID: 46, Kind: model.RegionProse, Target: model.Target{Kind: model.TargetNode, ID: 10},
+			Blocks: []model.ID{50},
+		})
+	})
+	if err := os.WriteFile(filepath.Join(scene.paths.BlocksDir, "50.md"),
+		[]byte("Summary of one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	if !strings.Contains(content, "| [One](#one) | Summary of one |") {
+		t.Fatalf("index prose missing:\n%s", content)
+	}
+
+	chapterScene := newScene(t, model.OutputChapter)
+	editManifest(t, chapterScene, func(manifest *model.Manifest) {
+		manifest.Settings.TOC.Enabled = true
+		manifest.Root.Children[0].Children[0].ProseBlock = 50
+		manifest.Regions = append(manifest.Regions, &model.Region{
+			ID: 46, Kind: model.RegionProse, Target: model.Target{Kind: model.TargetNode, ID: 12},
+			Blocks: []model.ID{50},
+		})
+	})
+	if err := os.WriteFile(filepath.Join(chapterScene.paths.BlocksDir, "50.md"),
+		[]byte("Sub summary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chapterResult, err := chapterScene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := chapterScene.file(t, chapterResult, "README.md")
+	if !strings.Contains(readme, "| &emsp;[Sub](one.md#sub) | Sub summary |") {
+		t.Fatalf("chapter index prose missing:\n%s", readme)
+	}
+	chapter := chapterScene.file(t, chapterResult, "one.md")
+	if strings.Contains(chapter, "Sub summary") {
+		t.Fatalf("index prose leaked into the chapter ToC:\n%s", chapter)
+	}
+}
+
+func TestStatusRendering(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Status = &model.StatusConfig{Enabled: true}
+		manifest.Root.Children[0].Status = "final"
+		manifest.SetMeta(11, model.BlockMeta{Status: "wip"})
+	})
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	finalBadge := "![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)"
+	wipBadge := "![status: Work in Progress](https://img.shields.io/badge/status-Work%20in%20Progress-orange?style=flat-square)"
+	for _, want := range []string{
+		"| Document | Status |",
+		"| [One](#one) | " + finalBadge + " |",
+		"| &emsp;[Sub](#sub) |  |",
+		"## One " + finalBadge,
+		wipBadge + "\n\nBody 11",
+		"**Status**",
+		"| " + finalBadge + " | Content is settled; only errata and clarifications remain. |",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("missing %q in\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "| Document | Status | Description |") {
+		t.Fatalf("an empty description column must not appear:\n%s", content)
+	}
+	legendAt := strings.Index(content, "**Status**")
+	indexAt := strings.Index(content, "## Index")
+	if legendAt < 0 || indexAt < 0 || legendAt > indexAt {
+		t.Fatalf("the legend must precede the index:\n%s", content)
+	}
+	chapterTOC := chapterTOCForTest(t, scene)
+	if strings.Contains(chapterTOC, "| Document |") {
+		t.Fatalf("the ToC must not become a table:\n%s", chapterTOC)
+	}
+}
+
+func TestStatusAndProseColumns(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Status = &model.StatusConfig{Enabled: true}
+		manifest.Root.Children[0].Status = "final"
+		manifest.Root.Children[0].ProseBlock = 50
+		manifest.Regions = append(manifest.Regions, &model.Region{
+			ID: 46, Kind: model.RegionProse, Target: model.Target{Kind: model.TargetNode, ID: 10},
+			Blocks: []model.ID{50},
+		})
+	})
+	if err := os.WriteFile(filepath.Join(scene.paths.BlocksDir, "50.md"),
+		[]byte("Short summary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	if !strings.Contains(content, "| Document | Status | Description |") {
+		t.Fatalf("missing the three-column header:\n%s", content)
+	}
+	if !strings.Contains(content, "| [One](#one) | ![status: Final]") ||
+		!strings.Contains(content, "| Short summary |") {
+		t.Fatalf("missing the prose/status row:\n%s", content)
+	}
+}
+
+func TestStatusDisabledRendersNothing(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children[0].Status = "final"
+		manifest.SetMeta(11, model.BlockMeta{Status: "wip"})
+	})
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	for _, forbidden := range []string{"img.shields.io", "**Status**", "| Document | Status"} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("a disabled system rendered %q:\n%s", forbidden, content)
+		}
+	}
+	if !strings.Contains(content, "- [One](#one)") {
+		t.Fatalf("the plain index must stay a list:\n%s", content)
+	}
+}
+
+func TestLibraryBadges(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "go.mod"),
+		[]byte("module github.com/example/project\n\ngo 1.27.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "LICENSE"),
+		[]byte("MIT License\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Badges = []model.Badge{
+			{ID: "go"}, {ID: "license"}, {ID: "ghost"},
+		}
+	})
+	scene.service.ProjectDir = project
+	scene.service.Navigation.IsLibrary = true
+
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	for _, want := range []string{
+		"![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)",
+		"![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("missing %q in\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "ghost") {
+		t.Fatalf("an unresolved badge must be omitted:\n%s", content)
+	}
+	badgeAt := strings.Index(content, "![go:")
+	headingAt := strings.Index(content, "# Book")
+	if badgeAt < 0 || headingAt < 0 || badgeAt > headingAt {
+		t.Fatalf("badges must sit above the title:\n%s", content)
+	}
+
+	findings, err := scene.service.Check("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findings {
+		if finding.Code == "badge-unresolved" && strings.Contains(finding.Message, "ghost") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing badge-unresolved finding: %+v", findings)
+	}
+
+	scene.service.Navigation.IsLibrary = false
+	result, err = scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Files[0].Content, "img.shields.io") {
+		t.Fatal("a non-library book must not render badges")
+	}
+}
+
+func TestIndexProseOnLinkEntry(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children = append(manifest.Root.Children, &model.Node{
+			ID: 30, Kind: model.KindLink, Title: "Elsewhere", ProseBlock: 50,
+			Ref: &model.Ref{Book: "other"},
+		})
+		manifest.Regions = append(manifest.Regions, &model.Region{
+			ID: 46, Kind: model.RegionProse, Target: model.Target{Kind: model.TargetNode, ID: 30},
+			Blocks: []model.ID{50},
+		})
+	})
+	if err := os.WriteFile(filepath.Join(scene.paths.BlocksDir, "50.md"),
+		[]byte("Link summary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Files[0].Content, "| Elsewhere | Link summary |") {
+		t.Fatalf("link index prose missing:\n%s", result.Files[0].Content)
+	}
+}
+
+func TestIndexTitleIsPlainText(t *testing.T) {
+	scene := newScene(t, model.OutputMonolith)
+	editManifest(t, scene, func(manifest *model.Manifest) {
+		manifest.Root.Children[0].Title = "Coverage of `PLAN.md` §3"
+	})
+	result, err := scene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := result.Files[0].Content
+	if !strings.Contains(content, "## Coverage of `PLAN.md` §3") {
+		t.Fatalf("the heading must keep its formatting:\n%s", content)
+	}
+	if !strings.Contains(content, "- [Coverage of PLAN.md §3](#coverage-of-plan-md-3)") {
+		t.Fatalf("the index entry must be plain text:\n%s", content)
+	}
+	if strings.Contains(content, "[Coverage of `PLAN.md`") {
+		t.Fatalf("the index entry still carries inline markup:\n%s", content)
+	}
+
+	tocScene := newScene(t, model.OutputChapter)
+	editManifest(t, tocScene, func(manifest *model.Manifest) {
+		manifest.Settings.TOC.Enabled = true
+		manifest.Root.Children[0].Children[0].Title = "Uses `PLAN.md`"
+	})
+	tocResult, err := tocScene.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chapter := tocScene.file(t, tocResult, "one.md")
+	if !strings.Contains(chapter, "- [Uses PLAN.md](#uses-plan-md)") {
+		t.Fatalf("the ToC entry must be plain text:\n%s", chapter)
+	}
+	if strings.Contains(chapter, "[Uses `PLAN.md`") {
+		t.Fatalf("the ToC entry still carries inline markup:\n%s", chapter)
+	}
+}

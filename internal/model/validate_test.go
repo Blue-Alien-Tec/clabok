@@ -173,6 +173,108 @@ func TestRegionRules(t *testing.T) {
 	expectCode(t, manifest, "model.unknown-region-kind")
 }
 
+func TestProseRules(t *testing.T) {
+	manifest := validManifest()
+	manifest.Root.Children[0].ProseBlock = 16
+	manifest.Regions = append(manifest.Regions, &Region{
+		ID: 23, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 2}, Blocks: []ID{16},
+	})
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("valid prose: %v", err.Issues)
+	}
+
+	manifest = validManifest()
+	manifest.Regions = append(manifest.Regions, &Region{
+		ID: 23, Kind: RegionProse, Target: Target{Kind: TargetBook}, Blocks: []ID{16},
+	})
+	expectCode(t, manifest, "model.invalid-target")
+
+	manifest = validManifest()
+	manifest.Regions = append(manifest.Regions, &Region{
+		ID: 23, Kind: RegionProse, Target: Target{Kind: TargetBlock, ID: 11}, Blocks: []ID{16},
+	})
+	expectCode(t, manifest, "model.invalid-target")
+
+	manifest = validManifest()
+	manifest.Regions = append(manifest.Regions, &Region{
+		ID: 23, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 2}, Blocks: []ID{16, 17},
+	})
+	expectCode(t, manifest, "model.prose-blocks")
+
+	manifest = validManifest()
+	manifest.Regions = append(manifest.Regions,
+		&Region{ID: 23, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 2}, Blocks: []ID{16}},
+		&Region{ID: 24, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 2}, Blocks: []ID{17}},
+	)
+	expectCode(t, manifest, "model.prose-count")
+
+	manifest = validManifest()
+	manifest.Root.Children[0].ProseBlock = 11
+	expectCode(t, manifest, "model.prose-not-region")
+
+	manifest = validManifest()
+	manifest.Root.Children[0].ProseBlock = 16
+	manifest.Regions = append(manifest.Regions, &Region{
+		ID: 23, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 3}, Blocks: []ID{16},
+	})
+	expectCode(t, manifest, "model.prose-owner")
+
+	manifest = validManifest()
+	manifest.Root.Children[0].ProseBlock = 16
+	manifest.Regions = append(manifest.Regions,
+		&Region{ID: 23, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 2}, Blocks: []ID{16}},
+		&Region{ID: 24, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 3}, Blocks: []ID{17}},
+	)
+	expectCode(t, manifest, "model.prose-ref-missing")
+}
+
+func TestStatusRules(t *testing.T) {
+	manifest := validManifest()
+	manifest.Status = &StatusConfig{Enabled: true}
+	manifest.Root.Children[0].Status = "final"
+	manifest.BlockMeta = map[ID]BlockMeta{11: {Status: "wip"}}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("valid status: %v", err.Issues)
+	}
+
+	manifest = validManifest()
+	manifest.Status = &StatusConfig{Enabled: true}
+	manifest.Root.Children[0].Status = "ghost"
+	expectCode(t, manifest, "model.unknown-status")
+
+	manifest = validManifest()
+	manifest.Status = &StatusConfig{Enabled: true}
+	manifest.BlockMeta = map[ID]BlockMeta{11: {Status: "ghost"}}
+	expectCode(t, manifest, "model.unknown-status")
+
+	manifest = validManifest()
+	manifest.Status = &StatusConfig{Enabled: false}
+	manifest.Root.Children[0].Status = "ghost"
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("a disabled system must ignore assignments: %v", err.Issues)
+	}
+}
+
+func TestBadgeRules(t *testing.T) {
+	manifest := validManifest()
+	manifest.Badges = []Badge{{ID: "go"}, {ID: "license", Message: "MIT"}}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("valid badges: %v", err.Issues)
+	}
+
+	manifest = validManifest()
+	manifest.Badges = []Badge{{ID: "go"}, {ID: "go"}}
+	expectCode(t, manifest, "model.duplicate-badge")
+
+	manifest = validManifest()
+	manifest.Badges = []Badge{{ID: "bad id"}}
+	expectCode(t, manifest, "model.invalid-badge")
+
+	manifest = validManifest()
+	manifest.Badges = []Badge{{ID: ""}}
+	expectCode(t, manifest, "model.invalid-badge")
+}
+
 func TestBlockMeta(t *testing.T) {
 	manifest := validManifest()
 	manifest.SetMeta(11, BlockMeta{Type: "UILayout", Locked: true})

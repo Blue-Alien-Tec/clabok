@@ -8,6 +8,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/config"
 	"github.com/Blue-Alien-Tec/clabok/internal/coordinator"
+	"github.com/Blue-Alien-Tec/clabok/internal/editorial"
 	"github.com/Blue-Alien-Tec/clabok/internal/library"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/render"
@@ -22,6 +23,7 @@ func main() {
 	coordinator.Register(registry)
 	lifecycle.Register(registry)
 	structure.Register(registry)
+	editorial.Register(registry)
 	apply.Register(registry)
 	body.Register(registry)
 	search.Register(registry)

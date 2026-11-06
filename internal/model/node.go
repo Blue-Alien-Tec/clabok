@@ -16,14 +16,17 @@ func (ref *Ref) Valid() bool {
 }
 
 // Node is one structural level or one link entry. It carries no body: blocks are the only bodies.
+// ProseBlock references the block that holds the optional one-line index prose.
 type Node struct {
-	ID       ID      `json:"id"`
-	Kind     Kind    `json:"kind"`
-	Title    string  `json:"title,omitempty"`
-	Part     string  `json:"part,omitempty"`
-	Blocks   []ID    `json:"blocks,omitempty"`
-	Children []*Node `json:"children,omitempty"`
-	Ref      *Ref    `json:"ref,omitempty"`
+	ID         ID      `json:"id"`
+	Kind       Kind    `json:"kind"`
+	Title      string  `json:"title,omitempty"`
+	Part       string  `json:"part,omitempty"`
+	ProseBlock ID      `json:"proseBlock,omitempty"`
+	Status     string  `json:"status,omitempty"`
+	Blocks     []ID    `json:"blocks,omitempty"`
+	Children   []*Node `json:"children,omitempty"`
+	Ref        *Ref    `json:"ref,omitempty"`
 }
 
 // Clone returns a deep copy.
@@ -32,10 +35,12 @@ func (node *Node) Clone() *Node {
 		return nil
 	}
 	clone := &Node{
-		ID:    node.ID,
-		Kind:  node.Kind,
-		Title: node.Title,
-		Part:  node.Part,
+		ID:         node.ID,
+		Kind:       node.Kind,
+		Title:      node.Title,
+		Part:       node.Part,
+		ProseBlock: node.ProseBlock,
+		Status:     node.Status,
 	}
 	if node.Blocks != nil {
 		clone.Blocks = append([]ID(nil), node.Blocks...)

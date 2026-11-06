@@ -3,6 +3,8 @@
 
 [Document Index](#document-index)
 
+[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 1.2.0-dev](https://img.shields.io/badge/version-1.2.0--dev-green?style=flat-square)
+
 # CLABOK
 
 Command-Line Authoring for Blocks and Orchestration Kit.
@@ -21,6 +23,7 @@ Status: initial Go scaffold. The full documentation is authored with CLABOK itse
 | Book |
 | --- |
 | [CLABOK Planning](Docs/clabok-planning/README.md) |
+| [UI Layout Demos](Docs/ui-layout-demos/README.md) |
 
 <a id="checks"></a>
 

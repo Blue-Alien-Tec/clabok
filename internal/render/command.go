@@ -446,6 +446,7 @@ func newService(env *cli.Env) (*Service, *cli.Error) {
 	}
 	service := New(life)
 	service.Overrides = values.AsciiUITypes
+	service.ProjectDir = values.ProjectDir
 	return service, nil
 }
 

@@ -1,7 +1,7 @@
-// Package buildinfo carries the product identity and the injected build version.
+// Package buildinfo carries the product identity and the development version.
 //
-// The version is set at build time with
-// -ldflags "-X github.com/Blue-Alien-Tec/clabok/internal/buildinfo.Version=<version>".
+// Version is the single source of truth and is not stamped with -ldflags. A change to this file is
+// the only CI trigger.
 package buildinfo
 
 const (
@@ -11,5 +11,5 @@ const (
 	CLI = "pecia"
 )
 
-// Version is the build version; the development default applies to unstamped builds.
-var Version = "1.0.0-dev"
+// Version is the development version; the milestone close bumps it.
+var Version = "1.2.0-dev"

@@ -50,7 +50,7 @@ internal/render/command.go        Overrides from asciiui.types
 - The `asciiui add|set|remove` authoring commands: S12 owns the feature and calls
   `structure.AddLockedBlock`.
 - Stable anchors and references: S10.
-- Index prose: the field arrives with S12.
+- Index prose: the block reference arrives with S12.
 
 ## 6. Implementation notes (2026-11-05)
 

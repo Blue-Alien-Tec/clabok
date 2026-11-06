@@ -68,6 +68,20 @@ func TestDecodeNormalizesSettings(t *testing.T) {
 	}
 }
 
+func TestDecodeUpgradesVersion2(t *testing.T) {
+	document := `{"version":2,"id":"x","root":{"id":"1","kind":"title","title":"X"},"settings":{}}`
+	manifest, err := Decode([]byte(document))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != Version {
+		t.Fatalf("version %d, want %d", manifest.Version, Version)
+	}
+	if !manifest.Root.ProseBlock.IsZero() {
+		t.Fatalf("unexpected prose block %s", manifest.Root.ProseBlock)
+	}
+}
+
 func TestDecodeRejectsInvalidDocuments(t *testing.T) {
 	cases := []struct {
 		document string
@@ -75,7 +89,8 @@ func TestDecodeRejectsInvalidDocuments(t *testing.T) {
 	}{
 		{`{"version":2,"id":"x","root":{"id":"1","kind":"title","title":"X"},"bogus":1}`, "model.unknown-key"},
 		{`{"version":2,"version":2}`, "model.duplicate-key"},
-		{`{"version":3,"id":"x"}`, "model.manifest-version"},
+		{`{"version":4,"id":"x"}`, "model.manifest-version"},
+		{`{"version":1,"id":"x"}`, "model.manifest-version"},
 		{`{"id":"x"}`, "model.manifest-version"},
 		{`{`, "model.invalid-json"},
 	}

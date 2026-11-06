@@ -59,6 +59,23 @@ func TestBookBlockAndClone(t *testing.T) {
 	}
 }
 
+func TestBookProseBody(t *testing.T) {
+	book := bookWithBodies()
+	book.Manifest.Root.Children[0].ProseBlock = 16
+	book.Manifest.Regions = append(book.Manifest.Regions, &Region{
+		ID: 23, Kind: RegionProse, Target: Target{Kind: TargetNode, ID: 2}, Blocks: []ID{16},
+	})
+	book.SetBody(16, "A short summary\n")
+	if err := book.Validate(); err != nil {
+		t.Fatalf("unexpected issues: %v", err.Issues)
+	}
+	book.SetBody(16, "line one\nline two\n")
+	err := book.Validate()
+	if err == nil || !hasCode(err, "model.invalid-prose") {
+		t.Fatalf("expected invalid prose, got %v", err)
+	}
+}
+
 func TestBookWithNilManifest(t *testing.T) {
 	book := &Book{}
 	err := book.Validate()

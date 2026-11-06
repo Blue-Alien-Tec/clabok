@@ -5,159 +5,170 @@
 
 # CLABOK Planning
 
+**Status**
+
+| Status | Meaning |
+| --- | --- |
+| ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) | Content is settled; only errata and clarifications remain. |
+| ![status: In Review](https://img.shields.io/badge/status-In%20Review-yellow?style=flat-square) | Content is complete and under review; small changes are expected. |
+| ![status: Work in Progress](https://img.shields.io/badge/status-Work%20in%20Progress-orange?style=flat-square) | The direction is set, details are still moving. |
+| ![status: Draft](https://img.shields.io/badge/status-Draft-lightgrey?style=flat-square) | An outline and a direction; the content is not complete. |
+
 ## Index
 
-- [CLABOK — Body Granularity, Structural Authority, Documentation Location and Central Store (Conceptual Target Model)](#clabok-body-granularity-structural-authority-documentation-location-and-central-store-conceptual-target-model)
-  - [Purpose](#purpose)
-  - [Verified Current State](#verified-current-state)
-  - [Target Model (normative, as stated)](#target-model-normative-as-stated)
-  - [Gap Analysis](#gap-analysis)
-  - [Areas the Later Plan Must Cover](#areas-the-later-plan-must-cover)
-  - [Invariants to Preserve](#invariants-to-preserve)
-  - [Legacy Library Inventory (untouched by this plan)](#legacy-library-inventory-untouched-by-this-plan)
-  - [Out of Scope](#out-of-scope)
-  - [Open Questions and Decision Points](#open-questions-and-decision-points)
-- [CLABOK Scope Map](#clabok-scope-map)
-  - [Why this folder exists](#why-this-folder-exists)
-  - [Ground rules](#ground-rules)
-  - [Scope catalogue](#scope-catalogue)
-  - [Delivery order and milestones](#delivery-order-and-milestones)
-  - [Coverage of `PLAN.md` §3](#coverage-of-plan-md-3)
-  - [Invariant ownership (`PLAN.md` §6)](#invariant-ownership-plan-md-6)
-  - [Cross-scope contracts](#cross-scope-contracts)
-  - [Definition of done (applies to every scope)](#definition-of-done-applies-to-every-scope)
-  - [Global exclusions](#global-exclusions)
-  - [Change control](#change-control)
-- [Handover: State After S11 (M5 implemented and pushed; bump/CI deferred)](#handover-state-after-s11-m5-implemented-and-pushed-bump-ci-deferred)
-  - [Where the project stands](#where-the-project-stands)
-  - [Non-negotiable workflow rules](#non-negotiable-workflow-rules)
-  - [Toolchain](#toolchain)
-  - [Repository map](#repository-map)
-  - [Contracts a new scope must use](#contracts-a-new-scope-must-use)
-  - [Invariants and conventions](#invariants-and-conventions)
-  - [Known gaps and explicit carry-overs](#known-gaps-and-explicit-carry-overs)
-  - [Starting the next session](#starting-the-next-session)
-- [S01 — Foundation and CLI Contract](#s01-foundation-and-cli-contract)
-  - [Goal](#goal)
-  - [In scope](#in-scope)
-  - [Out of scope](#out-of-scope-2)
-  - [Deliverables](#deliverables)
-  - [Acceptance criteria](#acceptance-criteria)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session)
-  - [Risks and constraints](#risks-and-constraints)
-- [S02 — Configuration](#s02-configuration)
-  - [Goal](#goal-2)
-  - [In scope](#in-scope-2)
-  - [Out of scope](#out-of-scope-3)
-  - [Deliverables](#deliverables-2)
-  - [Acceptance criteria](#acceptance-criteria-2)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-2)
-  - [Risks and constraints](#risks-and-constraints-2)
-- [S03 — Domain Model and Identifiers](#s03-domain-model-and-identifiers)
-  - [Goal](#goal-3)
-  - [In scope](#in-scope-3)
-  - [Out of scope](#out-of-scope-4)
-  - [Deliverables](#deliverables-3)
-  - [Acceptance criteria](#acceptance-criteria-3)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-3)
-  - [Risks and constraints](#risks-and-constraints-3)
-- [S04 — Central Store and Containers](#s04-central-store-and-containers)
-  - [Goal](#goal-4)
-  - [In scope](#in-scope-4)
-  - [Out of scope](#out-of-scope-5)
-  - [Deliverables](#deliverables-4)
-  - [Acceptance criteria](#acceptance-criteria-4)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-4)
-  - [Risks and constraints](#risks-and-constraints-4)
-- [S05 — Open/Close Lifecycle and Rollback Tiers](#s05-open-close-lifecycle-and-rollback-tiers)
-  - [Goal](#goal-5)
-  - [In scope](#in-scope-5)
-  - [Out of scope](#out-of-scope-6)
-  - [Deliverables](#deliverables-5)
-  - [Acceptance criteria](#acceptance-criteria-5)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-5)
-  - [Risks and constraints](#risks-and-constraints-5)
-- [S06 — Concurrency and Coordination](#s06-concurrency-and-coordination)
-  - [Goal](#goal-6)
-  - [In scope](#in-scope-6)
-  - [Out of scope](#out-of-scope-7)
-  - [Deliverables](#deliverables-6)
-  - [Acceptance criteria](#acceptance-criteria-6)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-6)
-  - [Risks and constraints](#risks-and-constraints-6)
-- [S07 — Structure and Book Settings Commands](#s07-structure-and-book-settings-commands)
-  - [Goal](#goal-7)
-  - [In scope](#in-scope-7)
-  - [Out of scope](#out-of-scope-8)
-  - [Deliverables](#deliverables-7)
-  - [Acceptance criteria](#acceptance-criteria-7)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-7)
-  - [Risks and constraints](#risks-and-constraints-7)
-- [S08 — Body Authoring, Prose Discipline and Temp](#s08-body-authoring-prose-discipline-and-temp)
-  - [Goal](#goal-8)
-  - [In scope](#in-scope-8)
-  - [Out of scope](#out-of-scope-9)
-  - [Deliverables](#deliverables-8)
-  - [Acceptance criteria](#acceptance-criteria-8)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-8)
-  - [Risks and constraints](#risks-and-constraints-8)
-- [S09 — Rendering and Output Modes](#s09-rendering-and-output-modes)
-  - [Goal](#goal-9)
-  - [In scope](#in-scope-9)
-  - [Out of scope](#out-of-scope-10)
-  - [Deliverables](#deliverables-9)
-  - [Acceptance criteria](#acceptance-criteria-9)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-9)
-  - [Risks and constraints](#risks-and-constraints-9)
-- [S10 — Numbering, Anchors and References](#s10-numbering-anchors-and-references)
-  - [Goal](#goal-10)
-  - [In scope](#in-scope-10)
-  - [Out of scope](#out-of-scope-11)
-  - [Deliverables](#deliverables-10)
-  - [Acceptance criteria](#acceptance-criteria-10)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-10)
-  - [Risks and constraints](#risks-and-constraints-10)
-- [S11 — Library Book, Documentation Location and Cut-Over](#s11-library-book-documentation-location-and-cut-over)
-  - [Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05)
-  - [Goal](#goal-11)
-  - [In scope](#in-scope-11)
-  - [Out of scope](#out-of-scope-12)
-  - [Deliverables](#deliverables-11)
-  - [Acceptance criteria](#acceptance-criteria-11)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-11)
-  - [Risks and constraints](#risks-and-constraints-11)
-- [S12 — Editorial State and Generated Content](#s12-editorial-state-and-generated-content)
-  - [Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05-2)
-  - [Goal](#goal-12)
-  - [In scope](#in-scope-12)
-  - [Out of scope](#out-of-scope-13)
-  - [Deliverables](#deliverables-12)
-  - [Acceptance criteria](#acceptance-criteria-12)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-12)
-  - [Risks and constraints](#risks-and-constraints-12)
-  - [Refinement (2026-11-05)](#refinement-2026-11-05)
-- [S13 — Grammar Gate and Term List](#s13-grammar-gate-and-term-list)
-  - [Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05-3)
-  - [Goal](#goal-13)
-  - [In scope](#in-scope-13)
-  - [Out of scope](#out-of-scope-14)
-  - [Deliverables](#deliverables-13)
-  - [Acceptance criteria](#acceptance-criteria-13)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-13)
-  - [Risks and constraints](#risks-and-constraints-13)
-- [S14 — Terminal UI](#s14-terminal-ui)
-  - [Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05-4)
-  - [Goal](#goal-14)
-  - [In scope](#in-scope-14)
-  - [Out of scope](#out-of-scope-15)
-  - [Deliverables](#deliverables-14)
-  - [Acceptance criteria](#acceptance-criteria-14)
-  - [Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-14)
-  - [Risks and constraints](#risks-and-constraints-14)
+| Document | Status |
+| --- | --- |
+| [CLABOK — Body Granularity, Structural Authority, Documentation Location and Central Store (Conceptual Target Model)](#clabok-body-granularity-structural-authority-documentation-location-and-central-store-conceptual-target-model) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Purpose](#purpose) |  |
+| &emsp;[Verified Current State](#verified-current-state) |  |
+| &emsp;[Target Model (normative, as stated)](#target-model-normative-as-stated) |  |
+| &emsp;[Gap Analysis](#gap-analysis) |  |
+| &emsp;[Areas the Later Plan Must Cover](#areas-the-later-plan-must-cover) |  |
+| &emsp;[Invariants to Preserve](#invariants-to-preserve) |  |
+| &emsp;[Legacy Library Inventory (untouched by this plan)](#legacy-library-inventory-untouched-by-this-plan) |  |
+| &emsp;[Out of Scope](#out-of-scope) |  |
+| &emsp;[Open Questions and Decision Points](#open-questions-and-decision-points) |  |
+| [CLABOK Scope Map](#clabok-scope-map) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Why this folder exists](#why-this-folder-exists) |  |
+| &emsp;[Ground rules](#ground-rules) |  |
+| &emsp;[Scope catalogue](#scope-catalogue) |  |
+| &emsp;[Delivery order and milestones](#delivery-order-and-milestones) |  |
+| &emsp;[Coverage of PLAN.md §3](#coverage-of-plan-md-3) |  |
+| &emsp;[Invariant ownership (PLAN.md §6)](#invariant-ownership-plan-md-6) |  |
+| &emsp;[Cross-scope contracts](#cross-scope-contracts) |  |
+| &emsp;[Definition of done (applies to every scope)](#definition-of-done-applies-to-every-scope) |  |
+| &emsp;[Global exclusions](#global-exclusions) |  |
+| &emsp;[Change control](#change-control) |  |
+| [Handover: State After S11 (M5 implemented and pushed; bump/CI deferred)](#handover-state-after-s11-m5-implemented-and-pushed-bump-ci-deferred) | ![status: In Review](https://img.shields.io/badge/status-In%20Review-yellow?style=flat-square) |
+| &emsp;[Where the project stands](#where-the-project-stands) |  |
+| &emsp;[Non-negotiable workflow rules](#non-negotiable-workflow-rules) |  |
+| &emsp;[Toolchain](#toolchain) |  |
+| &emsp;[Repository map](#repository-map) |  |
+| &emsp;[Contracts a new scope must use](#contracts-a-new-scope-must-use) |  |
+| &emsp;[Invariants and conventions](#invariants-and-conventions) |  |
+| &emsp;[Known gaps and explicit carry-overs](#known-gaps-and-explicit-carry-overs) |  |
+| &emsp;[Starting the next session](#starting-the-next-session) |  |
+| [S01 — Foundation and CLI Contract](#s01-foundation-and-cli-contract) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal) |  |
+| &emsp;[In scope](#in-scope) |  |
+| &emsp;[Out of scope](#out-of-scope-2) |  |
+| &emsp;[Deliverables](#deliverables) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints) |  |
+| [S02 — Configuration](#s02-configuration) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-2) |  |
+| &emsp;[In scope](#in-scope-2) |  |
+| &emsp;[Out of scope](#out-of-scope-3) |  |
+| &emsp;[Deliverables](#deliverables-2) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-2) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-2) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-2) |  |
+| [S03 — Domain Model and Identifiers](#s03-domain-model-and-identifiers) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-3) |  |
+| &emsp;[In scope](#in-scope-3) |  |
+| &emsp;[Out of scope](#out-of-scope-4) |  |
+| &emsp;[Deliverables](#deliverables-3) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-3) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-3) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-3) |  |
+| [S04 — Central Store and Containers](#s04-central-store-and-containers) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-4) |  |
+| &emsp;[In scope](#in-scope-4) |  |
+| &emsp;[Out of scope](#out-of-scope-5) |  |
+| &emsp;[Deliverables](#deliverables-4) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-4) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-4) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-4) |  |
+| [S05 — Open/Close Lifecycle and Rollback Tiers](#s05-open-close-lifecycle-and-rollback-tiers) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-5) |  |
+| &emsp;[In scope](#in-scope-5) |  |
+| &emsp;[Out of scope](#out-of-scope-6) |  |
+| &emsp;[Deliverables](#deliverables-5) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-5) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-5) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-5) |  |
+| [S06 — Concurrency and Coordination](#s06-concurrency-and-coordination) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-6) |  |
+| &emsp;[In scope](#in-scope-6) |  |
+| &emsp;[Out of scope](#out-of-scope-7) |  |
+| &emsp;[Deliverables](#deliverables-6) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-6) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-6) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-6) |  |
+| [S07 — Structure and Book Settings Commands](#s07-structure-and-book-settings-commands) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-7) |  |
+| &emsp;[In scope](#in-scope-7) |  |
+| &emsp;[Out of scope](#out-of-scope-8) |  |
+| &emsp;[Deliverables](#deliverables-7) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-7) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-7) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-7) |  |
+| [S08 — Body Authoring, Prose Discipline and Temp](#s08-body-authoring-prose-discipline-and-temp) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-8) |  |
+| &emsp;[In scope](#in-scope-8) |  |
+| &emsp;[Out of scope](#out-of-scope-9) |  |
+| &emsp;[Deliverables](#deliverables-8) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-8) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-8) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-8) |  |
+| [S09 — Rendering and Output Modes](#s09-rendering-and-output-modes) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-9) |  |
+| &emsp;[In scope](#in-scope-9) |  |
+| &emsp;[Out of scope](#out-of-scope-10) |  |
+| &emsp;[Deliverables](#deliverables-9) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-9) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-9) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-9) |  |
+| [S10 — Numbering, Anchors and References](#s10-numbering-anchors-and-references) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Goal](#goal-10) |  |
+| &emsp;[In scope](#in-scope-10) |  |
+| &emsp;[Out of scope](#out-of-scope-11) |  |
+| &emsp;[Deliverables](#deliverables-10) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-10) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-10) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-10) |  |
+| [S11 — Library Book, Documentation Location and Cut-Over](#s11-library-book-documentation-location-and-cut-over) | ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square) |
+| &emsp;[Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05) |  |
+| &emsp;[Goal](#goal-11) |  |
+| &emsp;[In scope](#in-scope-11) |  |
+| &emsp;[Out of scope](#out-of-scope-12) |  |
+| &emsp;[Deliverables](#deliverables-11) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-11) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-11) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-11) |  |
+| [S12 — Editorial State and Generated Content](#s12-editorial-state-and-generated-content) | ![status: Work in Progress](https://img.shields.io/badge/status-Work%20in%20Progress-orange?style=flat-square) |
+| &emsp;[Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05-2) |  |
+| &emsp;[Goal](#goal-12) |  |
+| &emsp;[In scope](#in-scope-12) |  |
+| &emsp;[Out of scope](#out-of-scope-13) |  |
+| &emsp;[Deliverables](#deliverables-12) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-12) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-12) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-12) |  |
+| &emsp;[Refinement (2026-11-05)](#refinement-2026-11-05) |  |
+| [S13 — Grammar Gate and Term List](#s13-grammar-gate-and-term-list) | ![status: Draft](https://img.shields.io/badge/status-Draft-lightgrey?style=flat-square) |
+| &emsp;[Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05-3) |  |
+| &emsp;[Goal](#goal-13) |  |
+| &emsp;[In scope](#in-scope-13) |  |
+| &emsp;[Out of scope](#out-of-scope-14) |  |
+| &emsp;[Deliverables](#deliverables-13) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-13) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-13) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-13) |  |
+| [S14 — Terminal UI](#s14-terminal-ui) | ![status: Draft](https://img.shields.io/badge/status-Draft-lightgrey?style=flat-square) |
+| &emsp;[Current state and pre-planned decisions (2026-11-05)](#current-state-and-pre-planned-decisions-2026-11-05-4) |  |
+| &emsp;[Goal](#goal-14) |  |
+| &emsp;[In scope](#in-scope-14) |  |
+| &emsp;[Out of scope](#out-of-scope-15) |  |
+| &emsp;[Deliverables](#deliverables-14) |  |
+| &emsp;[Acceptance criteria](#acceptance-criteria-14) |  |
+| &emsp;[Design decisions for this scope's planning session](#design-decisions-for-this-scope-s-planning-session-14) |  |
+| &emsp;[Risks and constraints](#risks-and-constraints-14) |  |
 
 <a id="clabok-body-granularity-structural-authority-documentation-location-and-central-store-conceptual-target-model"></a>
 
-## CLABOK — Body Granularity, Structural Authority, Documentation Location and Central Store (Conceptual Target Model)
+## CLABOK — Body Granularity, Structural Authority, Documentation Location and Central Store (Conceptual Target Model) ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: draft (2026-11-04, revised 2026-11-05). Conceptual only: no implementation design, no
 migration started. Owner decisions are recorded in §3.1–3.14. This document records the target
@@ -861,7 +872,7 @@ No open questions remain. Owner decisions are recorded in §3.1–3.10.
 
 <a id="clabok-scope-map"></a>
 
-## CLABOK Scope Map
+## CLABOK Scope Map ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: scope breakdown (2026-11-05).
 Normative source: [../PLAN.md](../PLAN.md).
@@ -922,7 +933,7 @@ session has to resolve.
 | [S09](09-rendering-and-output-modes.md) | Rendering and output modes | 5 | S04, S07, S08 | implemented | §3.4, §3.7 (heading mapping, mode switch, navigation), §3 (7), §3.14 (index prose) |
 | [S10](10-numbering-anchors-references.md) | Numbering, anchors and references | 5 | S09 | implemented | §3.7 (numbering, anchors, references, reorder) |
 | [S11](11-library-docs-and-cutover.md) | Library book, documentation location and cut-over | 6 | S02, S04, S05, S09, S10 | implemented | §3.1, §3.6, §3.8, §3.9 |
-| [S12](12-editorial-state-and-generated-content.md) | Editorial state and generated content | 7 | S09 | draft | §3.14, §3 (4) |
+| [S12](12-editorial-state-and-generated-content.md) | Editorial state and generated content | 7 | S09 | in progress (S12a–S12d; S12e deferred) | §3.14, §3 (4) |
 | [S13](13-grammar-and-terms.md) | Grammar gate and term list | 7 | S02, S08 | draft | §3.14 (terms and grammar), §3.11 (grammar endpoint) |
 | [S14](14-tui.md) | Terminal UI | 8 | S07, S08, S09 | draft | §3.10 (TUI) |
 
@@ -1118,7 +1129,7 @@ These are excluded for every scope and are not repeated per document:
 
 <a id="handover-state-after-s11-m5-implemented-and-pushed-bump-ci-deferred"></a>
 
-## Handover: State After S11 (M5 implemented and pushed; bump/CI deferred)
+## Handover: State After S11 (M5 implemented and pushed; bump/CI deferred) ![status: In Review](https://img.shields.io/badge/status-In%20Review-yellow?style=flat-square)
 
 Status: handover (2026-11-05). Read this first in a fresh session.
 Normative source: [../PLAN.md](../PLAN.md). Scope map: [README.md](README.md).
@@ -1196,6 +1207,7 @@ internal/refs             title anchors, assigner, target resolution, [[id:N]]
 internal/render           pure renderer (open or closed source), sync, check, library-wide sync
 internal/library          registry defaults, book new/move/rename/unregister, Document Index
 internal/idspace          library ID ledger, global allocation, Peek
+internal/editorial        prose and region commands (footer, notes)
 ```
 
 
@@ -1249,6 +1261,11 @@ internal/idspace          library ID ledger, global allocation, Peek
   the persisted ledger `<store>/ids.json` under the `KindIDs` lock; `Peek` previews without writing
   for dry runs. The ledger is initialized from the highest owned ID of every registered book when
   it is missing.
+- **Editorial** (`internal/editorial`): `prose set|clear` and
+  `region set|clear|notes|remove`. The mutations live in `structure`
+  (`SetProse`, `SetFooter`, `ClearFooter`, `AddNote`, `RemoveNote`); a created region block is
+  written with its text in the same atomic step. Manifest v3 adds `Node.Prose`; v2 manifests are
+  read and upgraded in memory.
 - **Asciiui** (`internal/asciiui`): `Parse`, `Render`, `Defaults`, `Resolve`; specs live at
   `layouts/asciiui/<blockID>.asciiui` in the container/extract.
 - **Apply** (`internal/apply`): plan v1 with `add`, `rename`, `move`, `remove`, `type`, `setting`;
@@ -1300,8 +1317,9 @@ internal/idspace          library ID ledger, global allocation, Peek
   triggered. Bump to `1.1.0-dev` in a follow-up commit when the CI run is wanted.
 - **Apply has no content step.** S07b planned it for S08; S08 defined the body commands but no
   `apply` body op exists. Decide in a later scope; the gate (S13) must then cover it.
-- **Index prose is not modelled.** The renderer's Document Index has one column; S12 adds prose and
-  the note column. The repository-layout block is S12.
+- **Editorial state is partial.** S12a delivers manifest v3, index prose, the footer and notes
+  commands and their rendering. S12b–S12e remain: ASCII UI authoring, status, badges and the
+  repository-layout block.
 - **No grammar/terms code** exists; the body write path is the single hook point.
 - **No TUI** exists.
 - **Legacy books** under `Assets/Docs` are untouched and unreadable by CLABOK (no import/adopt).
@@ -1325,7 +1343,7 @@ internal/idspace          library ID ledger, global allocation, Peek
 
 <a id="s01-foundation-and-cli-contract"></a>
 
-## S01 — Foundation and CLI Contract
+## S01 — Foundation and CLI Contract ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Plan: [plans/01-foundation-and-cli-contract.md](plans/01-foundation-and-cli-contract.md).
 Phase: 1. Depends on: none. Blocks: every other scope.
@@ -1435,7 +1453,7 @@ package boundary.
 
 <a id="s02-configuration"></a>
 
-## S02 — Configuration
+## S02 — Configuration ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Plan: [plans/02-configuration.md](plans/02-configuration.md).
 Phase: 1. Depends on: S01. Blocks: S04 (paths), S06 (concurrency mode), S09 (asciiui overrides),
@@ -1547,7 +1565,7 @@ command surface and a precedence rule that every other scope can rely on.
 
 <a id="s03-domain-model-and-identifiers"></a>
 
-## S03 — Domain Model and Identifiers
+## S03 — Domain Model and Identifiers ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Plan: [plans/03-domain-model-and-identifiers.md](plans/03-domain-model-and-identifiers.md).
 Phase: 2. Depends on: S01. Blocks: S04, S07, S08, S09, S10, S11.
@@ -1671,7 +1689,7 @@ make every structural invariant machine-checkable before any storage, command or
 
 <a id="s04-central-store-and-containers"></a>
 
-## S04 — Central Store and Containers
+## S04 — Central Store and Containers ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Delivery slices: S04a (container codec, delivered) -> S04b (store
 layout, book identity, hash pairs, delivered) -> S04c (registry, diff, export, delivered).
@@ -1792,7 +1810,7 @@ round-trips, per-member hashes and drift detection, and without any book semanti
 
 <a id="s05-open-close-lifecycle-and-rollback-tiers"></a>
 
-## S05 — Open/Close Lifecycle and Rollback Tiers
+## S05 — Open/Close Lifecycle and Rollback Tiers ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Delivery slices: S05a (open/close mechanics, open state,
 extraction, repack, recovery, delivered) and S05b (rollback tiers, crash reporting, delivered).
@@ -1915,7 +1933,7 @@ and a crash is reported instead of repaired.
 
 <a id="s06-concurrency-and-coordination"></a>
 
-## S06 — Concurrency and Coordination
+## S06 — Concurrency and Coordination ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Delivery slices: S06a (coordinator interface, file backend,
 delivered) and S06b (daemon, mode selection, version handshake, conformance suite, delivered).
@@ -2037,7 +2055,7 @@ parallel, structural changes serialize per node, and no backend changes book dat
 
 <a id="s07-structure-and-book-settings-commands"></a>
 
-## S07 — Structure and Book Settings Commands
+## S07 — Structure and Book Settings Commands ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Delivery slices: S07a (add, rename, move, remove, book settings,
 delivered) and S07b (declarative `apply` plans, delivered).
@@ -2155,7 +2173,7 @@ replace direct manifest editing — all through locks, dry-run and rollback.
 
 <a id="s08-body-authoring-prose-discipline-and-temp"></a>
 
-## S08 — Body Authoring, Prose Discipline and Temp
+## S08 — Body Authoring, Prose Discipline and Temp ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Delivery slices: S08a (body commands, prose discipline, block
 parallelism, delivered) and S08b (temp area, flush, find, delivered).
@@ -2280,7 +2298,7 @@ deeper is text, and keep transient authoring inputs in the project `.temp` area.
 
 <a id="s09-rendering-and-output-modes"></a>
 
-## S09 — Rendering and Output Modes
+## S09 — Rendering and Output Modes ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Delivery slices: S09a (render modes, index, sync, check) and S09b (ASCII UI catalog, anchor rendering). The index-prose field arrives with S12.
 Phase: 5. Depends on: S04 (store), S07 (structure, settings), S08 (bodies). Blocks: S10, S11, S12, S14.
@@ -2415,7 +2433,7 @@ a generated index in the README, per-file navigation and pruning of files a mode
 
 <a id="s10-numbering-anchors-and-references"></a>
 
-## S10 — Numbering, Anchors and References
+## S10 — Numbering, Anchors and References ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05). Delivery slices: S10a (numbering, anchors, references, delivered).
 Revision (2026-11-05, owner decision): IDs are immutable; the S10b rekey slice was removed. Placement
@@ -2536,7 +2554,7 @@ immutable: placement changes never rewrite a reference.
 
 <a id="s11-library-book-documentation-location-and-cut-over"></a>
 
-## S11 — Library Book, Documentation Location and Cut-Over
+## S11 — Library Book, Documentation Location and Cut-Over ![status: Final](https://img.shields.io/badge/status-Final-brightgreen?style=flat-square)
 
 Status: implemented (2026-11-05); milestone close pending.
 Revision (2026-11-05, owner decision): IDs are immutable and there is no rekey. Placement is a
@@ -2700,9 +2718,9 @@ real book while the legacy books stay untouched.
 
 <a id="s12-editorial-state-and-generated-content"></a>
 
-## S12 — Editorial State and Generated Content
+## S12 — Editorial State and Generated Content ![status: Work in Progress](https://img.shields.io/badge/status-Work%20in%20Progress-orange?style=flat-square)
 
-Status: draft, not planned.
+Status: in progress (S12a delivered 2026-11-05; S12b–S12e open).
 Phase: 7. Depends on: S09 (render placement contract). Blocks: none, but S11 is its first consumer.
 PLAN refs: §3.14 (regions, footer, notes, index prose, status, badges, layout block), §3 (4),
 §3.11 (asciiui types are an S09 concern).
@@ -2856,7 +2874,7 @@ instead of hand-written markup, while removing the header and preamble regions f
 
 <a id="s13-grammar-gate-and-term-list"></a>
 
-## S13 — Grammar Gate and Term List
+## S13 — Grammar Gate and Term List ![status: Draft](https://img.shields.io/badge/status-Draft-lightgrey?style=flat-square)
 
 Status: draft, not planned.
 Phase: 7. Depends on: S02 (grammar endpoint), S08 (prose-writing commands, temp). Blocks: none.
@@ -2996,7 +3014,7 @@ tool-owned, confirmation-gated artifact so that no prose write and no term chang
 
 <a id="s14-terminal-ui"></a>
 
-## S14 — Terminal UI
+## S14 — Terminal UI ![status: Draft](https://img.shields.io/badge/status-Draft-lightgrey?style=flat-square)
 
 Status: draft, not planned.
 Phase: 8. Depends on: S07 (structure), S08 (body), S09 (render), plus S05/S06 behaviour at runtime.

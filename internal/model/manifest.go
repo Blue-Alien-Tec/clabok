@@ -11,8 +11,9 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 )
 
-// Version is the supported manifest schema version. Version 2 added optional block metadata.
-const Version = 2
+// Version is the supported manifest schema version. Version 2 added optional block metadata;
+// version 3 added the index-prose block reference.
+const Version = 3
 
 // BookID names a book in the store. It is not an element ID and is not referenced by other books.
 type BookID string
@@ -40,6 +41,8 @@ type BlockMeta struct {
 	Type string `json:"type,omitempty"`
 	// Locked protects the generated content: a command may not change the body or the type.
 	Locked bool `json:"locked,omitempty"`
+	// Status is the assigned editorial state while the book enables the status system.
+	Status string `json:"status,omitempty"`
 }
 
 // Manifest is the structure document of one book. Bodies are not part of it: they live in the body
@@ -50,6 +53,8 @@ type Manifest struct {
 	Root      *Node            `json:"root"`
 	Regions   []*Region        `json:"regions,omitempty"`
 	BlockMeta map[ID]BlockMeta `json:"blockMeta,omitempty"`
+	Status    *StatusConfig    `json:"status,omitempty"`
+	Badges    []Badge          `json:"badges,omitempty"`
 	Settings  Settings         `json:"settings"`
 }
 
@@ -63,7 +68,7 @@ func (manifest *Manifest) Meta(id ID) BlockMeta {
 
 // SetMeta writes block metadata. The zero value removes the entry.
 func (manifest *Manifest) SetMeta(id ID, meta BlockMeta) {
-	if meta.Type == "" && !meta.Locked {
+	if meta.Type == "" && !meta.Locked && meta.Status == "" {
 		delete(manifest.BlockMeta, id)
 		if len(manifest.BlockMeta) == 0 {
 			manifest.BlockMeta = nil
@@ -134,20 +139,21 @@ func Decode(data []byte) (*Manifest, error) {
 		}
 		return nil, &Error{Code: "model.invalid-json", Message: err.Error()}
 	}
-	if manifest.Version != Version {
-		if manifest.Version > Version {
-			return nil, &Error{
-				Code: "model.manifest-version",
-				Message: fmt.Sprintf("manifest version %d is newer than pecia supports (%d)",
-					manifest.Version, Version),
-			}
-		}
+	if manifest.Version > Version {
 		return nil, &Error{
 			Code: "model.manifest-version",
-			Message: fmt.Sprintf("unsupported manifest version %d (expected %d)",
+			Message: fmt.Sprintf("manifest version %d is newer than pecia supports (%d)",
 				manifest.Version, Version),
 		}
 	}
+	if manifest.Version < 2 {
+		return nil, &Error{
+			Code: "model.manifest-version",
+			Message: fmt.Sprintf("unsupported manifest version %d (expected 2 or %d)",
+				manifest.Version, Version),
+		}
+	}
+	manifest.Version = Version
 	manifest.Normalize()
 	return &manifest, nil
 }
@@ -176,6 +182,14 @@ func (manifest *Manifest) Clone() *Manifest {
 		ID:       manifest.ID,
 		Root:     manifest.Root.Clone(),
 		Settings: manifest.Settings,
+	}
+	if manifest.Status != nil {
+		status := *manifest.Status
+		clone.Status = &status
+	}
+	if manifest.Badges != nil {
+		clone.Badges = make([]Badge, len(manifest.Badges))
+		copy(clone.Badges, manifest.Badges)
 	}
 	if manifest.BlockMeta != nil {
 		clone.BlockMeta = make(map[ID]BlockMeta, len(manifest.BlockMeta))

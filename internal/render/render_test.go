@@ -396,8 +396,11 @@ func TestRenderAsciiUIAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := result.Files[0].Content
-	if !strings.Contains(content, "<!-- asciiui:50 -->") || !strings.Contains(content, "[ Buy ]") {
+	if !strings.Contains(content, "<!-- asciiui:50 -->\n```text\n") || !strings.Contains(content, "[ Buy ]") {
 		t.Fatalf("ascii drawing missing\n%s", content)
+	}
+	if !strings.Contains(content, "\n```\n<!-- /asciiui:50 -->") {
+		t.Fatalf("the drawing is not fenced\n%s", content)
 	}
 	if !strings.Contains(content, "Buy: Button") {
 		t.Fatalf("generic legend missing\n%s", content)
@@ -601,6 +604,24 @@ func TestSlug(t *testing.T) {
 	for input, want := range cases {
 		if got := Slug(input); got != want {
 			t.Fatalf("Slug(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestPlainTitle(t *testing.T) {
+	cases := map[string]string{
+		"Coverage of `PLAN.md` §3":           "Coverage of PLAN.md §3",
+		"**Bold** and __Strong__":            "Bold and Strong",
+		"~~Struck~~":                         "Struck",
+		"[Nested](https://example.com) link": "Nested link",
+		"![Alt](image.png) image":            "Alt image",
+		"plain title":                        "plain title",
+		"broken [bracket":                    "broken [bracket",
+		"broken [link]":                      "broken [link]",
+	}
+	for input, want := range cases {
+		if got := plainTitle(input); got != want {
+			t.Fatalf("plainTitle(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

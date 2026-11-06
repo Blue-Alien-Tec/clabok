@@ -40,10 +40,12 @@ var Defaults = map[string]string{
 	"separator": "Separator",
 }
 
-// Resolve returns the widget label for a node: an explicit widget wins, then the configured
-// override for the generic kind, then the built-in default.
+// Resolve returns the widget label for a node. A project type is the one place that names a concrete
+// widget: an explicit generic label (the built-in default, for example `Button`) yields to the
+// configured override, so `asciiui.types.button = UIButton` turns every generic button into UIButton.
+// An explicit non-generic label stays a one-node override.
 func Resolve(kind, explicit string, overrides map[string]string) string {
-	if explicit != "" {
+	if explicit != "" && !isGenericLabel(explicit) {
 		return explicit
 	}
 	if overrides != nil {
@@ -51,10 +53,23 @@ func Resolve(kind, explicit string, overrides map[string]string) string {
 			return value
 		}
 	}
+	if explicit != "" {
+		return explicit
+	}
 	if value := Defaults[kind]; value != "" {
 		return value
 	}
 	return kind
+}
+
+// isGenericLabel reports whether the label is one of the built-in generic widget names.
+func isGenericLabel(label string) bool {
+	for _, generic := range Defaults {
+		if strings.EqualFold(generic, label) {
+			return true
+		}
+	}
+	return false
 }
 
 // Node is one spec entry.
@@ -175,6 +190,24 @@ func parseInt(text string) (int, bool) {
 
 type block struct {
 	lines []string
+	frame bool
+}
+
+// stretch grows a framed block to height by inserting empty content rows before the bottom border.
+// A row uses it so panels of unequal content still close on the same line.
+func (b block) stretch(height int) block {
+	if !b.frame || len(b.lines) < 2 || len(b.lines) >= height {
+		return b
+	}
+	width := len(b.lines[0])
+	fill := "|" + strings.Repeat(" ", width-2) + "|"
+	lines := make([]string, 0, height)
+	lines = append(lines, b.lines[:len(b.lines)-1]...)
+	for len(lines) < height-1 {
+		lines = append(lines, fill)
+	}
+	lines = append(lines, b.lines[len(b.lines)-1])
+	return block{lines: lines, frame: true}
 }
 
 func (b block) width() int {
@@ -259,6 +292,45 @@ func padRight(text string, width int) string {
 	return text + strings.Repeat(" ", width-len(text))
 }
 
+// isRule reports whether a raw content line is a horizontal rule.
+func isRule(line string) bool {
+	return strings.Contains(line, "-") && strings.Trim(line, "- ") == ""
+}
+
+// isRuleLine reports whether a wrapped panel line holds only a horizontal rule between its borders.
+func isRuleLine(line string) bool {
+	if len(line) < 3 || line[0] != '|' || line[len(line)-1] != '|' {
+		return false
+	}
+	return isRule(line[1 : len(line)-1])
+}
+
+// widen grows a framed block to width by extending its border and filling content rows, so stacked
+// panels share one right edge.
+func (b block) widen(width int) block {
+	if !b.frame || len(b.lines) == 0 {
+		return b
+	}
+	current := len(b.lines[0])
+	if current >= width {
+		return b
+	}
+	extra := width - current
+	lines := make([]string, len(b.lines))
+	for index, line := range b.lines {
+		if strings.HasPrefix(line, "+") {
+			lines[index] = line[:len(line)-1] + strings.Repeat("-", extra) + "+"
+			continue
+		}
+		if isRuleLine(line) {
+			lines[index] = "| " + strings.Repeat("-", width-4) + " |"
+			continue
+		}
+		lines[index] = line[:len(line)-1] + strings.Repeat(" ", extra) + line[len(line)-1:]
+	}
+	return block{lines: lines, frame: true}
+}
+
 func row(children []block) block {
 	if len(children) == 0 {
 		return block{}
@@ -275,9 +347,10 @@ func row(children []block) block {
 	for line := 0; line < height; line++ {
 		parts := make([]string, len(children))
 		for index, child := range children {
+			grown := child.stretch(height)
 			text := ""
-			if line < len(child.lines) {
-				text = child.lines[line]
+			if line < len(grown.lines) {
+				text = grown.lines[line]
 			}
 			parts[index] = padRight(text, widths[index])
 		}
@@ -294,7 +367,13 @@ func stack(children []block) block {
 		}
 	}
 	lines := make([]string, 0)
-	for _, child := range children {
+	for index, child := range children {
+		if child.frame {
+			child = child.widen(width)
+		}
+		if index > 0 && (child.frame || children[index-1].frame) {
+			lines = append(lines, "")
+		}
 		for _, line := range child.lines {
 			lines = append(lines, padRight(line, width))
 		}
@@ -317,10 +396,13 @@ func panel(title string, content block) block {
 		lines = append(lines, "| "+padRight(title, inner)+" |")
 	}
 	for _, line := range content.lines {
+		if isRule(line) {
+			line = strings.Repeat("-", inner)
+		}
 		lines = append(lines, "| "+padRight(line, inner)+" |")
 	}
 	lines = append(lines, border)
-	return block{lines: lines}
+	return block{lines: lines, frame: true}
 }
 
 func leaf(node *Node) block {

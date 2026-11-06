@@ -81,7 +81,10 @@ func (manifest *Manifest) Validate() *ValidationError {
 		validator.walkNode(manifest.Root, 1, "root")
 	}
 	validator.validateRegions()
+	validator.validateProseRefs()
 	validator.validateBlockMeta()
+	validator.validateStatus()
+	validator.validateBadges()
 	validator.validateSettings()
 	if len(validator.issues) == 0 {
 		return nil
@@ -134,6 +137,20 @@ func (book *Book) Validate() *ValidationError {
 				Path:    "blocks[" + id.String() + "]",
 				Message: "body has no placement",
 			})
+		}
+	}
+	for _, region := range book.Manifest.Regions {
+		if region == nil || region.Kind != RegionProse {
+			continue
+		}
+		for _, id := range region.Blocks {
+			if message := ValidateProse(book.Bodies[id]); message != "" {
+				issues = append(issues, Issue{
+					Code:    "model.invalid-prose",
+					Path:    "blocks[" + id.String() + "]",
+					Message: message,
+				})
+			}
 		}
 	}
 	if len(issues) == 0 {
@@ -243,6 +260,8 @@ func (validator *manifestValidator) validateBlocks(blocks []ID, path string) {
 
 func (validator *manifestValidator) validateRegions() {
 	footers := 0
+	notesTargets := map[string]string{}
+	proseTargets := map[string]string{}
 	for index, region := range validator.manifest.Regions {
 		path := fmt.Sprintf("regions[%d]", index)
 		if region == nil {
@@ -281,6 +300,10 @@ func (validator *manifestValidator) validateRegions() {
 			validator.add("model.invalid-target", path+".target",
 				"unknown target kind %q", region.Target.Kind)
 		}
+		if region.Kind == RegionProse && region.Target.Kind != TargetNode {
+			validator.add("model.invalid-target", path+".target",
+				"index prose targets a node")
+		}
 		if region.Kind == RegionFooter {
 			footers++
 			if footers > 1 {
@@ -290,8 +313,133 @@ func (validator *manifestValidator) validateRegions() {
 				validator.add("model.invalid-target", path+".target",
 					"the footer must target the book")
 			}
+			if len(region.Blocks) > 1 {
+				validator.add("model.footer-blocks", path+".blocks",
+					"the footer holds at most one block")
+			}
+		}
+		if region.Kind == RegionNotes {
+			key := string(region.Target.Kind) + ":" + region.Target.ID.String()
+			if previous, exists := notesTargets[key]; exists {
+				validator.add("model.note-count", path,
+					"a target has at most one notes region (already at %s)", previous)
+			} else {
+				notesTargets[key] = path
+			}
+		}
+		if region.Kind == RegionProse && region.Target.Kind == TargetNode {
+			key := region.Target.ID.String()
+			if previous, exists := proseTargets[key]; exists {
+				validator.add("model.prose-count", path,
+					"a node has at most one index prose region (already at %s)", previous)
+			} else {
+				proseTargets[key] = path
+			}
+			if len(region.Blocks) != 1 {
+				validator.add("model.prose-blocks", path+".blocks",
+					"an index prose region holds exactly one block")
+			}
 		}
 		validator.validateBlocks(region.Blocks, path+".blocks")
+	}
+}
+
+// validateProseRefs checks the two-way link between Node.ProseBlock and the prose region that owns
+// the block. The text itself lives in the body store, never on the node.
+func (validator *manifestValidator) validateProseRefs() {
+	owners := map[ID]ID{}
+	for _, region := range validator.manifest.Regions {
+		if region == nil || region.Kind != RegionProse ||
+			region.Target.Kind != TargetNode || len(region.Blocks) != 1 {
+			continue
+		}
+		owners[region.Blocks[0]] = region.Target.ID
+	}
+	validator.manifest.Walk(func(node *Node, depth int, parent *Node) bool {
+		if node.ProseBlock.IsZero() {
+			return true
+		}
+		path := validator.nodes[node.ID] + ".proseBlock"
+		if _, placed := validator.placed[node.ProseBlock]; !placed {
+			validator.add("model.prose-unplaced", path, "block %s is not placed", node.ProseBlock)
+			return true
+		}
+		owner, exists := owners[node.ProseBlock]
+		switch {
+		case !exists:
+			validator.add("model.prose-not-region", path,
+				"block %s is not in an index prose region", node.ProseBlock)
+		case owner != node.ID:
+			validator.add("model.prose-owner", path,
+				"block %s belongs to node %s", node.ProseBlock, owner)
+		}
+		return true
+	})
+	blocks := make([]ID, 0, len(owners))
+	for block := range owners {
+		blocks = append(blocks, block)
+	}
+	sort.Slice(blocks, func(left, right int) bool { return blocks[left] < blocks[right] })
+	for _, block := range blocks {
+		owner := owners[block]
+		node, exists := validator.manifest.FindNode(owner)
+		if exists && node.ProseBlock != block {
+			validator.add("model.prose-ref-missing", validator.nodes[owner]+".proseBlock",
+				"the prose region block %s is not referenced", block)
+		}
+	}
+}
+
+// validateStatus checks assigned states while the book enables the status system. A disabled system
+// ignores assignments, so switching it off stays reversible.
+func (validator *manifestValidator) validateStatus() {
+	manifest := validator.manifest
+	if !manifest.StatusEnabled() {
+		return
+	}
+	manifest.Walk(func(node *Node, depth int, parent *Node) bool {
+		if node.Status == "" {
+			return true
+		}
+		if _, exists := FindStatus(node.Status); !exists {
+			validator.add("model.unknown-status", validator.nodes[node.ID]+".status",
+				"unknown status %q", node.Status)
+		}
+		return true
+	})
+	blocks := make([]ID, 0, len(manifest.BlockMeta))
+	for id := range manifest.BlockMeta {
+		blocks = append(blocks, id)
+	}
+	sort.Slice(blocks, func(left, right int) bool { return blocks[left] < blocks[right] })
+	for _, id := range blocks {
+		meta := manifest.BlockMeta[id]
+		if meta.Status == "" {
+			continue
+		}
+		if _, exists := FindStatus(meta.Status); !exists {
+			validator.add("model.unknown-status", "blockMeta["+id.String()+"].status",
+				"unknown status %q", meta.Status)
+		}
+	}
+}
+
+// validateBadges checks the declared badge list. The detector value is a repository fact and is
+// resolved by the renderer, not by the manifest validator.
+func (validator *manifestValidator) validateBadges() {
+	seen := map[string]int{}
+	for index, badge := range validator.manifest.Badges {
+		path := fmt.Sprintf("badges[%d]", index)
+		if message := ValidateTypeToken(badge.ID); badge.ID == "" || message != "" {
+			validator.add("model.invalid-badge", path+".id",
+				"badge id must be a single token of at most 64 characters")
+		}
+		if previous, exists := seen[badge.ID]; exists {
+			validator.add("model.duplicate-badge", path+".id",
+				"badge %q is already declared at badges[%d]", badge.ID, previous)
+			continue
+		}
+		seen[badge.ID] = index
 	}
 }
 
@@ -317,6 +465,22 @@ func (validator *manifestValidator) validateBlockMeta() {
 			}
 		}
 	}
+}
+
+// ValidateProse checks the one-line index prose. An empty value is valid and means "no prose";
+// trailing line breaks are tolerated because body files normally end with one.
+func ValidateProse(value string) string {
+	text := strings.TrimRight(value, "\r\n")
+	if text == "" {
+		return ""
+	}
+	if len([]rune(text)) > 300 {
+		return "must be at most 300 characters"
+	}
+	if strings.ContainsAny(text, "\r\n") {
+		return "must be a single line"
+	}
+	return ""
 }
 
 // ValidateTypeToken checks the block type format: a single token of at most 64 characters.

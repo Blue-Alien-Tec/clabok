@@ -8,11 +8,13 @@ const (
 	RegionFooter RegionKind = "footer"
 	// RegionNotes holds notes attached to a node or a block.
 	RegionNotes RegionKind = "notes"
+	// RegionProse holds the block with the one-line index prose of a node.
+	RegionProse RegionKind = "prose"
 )
 
 // Valid reports whether the region kind is known.
 func (kind RegionKind) Valid() bool {
-	return kind == RegionFooter || kind == RegionNotes
+	return kind == RegionFooter || kind == RegionNotes || kind == RegionProse
 }
 
 // TargetKind names what a region collection or a reference points at.
