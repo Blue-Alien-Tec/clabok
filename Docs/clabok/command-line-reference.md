@@ -11,7 +11,7 @@
 
 Global behavior: JSON output by default, `--text` for a human summary, `--dry-run` for mutations, stable error codes on stderr and exit code 0 on success.
 
-`book`: `new`, `open`, `close`, `status`, `move`, `rename`, `unregister` and `set`. A library is created with `new --library`; `set` changes the output mode, the contents list, numbering or the index depth.
+`book`: `new`, `open`, `close`, `status`, `move`, `rename`, `unregister`, `purge` and `set`. A library is created with `new --library`; `set` changes the output mode, the contents list, numbering or the index depth. `book purge` deletes the working data of an unregistered book: its store directory, rollback pool, lock files and temp inputs. It never touches the rendered output and refuses a registered, open or library book.
 
 Structure: `add`, `move`, `remove`, `rename` and `block type`. Placement uses `--child-of`, `--index`, `--before` and `--after`.
 

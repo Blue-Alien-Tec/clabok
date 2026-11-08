@@ -14,6 +14,7 @@ func Register(registry *cli.Registry) {
 	registry.Add(moveBookCommand())
 	registry.Add(renameBookCommand())
 	registry.Add(unregisterBookCommand())
+	registry.Add(purgeBookCommand())
 	registry.Add(defaultsCommand())
 	registry.Add(syncCommand())
 }
@@ -158,6 +159,30 @@ func unregisterBookCommand() *cli.Command {
 			result, unregisterErr := service.Unregister(id, env.Globals.DryRun)
 			if unregisterErr != nil {
 				return nil, unregisterErr
+			}
+			return &cli.Result{Data: result}, nil
+		},
+	}
+}
+
+func purgeBookCommand() *cli.Command {
+	return &cli.Command{
+		Name:     "book purge",
+		Summary:  "delete the working data of an unregistered book; the rendered output stays",
+		Usage:    "pecia book purge <book-id>",
+		Mutating: true,
+		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
+			id, idErr := bookIDArg(args, "book purge")
+			if idErr != nil {
+				return nil, idErr
+			}
+			service, serviceErr := FromEnv(env)
+			if serviceErr != nil {
+				return nil, serviceErr
+			}
+			result, purgeErr := service.Purge(id, env.Globals.DryRun)
+			if purgeErr != nil {
+				return nil, purgeErr
 			}
 			return &cli.Result{Data: result}, nil
 		},

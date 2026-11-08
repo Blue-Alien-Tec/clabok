@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
@@ -410,6 +411,218 @@ func (service *Service) Unregister(id model.BookID, dryRun bool) (UnregisterResu
 		return result, refreshErr
 	}
 	return result, nil
+}
+
+// PurgeResult is the receipt of `book purge`.
+type PurgeResult struct {
+	DryRun   bool     `json:"dryRun"`
+	ID       string   `json:"id"`
+	Removed  bool     `json:"removed"`
+	Store    bool     `json:"store"`
+	Rollback bool     `json:"rollback"`
+	Temp     bool     `json:"temp"`
+	Locks    int      `json:"locks"`
+	Paths    []string `json:"paths"`
+}
+
+// DryRunResult marks the payload as a dry-run receipt.
+func (result PurgeResult) DryRunResult() bool { return result.DryRun }
+
+func (result PurgeResult) Text() string {
+	if !result.Removed {
+		if result.DryRun {
+			return fmt.Sprintf("dry run: nothing to purge for %s", result.ID)
+		}
+		return fmt.Sprintf("%s: nothing to purge", result.ID)
+	}
+	parts := make([]string, 0, 4)
+	if result.Store {
+		parts = append(parts, "store")
+	}
+	if result.Rollback {
+		parts = append(parts, "rollback")
+	}
+	if result.Temp {
+		parts = append(parts, "temp")
+	}
+	if result.Locks > 0 {
+		parts = append(parts, fmt.Sprintf("%d lock file(s)", result.Locks))
+	}
+	if result.DryRun {
+		return fmt.Sprintf("dry run: purge %s (%s); the rendered output is untouched",
+			result.ID, strings.Join(parts, ", "))
+	}
+	return fmt.Sprintf("%s: purged %s; the rendered output is untouched",
+		result.ID, strings.Join(parts, ", "))
+}
+
+// Purge deletes the working data of an unregistered book: its store directory, rollback pool,
+// coordinator lock files and temp inputs. It never touches the rendered output and refuses a
+// registered, open or store-reserved book. The command is idempotent.
+func (service *Service) Purge(id model.BookID, dryRun bool) (PurgeResult, *cli.Error) {
+	result := PurgeResult{DryRun: dryRun, ID: string(id)}
+	if !id.Valid() {
+		return result, cli.Usage("usage.invalid-value", "invalid book id %q", id)
+	}
+	if reservedBookID(id) {
+		return result, cli.Reject("library.purge-reserved",
+			"%q is part of the store layout and cannot be purged", id)
+	}
+	storeRelease, lockErr := service.Life.LockStore()
+	if lockErr != nil {
+		return result, cli.AsError(lockErr)
+	}
+	defer func() { _ = storeRelease() }()
+
+	registry, registryErr := service.loadRegistry()
+	if registryErr != nil {
+		return result, registryErr
+	}
+	if _, ok := registry.Library(); !ok {
+		return result, cli.Reject("library.incomplete-registry",
+			"the registry has no library entry; refusing to purge store data")
+	}
+	if closedErr := service.requireClosed(id); closedErr != nil {
+		return result, closedErr
+	}
+	if entry, registered := registry.Find(id); registered {
+		if entry.Kind == store.KindLibrary {
+			return result, cli.Reject("library.immovable", "the library book %q cannot be purged", id)
+		}
+		return result, cli.Reject("library.book-registered", "book %q is still registered", id).
+			WithHint("run `pecia book unregister " + string(id) + "` first")
+	}
+	paths, pathsErr := service.Layout.Book(id)
+	if pathsErr != nil {
+		return result, cli.AsError(pathsErr)
+	}
+	storeExists, storeErr := dirExists(paths.Dir)
+	if storeErr != nil {
+		return result, cli.Fail("library.purge-read-failed", "%v", storeErr)
+	}
+	rollbackExists, rollbackErr := dirExists(paths.RollbackDir)
+	if rollbackErr != nil {
+		return result, cli.Fail("library.purge-read-failed", "%v", rollbackErr)
+	}
+	tempDir := ""
+	tempExists := false
+	if service.Values != nil && service.Values.TempRoot != "" {
+		tempDir = filepath.Join(service.Values.TempRoot, string(id))
+		tempExists, storeErr = dirExists(tempDir)
+		if storeErr != nil {
+			return result, cli.Fail("library.purge-read-failed", "%v", storeErr)
+		}
+	}
+	lockFiles, lockFilesErr := service.bookLockFiles(id)
+	if lockFilesErr != nil {
+		return result, lockFilesErr
+	}
+	result.Store = storeExists
+	result.Rollback = rollbackExists
+	result.Temp = tempExists
+	result.Locks = len(lockFiles)
+	result.Paths = make([]string, 0, 3)
+	if storeExists {
+		result.Paths = append(result.Paths, paths.Dir)
+	}
+	if rollbackExists {
+		result.Paths = append(result.Paths, paths.RollbackDir)
+	}
+	if tempExists {
+		result.Paths = append(result.Paths, tempDir)
+	}
+	result.Removed = len(result.Paths) > 0 || result.Locks > 0
+	if dryRun || !result.Removed {
+		return result, nil
+	}
+	if storeExists {
+		if err := os.RemoveAll(paths.Dir); err != nil {
+			return result, cli.Fail("library.purge-failed", "remove %s: %v", paths.Dir, err)
+		}
+	}
+	if rollbackExists {
+		if err := os.RemoveAll(paths.RollbackDir); err != nil {
+			return result, cli.Fail("library.purge-failed", "remove %s: %v", paths.RollbackDir, err)
+		}
+	}
+	if tempExists {
+		if err := os.RemoveAll(tempDir); err != nil {
+			return result, cli.Fail("library.purge-failed", "remove %s: %v", tempDir, err)
+		}
+	}
+	for _, lockFile := range lockFiles {
+		if err := os.Remove(lockFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return result, cli.Fail("library.purge-failed", "remove %s: %v", lockFile, err)
+		}
+	}
+	return result, nil
+}
+
+// reservedBookID reports ids that name store infrastructure rather than a book directory.
+func reservedBookID(id model.BookID) bool {
+	switch string(id) {
+	case "rollback", ".coordinator", "library.json", "ids.json", "terms.txt",
+		"pending-terms.json", "open.json":
+		return true
+	}
+	return false
+}
+
+// dirExists reports whether path is an existing directory. A non-directory at a store path is an
+// error rather than a removal target, so a book id that collides with a registry file cannot
+// delete that file.
+func dirExists(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("%s is not a directory", path)
+	}
+	return true, nil
+}
+
+// bookLockFiles returns the coordinator lock files of one book. The block and node suffix must be
+// numeric so a book id that is a prefix of another id cannot match the other book's locks.
+func (service *Service) bookLockFiles(id model.BookID) ([]string, *cli.Error) {
+	directory := service.Layout.Coordinator()
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, cli.Fail("library.purge-read-failed", "%v", err)
+	}
+	bookName := "book-" + string(id) + ".lock"
+	blockPrefix := "block-" + string(id) + "-"
+	nodePrefix := "node-" + string(id) + "-"
+	files := make([]string, 0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		switch {
+		case name == bookName:
+			files = append(files, filepath.Join(directory, name))
+		case strings.HasPrefix(name, blockPrefix) && numericLock(name[len(blockPrefix):]):
+			files = append(files, filepath.Join(directory, name))
+		case strings.HasPrefix(name, nodePrefix) && numericLock(name[len(nodePrefix):]):
+			files = append(files, filepath.Join(directory, name))
+		}
+	}
+	return files, nil
+}
+
+func numericLock(suffix string) bool {
+	if !strings.HasSuffix(suffix, ".lock") {
+		return false
+	}
+	_, err := strconv.ParseUint(strings.TrimSuffix(suffix, ".lock"), 10, 64)
+	return err == nil
 }
 
 // refreshLibrary re-renders the library book so its Document Index follows the registry.

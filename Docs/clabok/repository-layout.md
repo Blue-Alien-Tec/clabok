@@ -17,6 +17,8 @@ This appendix shows the tracked directory structure of the repository. It is gen
   workflows/
 cmd/
   pecia/        CLI entry point and command wiring.
+Docs/
+  clabok/
 internal/       The Go packages, one directory per concern.
   apply/
   asciiui/
