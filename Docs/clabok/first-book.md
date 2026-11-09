@@ -25,7 +25,7 @@ pecia book open guide
 pecia book status guide
 ```
 
-Add a chapter. The command prints the new node identifier, which is the stable handle for every later command.
+Add a chapter. The command prints the new node identifier, which is the stable handle for every later command; use it as the parent for the first body.
 
 ```text
 pecia add --book guide --title "Getting Started"
@@ -34,7 +34,7 @@ pecia add --book guide --title "Getting Started"
 Write a body. Block `0` creates a new block under the parent; the text comes from the body flag or from a file, and `-` reads standard input.
 
 ```text
-pecia body set --book guide 0 --parent <chapter> --body "Hello from CLABOK."
+pecia body set --book guide 0 --parent <chapter-id> --body "Hello from CLABOK."
 ```
 
 Build the tree further: add a subchapter under the chapter and a block under the subchapter. The parent decides the level, and the core enforces the rules.

@@ -9,7 +9,7 @@
 
 # Overview
 
-CLABOK is a command-line authoring tool for structured Markdown books. It keeps a book's structure, bodies and generated content in one deterministic store and renders the result as a README or as chapter files.
+CLABOK is a command-line authoring tool for structured Markdown books. It keeps a book's structure, bodies and generated content in one deterministic store and renders the result as a single README, as chapter files or as part files.
 
 The problem it solves is documentation drift. When chapters, order, navigation and prose all live in text, every reorder becomes a manual edit and every link is a guess. CLABOK makes the structure data, so navigation, the index, anchors and numbering are generated from it.
 

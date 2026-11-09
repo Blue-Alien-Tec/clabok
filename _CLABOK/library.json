@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "books": [
+    {
+      "id": "library",
+      "path": ".",
+      "kind": "library"
+    },
+    {
+      "id": "clabok",
+      "path": "Docs/clabok",
+      "kind": "book"
+    }
+  ]
+}

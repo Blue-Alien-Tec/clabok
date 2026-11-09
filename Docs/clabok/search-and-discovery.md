@@ -11,7 +11,9 @@
 
 `find` is the read-only discovery surface. It searches one registered book with `--book` or all registered books with `--all` in registry order. An open book is read from its extracted state and a closed book from its container, so a search never requires `book open`.
 
-The match mode defaults to `literal`. `--mode glob` matches `*`, `?` and `\` against the whole line or title, and `--mode regex` accepts a Go regular expression. `--ignore-case` folds case in every mode, and `--word` limits literal matching to letter, digit and underscore boundaries. Every hit carries byte offsets and rune columns, so a caller can edit the exact span without searching again.
+The match mode defaults to `literal`. `--mode glob` matches `*`, `?` and `\` against the whole line or title, and `--mode regex` accepts a Go regular expression.
+
+`--ignore-case` folds case in every mode, and `--word` limits literal matching to letter, digit and underscore boundaries. Every hit carries byte offsets and rune columns, so a caller can edit the exact span without searching again.
 
 `--field` selects the text sources: `title` for node titles, `body` for node-placed blocks, `layout` for stored asciiui specifications, and `prose`, `note` and `footer` for region blocks. `all` selects every source. Generated RepoLayout bodies and rendered drawings are never searched, so a result always points at source text.
 
@@ -21,7 +23,9 @@ Scope filters narrow a search without a second query. `--node <id>` covers a nod
 
 JSON is the default output. Schema version 2 adds spans, the effective scope and the submitted query to the result. `--format ndjson` streams a meta line, the items, any warnings and a summary, and `--text` prints a human summary. A missing body is a warning (`search.missing-body`), an unreadable book in `--all` is a warning (`search.read-failed`), and `--strict` turns every warning into a failure.
 
-`--query` is repeatable: up to eight queries combine with `--join or` by default or `--join and`. The join unit follows the result mode: a line or title for `matches` and `count`, a block, node or book for the group modes. `--query-mode` aligns by index and allows mixed modes, including `fuzzy`; with several queries every span carries its query index and group items add `perQuery` counters.
+`--query` is repeatable: up to eight queries combine with `--join or` by default or `--join and`. The join unit follows the result mode: a line or title for `matches` and `count`, a block, node or book for the group modes.
+
+`--query-mode` aligns by index and allows mixed modes, including `fuzzy`; with several queries every span carries its query index and group items add `perQuery` counters.
 
 `--fuzzy 1` to `--fuzzy 3` enables typo-tolerant literal matching: every query word must match a distinct word on the line within the edit distance, in query order. Punctuation separates words, a span carries its `distance`, and `--word` cannot be combined with fuzzy.
 
@@ -29,7 +33,9 @@ Path and reference filters complete the metadata filters: `--node-path` matches 
 
 `--group-by` and `--count-by` aggregate by `type`, `status`, `kind` or `part`; keys sort case-insensitively and a group reports its first line, count and occurrences. `--require-match` exits 1 with `search.no-match` when the payload is empty, and `--snapshot` holds a shared book lock for a consistent read.
 
-`pecia index build --all --write` writes the derived search index; `index status` reports `missing`, `fresh`, `stale`, `corrupt` or `open`, and `index clear --write` removes it. The index is keyed by a container fingerprint and only covers closed books. `--index auto` uses a fresh index when the query can be served from its postings and scans otherwise, `--index force` rejects a missing or stale index and an unsupported query, and `--verify` re-checks indexed lines against the source.
+`pecia index build --all --write` writes the derived search index; `index status` reports `missing`, `fresh`, `stale`, `corrupt` or `open`, and `index clear --write` removes it. The index is keyed by a container fingerprint and only covers closed books.
+
+`--index auto` uses a fresh index when the query can be served from its postings and scans otherwise, `--index force` rejects a missing or stale index and an unsupported query, and `--verify` re-checks indexed lines against the source.
 
 The JSON schema adds `queries`, `join`, `fuzzy`, `index` and `perQuery` to describe the request and the index decision; each span carries `query` and `distance`, and each match carries `file`, the rendered path. `--format ndjson` streams `meta`, `match`, `group`, `warning` and `summary` lines. Exit codes stay 0 success, 1 failure (including `--require-match`), 2 usage and 3 rejected.
 

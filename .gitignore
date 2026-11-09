@@ -3,7 +3,11 @@
 /pecia
 /dist/
 
-# CLABOK working data
-/_CLABOK/
+# CLABOK transient working data (the book source is versioned)
+/_CLABOK/.coordinator/
+/_CLABOK/index/
+/_CLABOK/migrations/
+/_CLABOK/rollback/
+/_CLABOK/pending-terms.json
 /.temp/
 /.planning/

@@ -11,7 +11,7 @@
 
 Rendering is a pure function of the manifest, the bodies, the book settings and the repository facts. It reads the open extract or the packed container without changing the lifecycle state.
 
-`sync` renders one book, or every registered book when `--book` is omitted. `--write` writes, `--check` reports drift, `--prune` removes stale files, `--force` overwrites foreign files and `--dry-run` previews.
+`sync` renders one book, or every registered book when `--book` is omitted. `--write` writes, `--check` reports drift, `--prune` removes stale files, `--force` overwrites foreign files and `--dry-run` previews; `--out` writes to another directory.
 
 Three output modes exist. Monolith writes one README, chapter writes one file per chapter plus the README index, and part writes one file per part plus the part indexes.
 
@@ -21,7 +21,7 @@ The book index is a list or a table derived from the data. Prose adds a descript
 
 Headings come from node titles. Anchors are stable and number independent; `####` and deeper in prose are text. Numbering is opt-in and changes the heading text, not the anchors.
 
-The library README is the repository home: badges, title, the library content and the document index. The library layout renders its content blocks after the document index.
+The library README is the repository home: badges, title, the library content and the document index. The content blocks render first, then the document index closes the README.
 
 Render findings cover missing bodies, unknown status, unresolved badges, missing layouts, dangling references and structural problems. `check` reports the findings; `verify` runs the acceptance view of the same book.
 

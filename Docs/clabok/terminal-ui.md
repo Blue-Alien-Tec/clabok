@@ -13,10 +13,10 @@ The terminal UI is an optional view over the same core services. It starts only 
 
 The screen has a header with the book and the state, a structure tree, a body pane, a status line and a key hint. The view is plain text and does not depend on terminal features beyond basic terminal control.
 
-The loop reads one command per line, so type a command and press Enter:
+The loop reads one command per line: type the command word and press Enter. `up` and `down` are commands, not arrow keys.
 
 ```text
-up/down - move in the tree or body
+up / down - move in the tree or body
 enter - focus the body pane
 e - edit the selected body
 n / N - new node / chapter (prompt)

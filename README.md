@@ -7,27 +7,51 @@
 
 # CLABOK
 
-CLABOK is a command-line authoring tool for structured Markdown books.
+CLABOK is a command-line authoring tool for structured Markdown books. CLABOK is the project name; `pecia` is the command-line tool.
 
-It keeps a book's structure, bodies, navigation and generated content in one deterministic store and renders it as a single README or as chapter files.
+It keeps a book's structure, bodies, navigation and generated content in one deterministic store and renders it as a single README, as chapter files or as part files. The store is the source of truth; rendered Markdown is output.
+
+**Requirements**
+
+Go 1.27.3 or newer. The module has no third-party dependencies. A LanguageTool server and a local Java runtime are optional; the tool builds and runs without them.
+
+**Install**
+
+```text
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
+```
+
+Or build from the repository root:
+
+```text
+go build -o pecia ./cmd/pecia
+```
 
 **Quick Start**
 
 ```text
-go build -o pecia ./cmd/pecia
 pecia book new --library --title "My Docs"
 pecia book new --title "Guide"
 pecia book open guide
 pecia add --book guide --title "Getting Started"
-pecia body set --book guide 0 --parent <chapter> --body "Hello from CLABOK."
-pecia find --book guide --query "Hello" --result blocks
+pecia body set --book guide 0 --parent <chapter-id> --body "Hello from CLABOK."
 pecia book close guide
 pecia sync --write
 ```
 
-The rendered book is in `Docs/guide`; `pecia sync --check` verifies it.
+The book is rendered to `Docs/guide`; `pecia sync --check` verifies it.
 
-The full guide is the [CLABOK](Docs/clabok/README.md) book.
+**Documentation**
+
+The [CLABOK](Docs/clabok/README.md) book is the full guide: book model, authoring, rendering, configuration, command reference and development.
+
+**Development**
+
+`scripts/check.ps1` on Windows or `scripts/check.sh` on Unix runs format, vet, build and tests.
+
+**License**
+
+MIT. See [LICENSE](LICENSE).
 
 
 ## Document Index

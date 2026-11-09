@@ -31,7 +31,7 @@ A block can carry a type for later search (`block type`). Locked blocks protect 
 
 Numbering is opt-in per book. Without numbering, headings use the titles and anchors are derived from them. With numbering, numbers are rendered in the heading, while anchors remain number independent.
 
-Common structure errors are stable and descriptive: `structure.level-limit`, `structure.empty-title`, `structure.unknown-target`, `structure.anchor-mismatch` and `structure.locked`. They describe a rule, not a UI state.
+Common structure errors are stable and descriptive: `structure.level-exceeded`, `structure.parent-invalid`, `structure.empty-title`, `structure.unknown-target`, `structure.anchor-mismatch` and `structure.locked`. They describe a rule, not a UI state.
 
 
 ---

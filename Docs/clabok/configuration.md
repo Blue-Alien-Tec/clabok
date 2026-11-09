@@ -13,11 +13,11 @@ Configuration is optional. Without a project configuration file, built-in defaul
 
 `config set`, `config unset` and `config validate` edit and check the file; `config get` reads one value. Every command accepts `--project` to point at a different project root.
 
-Storage keys: `store.root` for the store, `docs.root` for rendered documentation and `temp.root` for transient inputs under `.temp`.
+Storage keys: `store.root` for the store (default `_CLABOK`), `docs.root` for rendered documentation (default `Docs`) and `temp.root` for transient inputs under `.temp`.
 
-Safety keys: `undo.limit` and `book.pointLimit` bound the rollback history, and `concurrency.mode` selects the file or daemon backend.
+Safety keys: `undo.limit` (default 10) and `book.pointLimit` (default 3) bound the rollback history, and `concurrency.mode` (default `file`) selects the file or daemon backend.
 
-Grammar keys: `grammar.endpoint` is the full check URL and `grammar.policy` is `block` or `warn`. The endpoint defaults to the local server.
+Grammar keys: `grammar.endpoint` is the full check URL and `grammar.policy` is `block` or `warn`. The endpoint defaults to the local server and the policy defaults to `block`.
 
 The `asciiui.types` map names the project widget type for a generic kind. The configured type wins over an explicit generic label; a non-generic explicit label remains a one-node override.
 

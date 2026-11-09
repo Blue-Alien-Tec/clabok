@@ -9,15 +9,16 @@
 
 # Installation
 
-CLABOK builds as a single Go binary. Go 1.27.3 or newer is required; the directive in `go.mod` is the reference, and older Go releases are not supported.
+CLABOK is the project; `pecia` is the command-line tool. It builds as a single Go binary with no third-party dependencies. Go 1.27.3 or newer is required; the directive in `go.mod` is the reference, and older Go releases are not supported.
 
-Build the binary from the repository root:
+Install the released command with `go install`, or build the working tree from the repository root:
 
 ```text
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
 go build -o pecia ./cmd/pecia
 ```
 
-On Windows the same command produces `pecia.exe`. Put the binary on `PATH`; every example then calls `pecia` from the project root.
+On Windows the build produces `pecia.exe`. Put the binary on `PATH`; every example then calls `pecia` from the project root.
 
 Verify the build with the version and the command list:
 

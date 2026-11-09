@@ -9,9 +9,9 @@
 
 # Command-Line Reference
 
-Global behavior: JSON output by default, `--text` for a human summary, `--dry-run` for mutations, stable error codes on stderr and exit code 0 on success.
+Global behavior: JSON output by default, `--text` for a human summary, `--dry-run` for mutations, stable error codes on stderr and exit code 0 on success. `pecia help <command>` is the authoritative flag reference.
 
-`book`: `new`, `open`, `close`, `status`, `move`, `rename`, `unregister`, `purge` and `set`. A library is created with `new --library`; `set` changes the output mode, the contents list, numbering or the index depth. Book IDs and output paths are case-insensitively unique, and reserved store names and Windows alias forms are rejected. `book new` refuses a non-empty store directory for an ID, so run `book purge` before reusing an ID. `book purge` deletes the working data of an unregistered book: its store directory, rollback pool, lock files and temp inputs. It never touches the rendered output and refuses a registered, open or library book.
+`book`: `new`, `open`, `close`, `status`, `move`, `rename`, `unregister`, `purge` and `set`. A library is created with `new --library`; `set` changes the output mode, the contents list, numbering or the index depth. Book IDs and output paths are case-insensitively unique, and reserved store names and Windows alias forms are rejected. `book new` refuses a non-empty store directory for an ID, so run `book purge` before reusing an ID. `book purge` deletes the working data of an unregistered book: its store directory, rollback pool, lock files and temp inputs. It never touches the rendered output and refuses a registered, open or library book. The setting keys are `output` (`monolith`, `chapter`, `part`), `toc` (`on`/`off`), `numbering` (`on`/`off`) and `index-depth` (an integer).
 
 Structure: `add`, `move`, `remove`, `rename` and `block type`. Placement uses `--child-of`, `--index`, `--before` and `--after`.
 
@@ -30,6 +30,13 @@ Project helpers: `config`, `library defaults`, `version` and `help`. `serve` sta
 Exit codes: 0 success, 1 failure, 2 usage and 3 rejected. The JSON envelope carries `schema`, `ok`, `command` and either `data` or `error` with a stable code, a message and an optional hint and details.
 
 `apply` executes a declarative JSON plan against an open book under one lock and one rollback point. Plan version 1 supports `add`, optionally with `text` for a newly created block, plus `rename`, `move`, `remove`, `type`, `setting` and `body`, which sets an existing placed block. Every body text passes the grammar gate, and a failing step leaves the book unchanged.
+
+```json
+{"version": 1, "steps": [
+  {"op": "add", "title": "Getting Started", "text": "Hello from CLABOK."},
+  {"op": "setting", "key": "numbering", "value": "on"}
+]}
+```
 
 
 ---

@@ -11,9 +11,9 @@
 
 The repository has two check scripts: `scripts/check.ps1` on Windows and `scripts/check.sh` on Unix. They run the formatter check, vet, the build and the tests.
 
-Run the test suite and the race detector through the scripts. The suite covers the model, the store, the structure path, rendering, the editorial features, the grammar client, the repository layout and the terminal view models.
+Run the test suite and the race detector through the scripts. The suite covers the model, the store, the structure path, rendering, the editorial features, the grammar client, the repository layout, search and the index, apply, migrations, badges, ASCII UI layouts and the terminal view models.
 
-CI runs three jobs on pushes that change the build-version file: a verify job for the formatter, vet, build and tests, a race job and a Windows job.
+CI runs three jobs on pushes to `main` that change the build-version file, and on manual dispatch: a verify job for the formatter, vet, build and tests, a race job and a Windows job.
 
 The build-version file is the only release trigger. Changing it triggers the workflow, so it is done at milestone close, never per change.
 
