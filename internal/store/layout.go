@@ -75,10 +75,69 @@ type BookPaths struct {
 	StateFile   string
 }
 
-// Book resolves the paths of one book and rejects an invalid ID.
-func (layout Layout) Book(id model.BookID) (BookPaths, error) {
+// ValidateBookID rejects ids that cannot safely name a store folder. The check is case-insensitive
+// for reserved names and rejects trailing dots and Windows-reserved characters, because a
+// case-insensitive file system would otherwise resolve an alias to store infrastructure.
+func ValidateBookID(id model.BookID) error {
 	if !id.Valid() {
-		return BookPaths{}, fail("store.invalid-book-id", "invalid book id %q", string(id))
+		return fail("store.invalid-book-id", "invalid book id %q", string(id))
+	}
+	if AmbiguousBookID(id) {
+		return fail("store.reserved-book-id",
+			"book id %q contains a reserved character or a trailing dot or space", string(id))
+	}
+	if ReservedBookID(id) {
+		return fail("store.reserved-book-id", "book id %q is part of the store layout", string(id))
+	}
+	return nil
+}
+
+// ReservedBookID reports ids that name store infrastructure rather than a book directory. The
+// comparison is case-insensitive and ignores trailing dots, because a case-insensitive file system
+// resolves "ROLLBACK" and "rollback." to the same directory as "rollback".
+func ReservedBookID(id model.BookID) bool {
+	name := strings.TrimRight(string(id), ". ")
+	switch strings.ToLower(name) {
+	case "rollback", ".coordinator", "library.json", "ids.json", "terms.txt",
+		"pending-terms.json", "open.json":
+		return true
+	}
+	return false
+}
+
+// AmbiguousBookID reports ids that are not a plain path component on every platform. A trailing dot
+// is stripped by Windows, and a colon can address an alternate data stream; both would let an id
+// alias a different path than the caller intended.
+func AmbiguousBookID(id model.BookID) bool {
+	name := string(id)
+	if strings.TrimRight(name, ". ") != name {
+		return true
+	}
+	return strings.ContainsAny(name, `:*?"<>|`)
+}
+
+// BookIDKey is the case-insensitive identity used for duplicate checks. On a case-insensitive file
+// system two ids that differ only by case name the same store directory.
+func BookIDKey(id model.BookID) string { return strings.ToLower(string(id)) }
+
+// PathKey is the case-insensitive identity used for output-path duplicate checks. Trailing dots
+// and spaces are removed per segment because Windows normalizes them away.
+func PathKey(path string) string {
+	clean := filepath.ToSlash(filepath.Clean(path))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return strings.ToLower(clean)
+	}
+	segments := strings.Split(clean, "/")
+	for index, segment := range segments {
+		segments[index] = strings.TrimRight(segment, ". ")
+	}
+	return strings.ToLower(strings.Join(segments, "/"))
+}
+
+// Book resolves the paths of one book and rejects an invalid or reserved ID.
+func (layout Layout) Book(id model.BookID) (BookPaths, error) {
+	if err := ValidateBookID(id); err != nil {
+		return BookPaths{}, err
 	}
 	directory := filepath.Join(layout.Root, string(id))
 	return BookPaths{

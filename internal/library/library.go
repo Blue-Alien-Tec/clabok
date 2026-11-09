@@ -53,11 +53,12 @@ func (service *Service) requireClosed(id model.BookID) *cli.Error {
 func (service *Service) newBookID(registry *store.Registry, requested, title string) (model.BookID, *cli.Error) {
 	if requested != "" {
 		id := model.BookID(requested)
-		if !id.Valid() {
-			return "", cli.Usage("usage.invalid-value", "invalid book id %q", requested)
+		if idErr := store.ValidateBookID(id); idErr != nil {
+			return "", cli.Reject("library.id-invalid", "%v", idErr)
 		}
-		if _, exists := registry.Find(id); exists {
-			return "", cli.Reject("library.id-in-use", "book id %q is already registered", requested)
+		if entry, taken := registry.FindFold(id); taken {
+			return "", cli.Reject("library.id-in-use",
+				"book id %q is already registered as %q", requested, entry.ID)
 		}
 		return id, nil
 	}
@@ -68,10 +69,12 @@ func (service *Service) newBookID(registry *store.Registry, requested, title str
 			candidate = base + "-" + strconv.Itoa(suffix)
 		}
 		id := model.BookID(candidate)
-		if !id.Valid() {
-			return "", cli.Usage("usage.invalid-value", "cannot derive a book id from %q", title)
+		if idErr := store.ValidateBookID(id); idErr != nil {
+			return "", cli.Reject("library.id-unavailable",
+				"cannot derive a usable book id from %q", title).
+				WithHint("pass --id with a plain id")
 		}
-		if _, exists := registry.Find(id); !exists {
+		if _, taken := registry.FindFold(id); !taken {
 			return id, nil
 		}
 	}
@@ -106,8 +109,7 @@ func (service *Service) newBookPath(registry *store.Registry, options NewBookOpt
 		}
 	}
 	for _, entry := range registry.Books {
-		clean, _ := store.RegistryPath(entry.Path)
-		if clean == outputPath {
+		if store.PathKey(entry.Path) == store.PathKey(outputPath) {
 			return "", cli.Reject("library.path-in-use",
 				"output path %q is already used by book %q", outputPath, entry.ID)
 		}

@@ -85,27 +85,31 @@ func (registry *Registry) Validate() error {
 		return fail("store.registry-version",
 			"unsupported registry version %d (expected %d)", registry.Version, RegistryVersion)
 	}
-	seenIDs := make(map[model.BookID]struct{}, len(registry.Books))
+	seenIDs := make(map[string]struct{}, len(registry.Books))
 	seenPaths := make(map[string]struct{}, len(registry.Books))
 	libraries := 0
 	for index, entry := range registry.Books {
 		where := "books[" + strconv.Itoa(index) + "]"
-		if !entry.ID.Valid() {
-			return fail("store.registry-invalid", "%s.id: invalid book id %q", where, string(entry.ID))
+		if idErr := ValidateBookID(entry.ID); idErr != nil {
+			return fail("store.registry-invalid", "%s.id: %v", where, idErr)
 		}
-		if _, duplicate := seenIDs[entry.ID]; duplicate {
-			return fail("store.registry-invalid", "%s.id: duplicate book id %q", where, string(entry.ID))
+		idKey := BookIDKey(entry.ID)
+		if _, duplicate := seenIDs[idKey]; duplicate {
+			return fail("store.registry-invalid",
+				"%s.id: duplicate book id %q (case-insensitive)", where, string(entry.ID))
 		}
-		seenIDs[entry.ID] = struct{}{}
+		seenIDs[idKey] = struct{}{}
 		clean, ok := cleanRegistryPath(entry.Path)
 		if !ok {
 			return fail("store.registry-invalid",
 				"%s.path: expected a relative path inside the project, got %q", where, entry.Path)
 		}
-		if _, duplicate := seenPaths[clean]; duplicate {
-			return fail("store.registry-invalid", "%s.path: duplicate output path %q", where, entry.Path)
+		pathKey := PathKey(clean)
+		if _, duplicate := seenPaths[pathKey]; duplicate {
+			return fail("store.registry-invalid",
+				"%s.path: duplicate output path %q (case-insensitive)", where, entry.Path)
 		}
-		seenPaths[clean] = struct{}{}
+		seenPaths[pathKey] = struct{}{}
 		switch entry.Kind {
 		case KindLibrary:
 			libraries++
@@ -140,9 +144,20 @@ func cleanRegistryPath(path string) (string, bool) {
 		strings.HasPrefix(trimmed, `\`) || (len(trimmed) > 1 && trimmed[1] == ':') {
 		return "", false
 	}
+	if strings.ContainsAny(trimmed, `:*?"<>|`) {
+		return "", false
+	}
 	normalized := filepath.ToSlash(filepath.Clean(trimmed))
 	if normalized == ".." || strings.HasPrefix(normalized, "../") {
 		return "", false
+	}
+	for _, segment := range strings.Split(normalized, "/") {
+		if segment == "." {
+			continue
+		}
+		if strings.TrimRight(segment, ". ") != segment {
+			return "", false
+		}
 	}
 	return normalized, true
 }
@@ -161,6 +176,18 @@ func RegistryPath(path string) (string, error) {
 func (registry *Registry) Find(id model.BookID) (RegistryEntry, bool) {
 	for _, entry := range registry.Books {
 		if entry.ID == id {
+			return entry, true
+		}
+	}
+	return RegistryEntry{}, false
+}
+
+// FindFold returns a registry entry by case-insensitive book id. Two ids that differ only by case
+// name the same store directory on a case-insensitive file system, so duplicate checks use this.
+func (registry *Registry) FindFold(id model.BookID) (RegistryEntry, bool) {
+	key := BookIDKey(id)
+	for _, entry := range registry.Books {
+		if BookIDKey(entry.ID) == key {
 			return entry, true
 		}
 	}

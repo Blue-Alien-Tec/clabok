@@ -110,6 +110,25 @@ func TestRegistryRejects(t *testing.T) {
 			code: "store.registry-invalid",
 		},
 		{
+			name: "case duplicate id",
+			document: `{"version":2,"books":[
+				{"id":"a","path":"Docs/a","kind":"book"},
+				{"id":"A","path":"Docs/b","kind":"book"}]}`,
+			code: "store.registry-invalid",
+		},
+		{
+			name: "case duplicate path",
+			document: `{"version":2,"books":[
+				{"id":"a","path":"Docs/a","kind":"book"},
+				{"id":"b","path":"Docs/A","kind":"book"}]}`,
+			code: "store.registry-invalid",
+		},
+		{
+			name:     "reserved id",
+			document: `{"version":2,"books":[{"id":"rollback","path":"Docs/rollback","kind":"book"}]}`,
+			code:     "store.registry-invalid",
+		},
+		{
 			name: "second library",
 			document: `{"version":2,"books":[
 				{"id":"a","path":".","kind":"library"},
@@ -139,6 +158,21 @@ func TestRegistryRejects(t *testing.T) {
 		{
 			name:     "absolute path",
 			document: `{"version":2,"books":[{"id":"a","path":"` + absolute + `","kind":"book"}]}`,
+			code:     "store.registry-invalid",
+		},
+		{
+			name:     "trailing dot path",
+			document: `{"version":2,"books":[{"id":"a","path":"Docs/a.","kind":"book"}]}`,
+			code:     "store.registry-invalid",
+		},
+		{
+			name:     "alternate data stream path",
+			document: `{"version":2,"books":[{"id":"a","path":"Docs/a:stream","kind":"book"}]}`,
+			code:     "store.registry-invalid",
+		},
+		{
+			name:     "wildcard path",
+			document: `{"version":2,"books":[{"id":"a","path":"Docs/*","kind":"book"}]}`,
 			code:     "store.registry-invalid",
 		},
 		{

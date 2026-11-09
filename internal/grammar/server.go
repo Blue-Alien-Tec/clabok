@@ -124,13 +124,27 @@ func Stop(endpoint string) (ServerInfo, error) {
 	if !exists {
 		return ServerInfo{URL: base, Running: reachable(base), Shared: reachable(base)}, nil
 	}
-	if state.PID > 0 {
+	if state.PID > 0 && shouldStopProcess(base, state.Started) {
 		if process, findErr := os.FindProcess(state.PID); findErr == nil {
 			_ = process.Kill()
 		}
 	}
 	_ = os.Remove(statePath())
 	return ServerInfo{URL: base, Running: false}, nil
+}
+
+// shouldStopProcess guards against pid reuse. A stale state file must not kill an unrelated
+// process that inherited the recorded pid: signal only when the endpoint still answers, or when
+// the state is fresh enough to describe a server that is still starting.
+func shouldStopProcess(base, started string) bool {
+	if reachable(base) {
+		return true
+	}
+	created, err := time.Parse(time.RFC3339, started)
+	if err != nil {
+		return false
+	}
+	return time.Since(created) < time.Minute
 }
 
 // Info reports the state and probes the endpoint.

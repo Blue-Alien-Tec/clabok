@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -126,6 +127,21 @@ func (service *Service) NewBook(options NewBookOptions, dryRun bool) (NewBookRes
 	if pathsErr != nil {
 		return NewBookResult{}, cli.AsError(pathsErr)
 	}
+	occupied, occupiedErr := dirExists(paths.Dir)
+	if occupiedErr != nil {
+		return NewBookResult{}, cli.Fail("library.store-read-failed", "%v", occupiedErr)
+	}
+	if occupied {
+		empty, emptyErr := dirIsEmpty(paths.Dir)
+		if emptyErr != nil {
+			return NewBookResult{}, cli.Fail("library.store-read-failed", "%v", emptyErr)
+		}
+		if !empty {
+			return NewBookResult{}, cli.Reject("library.store-exists",
+				"the store directory for book %q is not empty", id).
+				WithHint("run `pecia book purge " + string(id) + "` before reusing the id")
+		}
+	}
 	data, encodeErr := manifest.Encode()
 	if encodeErr != nil {
 		return NewBookResult{}, cli.AsError(encodeErr)
@@ -231,7 +247,7 @@ func (service *Service) Move(options MoveOptions, dryRun bool) (MoveResult, *cli
 		if other.ID == entry.ID {
 			continue
 		}
-		if otherClean, _ := store.RegistryPath(other.Path); otherClean == clean {
+		if otherClean, _ := store.RegistryPath(other.Path); store.PathKey(otherClean) == store.PathKey(clean) {
 			return MoveResult{}, cli.Reject("library.path-in-use",
 				"output path %q is already used by book %q", clean, other.ID)
 		}
@@ -464,9 +480,14 @@ func (service *Service) Purge(id model.BookID, dryRun bool) (PurgeResult, *cli.E
 	if !id.Valid() {
 		return result, cli.Usage("usage.invalid-value", "invalid book id %q", id)
 	}
-	if reservedBookID(id) {
+	if store.ReservedBookID(id) {
 		return result, cli.Reject("library.purge-reserved",
 			"%q is part of the store layout and cannot be purged", id)
+	}
+	if store.AmbiguousBookID(id) {
+		return result, cli.Reject("library.purge-ambiguous",
+			"%q is not a plain store name and may alias another path", id).
+			WithHint("use the exact book id without trailing dots or reserved characters")
 	}
 	storeRelease, lockErr := service.Life.LockStore()
 	if lockErr != nil {
@@ -485,12 +506,18 @@ func (service *Service) Purge(id model.BookID, dryRun bool) (PurgeResult, *cli.E
 	if closedErr := service.requireClosed(id); closedErr != nil {
 		return result, closedErr
 	}
-	if entry, registered := registry.Find(id); registered {
-		if entry.Kind == store.KindLibrary {
-			return result, cli.Reject("library.immovable", "the library book %q cannot be purged", id)
+	// Compare case-insensitively: on a case-insensitive file system an id like "LIBRARY" names
+	// the same store directory as the registered "library" entry. An exact lookup would miss it
+	// and purge a live book.
+	for _, entry := range registry.Books {
+		if !strings.EqualFold(string(entry.ID), string(id)) {
+			continue
 		}
-		return result, cli.Reject("library.book-registered", "book %q is still registered", id).
-			WithHint("run `pecia book unregister " + string(id) + "` first")
+		if entry.Kind == store.KindLibrary {
+			return result, cli.Reject("library.immovable", "the library book %q cannot be purged", entry.ID)
+		}
+		return result, cli.Reject("library.book-registered", "book %q is still registered", entry.ID).
+			WithHint("run `pecia book unregister " + string(entry.ID) + "` first")
 	}
 	paths, pathsErr := service.Layout.Book(id)
 	if pathsErr != nil {
@@ -535,6 +562,16 @@ func (service *Service) Purge(id model.BookID, dryRun bool) (PurgeResult, *cli.E
 	if dryRun || !result.Removed {
 		return result, nil
 	}
+	// The store lock serializes every lifecycle and registry transition, and an unregistered book
+	// cannot be opened or structurally mutated. Holding the book lock as well closes the remaining
+	// window against a stray lock holder before its lock file is removed.
+	bookRelease, bookLockErr := service.Life.LockBookExclusive(id)
+	if bookLockErr != nil {
+		return result, cli.AsError(bookLockErr)
+	}
+	bookLockPath := filepath.Join(service.Layout.Coordinator(), "book-"+string(id)+".lock")
+	defer func() { _ = os.Remove(bookLockPath) }()
+	defer func() { _ = bookRelease() }()
 	if storeExists {
 		if err := os.RemoveAll(paths.Dir); err != nil {
 			return result, cli.Fail("library.purge-failed", "remove %s: %v", paths.Dir, err)
@@ -550,22 +587,16 @@ func (service *Service) Purge(id model.BookID, dryRun bool) (PurgeResult, *cli.E
 			return result, cli.Fail("library.purge-failed", "remove %s: %v", tempDir, err)
 		}
 	}
+	_ = bookRelease()
 	for _, lockFile := range lockFiles {
+		if samePath(lockFile, bookLockPath) {
+			continue
+		}
 		if err := os.Remove(lockFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return result, cli.Fail("library.purge-failed", "remove %s: %v", lockFile, err)
 		}
 	}
 	return result, nil
-}
-
-// reservedBookID reports ids that name store infrastructure rather than a book directory.
-func reservedBookID(id model.BookID) bool {
-	switch string(id) {
-	case "rollback", ".coordinator", "library.json", "ids.json", "terms.txt",
-		"pending-terms.json", "open.json":
-		return true
-	}
-	return false
 }
 
 // dirExists reports whether path is an existing directory. A non-directory at a store path is an
@@ -596,25 +627,44 @@ func (service *Service) bookLockFiles(id model.BookID) ([]string, *cli.Error) {
 	if err != nil {
 		return nil, cli.Fail("library.purge-read-failed", "%v", err)
 	}
+	fold := runtime.GOOS == "windows"
 	bookName := "book-" + string(id) + ".lock"
 	blockPrefix := "block-" + string(id) + "-"
 	nodePrefix := "node-" + string(id) + "-"
+	if fold {
+		bookName = strings.ToLower(bookName)
+		blockPrefix = strings.ToLower(blockPrefix)
+		nodePrefix = strings.ToLower(nodePrefix)
+	}
 	files := make([]string, 0)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
+		compare := name
+		if fold {
+			compare = strings.ToLower(name)
+		}
 		switch {
-		case name == bookName:
+		case compare == bookName:
 			files = append(files, filepath.Join(directory, name))
-		case strings.HasPrefix(name, blockPrefix) && numericLock(name[len(blockPrefix):]):
+		case strings.HasPrefix(compare, blockPrefix) && numericLock(compare[len(blockPrefix):]):
 			files = append(files, filepath.Join(directory, name))
-		case strings.HasPrefix(name, nodePrefix) && numericLock(name[len(nodePrefix):]):
+		case strings.HasPrefix(compare, nodePrefix) && numericLock(compare[len(nodePrefix):]):
 			files = append(files, filepath.Join(directory, name))
 		}
 	}
 	return files, nil
+}
+
+func samePath(left, right string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 func numericLock(suffix string) bool {

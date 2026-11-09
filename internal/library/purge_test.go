@@ -3,6 +3,7 @@ package library
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -126,8 +127,63 @@ func TestPurgeRefusesRegisteredLibraryAndReserved(t *testing.T) {
 	assertReject([]string{"book", "purge", "guide"}, "library.book-registered")
 	assertReject([]string{"book", "purge", "guide", "--dry-run"}, "library.book-registered")
 	assertReject([]string{"book", "purge", "library"}, "library.immovable")
+	assertReject([]string{"book", "purge", "GUIDE"}, "library.book-registered")
+	assertReject([]string{"book", "purge", "LIBRARY"}, "library.immovable")
 	assertReject([]string{"book", "purge", "rollback"}, "library.purge-reserved")
-	assertReject([]string{"book", "purge", ".coordinator"}, "library.purge-reserved")
+	assertReject([]string{"book", "purge", "ROLLBACK"}, "library.purge-reserved")
+	assertReject([]string{"book", "purge", "rollback."}, "library.purge-reserved")
+	assertReject([]string{"book", "purge", ".Coordinator"}, "library.purge-reserved")
+	assertReject([]string{"book", "purge", "guide."}, "library.purge-ambiguous")
+	assertReject([]string{"book", "purge", "guide:stream"}, "library.purge-ambiguous")
+
+	layout := layoutOf(t, directory)
+	paths, err := layout.Book("guide")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(paths.Dir); err != nil {
+		t.Fatalf("a refused purge removed the store directory: %v", err)
+	}
+	if _, err := os.Stat(layout.Registry()); err != nil {
+		t.Fatalf("a refused purge removed the registry: %v", err)
+	}
+}
+
+func TestPurgeMatchesLockCaseOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("case-insensitive lock names are a Windows concern")
+	}
+	directory := t.TempDir()
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	runOK(t, directory, "book", "unregister", "guide")
+
+	layout := layoutOf(t, directory)
+	lockDir := layout.Coordinator()
+	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	removed := []string{"book-guide.lock", "block-guide-11.lock", "node-guide-12.lock"}
+	kept := []string{"block-guide-other-13.lock"}
+	for _, name := range append(append([]string{}, removed...), kept...) {
+		if err := os.WriteFile(filepath.Join(lockDir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload := dataOf(t, runOK(t, directory, "book", "purge", "GUIDE"))
+	if payload["locks"] != float64(len(removed)) {
+		t.Fatalf("purge lock count %v, want %d", payload["locks"], len(removed))
+	}
+	for _, name := range removed {
+		if _, err := os.Stat(filepath.Join(lockDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("lock file %s still exists", name)
+		}
+	}
+	for _, name := range kept {
+		if _, err := os.Stat(filepath.Join(lockDir, name)); err != nil {
+			t.Fatalf("purge removed foreign lock file %s", name)
+		}
+	}
 }
 
 func TestPurgeRefusesWithoutLibraryRegistry(t *testing.T) {

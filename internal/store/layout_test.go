@@ -29,6 +29,43 @@ func TestNewLayout(t *testing.T) {
 	}
 }
 
+func TestValidateBookID(t *testing.T) {
+	valid := []model.BookID{"guide", "clabok-planning", "library", "a"}
+	for _, id := range valid {
+		if err := ValidateBookID(id); err != nil {
+			t.Fatalf("%q rejected: %v", id, err)
+		}
+	}
+	invalid := []model.BookID{
+		"rollback", "ROLLBACK", "rollback.", ".coordinator", ".Coordinator",
+		"library.json", "LIBRARY.JSON", "guide.", "guide:stream", "C:", "guide*",
+	}
+	for _, id := range invalid {
+		if err := ValidateBookID(id); err == nil {
+			t.Fatalf("%q accepted", id)
+		} else {
+			expectCode(t, err, "store.reserved-book-id")
+		}
+	}
+	if err := ValidateBookID("a/b"); err == nil {
+		t.Fatal("a separator must be rejected")
+	} else {
+		expectCode(t, err, "store.invalid-book-id")
+	}
+	if BookIDKey("Guide") != BookIDKey("guide") {
+		t.Fatal("book id keys are case-sensitive")
+	}
+	if PathKey("Docs/Guide") != PathKey("Docs/guide") {
+		t.Fatal("path keys are case-sensitive")
+	}
+	if PathKey("Docs/Guide.") != PathKey("Docs/guide") {
+		t.Fatal("a trailing dot is not normalized in a path key")
+	}
+	if PathKey(".") != "." {
+		t.Fatalf("the library path key is %q", PathKey("."))
+	}
+}
+
 func TestLayoutSharedPaths(t *testing.T) {
 	root := t.TempDir()
 	layout, err := NewLayout(root)
