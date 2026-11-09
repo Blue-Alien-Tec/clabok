@@ -1,13 +1,9 @@
 package render
 
 import (
-	"errors"
-	"os"
 	"path"
-	"path/filepath"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
-	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
@@ -22,33 +18,11 @@ type crossIndex struct {
 
 // readManifest reads a book manifest without extracting or opening the book.
 func (service *Service) readManifest(book model.BookID) (*model.Manifest, error) {
-	paths, err := service.Lifecycle.Paths(book)
+	loaded, err := service.sources.LoadManifest(book)
 	if err != nil {
 		return nil, err
 	}
-	state, stateErr := service.Lifecycle.State(book)
-	if stateErr != nil {
-		return nil, stateErr
-	}
-	if state.Extracted {
-		data, readErr := os.ReadFile(filepath.Join(paths.Dir, lifecycle.ManifestMember))
-		if readErr == nil {
-			return model.Decode(data)
-		}
-		if !errors.Is(readErr, os.ErrNotExist) {
-			return nil, readErr
-		}
-	}
-	container, loadErr := store.Load(paths.Container)
-	if loadErr != nil {
-		return nil, loadErr
-	}
-	data, ok := container.Read(lifecycle.ManifestMember)
-	if !ok {
-		return nil, fail("render.manifest-missing",
-			"book %q has no %s member", book, lifecycle.ManifestMember)
-	}
-	return model.Decode(data)
+	return loaded.Manifest, nil
 }
 
 // buildCrossIndex reads every registered manifest and computes its rendered layout.

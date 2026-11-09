@@ -33,11 +33,11 @@ func (payload duplicateIDPayload) Text() string {
 func checkLibraryIDs(service *Service, registry *store.Registry) *cli.Error {
 	owners := make(map[model.ID]map[model.BookID]struct{})
 	for _, entry := range registry.Books {
-		source, err := service.readSource(entry.ID)
+		source, err := service.sources.LoadManifest(entry.ID)
 		if err != nil {
 			return cli.AsError(err)
 		}
-		for _, id := range source.manifest.OwnedIDs() {
+		for _, id := range source.Manifest.OwnedIDs() {
 			if id.IsZero() {
 				continue
 			}

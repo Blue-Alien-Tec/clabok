@@ -21,6 +21,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/prose"
 	"github.com/Blue-Alien-Tec/clabok/internal/refs"
 	"github.com/Blue-Alien-Tec/clabok/internal/repolayout"
+	"github.com/Blue-Alien-Tec/clabok/internal/source"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
@@ -59,6 +60,7 @@ type Result struct {
 // Service renders one book.
 type Service struct {
 	Lifecycle *lifecycle.Lifecycle
+	sources   *source.Service
 	// Overrides maps a generic asciiui widget name to a project-specific label.
 	Overrides map[string]string
 	// LibraryIndex is the generated library Document Index. It is set only for the library book; it
@@ -83,156 +85,21 @@ type IndexEntry struct {
 
 // New returns a render service.
 func New(life *lifecycle.Lifecycle) *Service {
-	return &Service{Lifecycle: life}
-}
-
-// bookSource is the render input of one book. It is either the extracted state (open or unsaved) or
-// the packed container, chosen without changing the lifecycle state.
-type bookSource struct {
-	paths        store.BookPaths
-	manifest     *model.Manifest
-	manifestData []byte
-	bodies       map[model.ID]string
-	layouts      map[model.ID][]byte
-	open         bool
-}
-
-// readSource loads the render input. The extracted state wins while the book is extracted; a
-// closed book is read from its container. Nothing is written and no book is opened.
-func (service *Service) readSource(book model.BookID) (*bookSource, error) {
-	paths, err := service.Lifecycle.Paths(book)
-	if err != nil {
-		return nil, err
-	}
-	state, err := service.Lifecycle.State(book)
-	if err != nil {
-		return nil, err
-	}
-	if state.Extracted {
-		source, extractErr := readExtracted(paths)
-		if extractErr == nil {
-			return source, nil
-		}
-		if !errors.Is(extractErr, os.ErrNotExist) {
-			return nil, extractErr
-		}
-	}
-	return readContainer(paths)
-}
-
-func readExtracted(paths store.BookPaths) (*bookSource, error) {
-	data, err := os.ReadFile(filepath.Join(paths.Dir, lifecycle.ManifestMember))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		return nil, fail("render.read-failed", "%v", err)
-	}
-	manifest, err := model.Decode(data)
-	if err != nil {
-		return nil, err
-	}
-	bodies, err := loadBodies(paths)
-	if err != nil {
-		return nil, err
-	}
-	layouts, err := loadLayoutsDir(filepath.Join(paths.Dir, "layouts", "asciiui"))
-	if err != nil {
-		return nil, err
-	}
-	return &bookSource{
-		paths: paths, manifest: manifest, manifestData: data, bodies: bodies, layouts: layouts, open: true,
-	}, nil
-}
-
-func readContainer(paths store.BookPaths) (*bookSource, error) {
-	container, err := store.Load(paths.Container)
-	if err != nil {
-		return nil, err
-	}
-	data, ok := container.Read(lifecycle.ManifestMember)
-	if !ok {
-		return nil, fail("render.manifest-missing",
-			"book %q has no %s member", paths.ID, lifecycle.ManifestMember)
-	}
-	manifest, err := model.Decode(data)
-	if err != nil {
-		return nil, err
-	}
-	bodies := map[model.ID]string{}
-	layouts := map[model.ID][]byte{}
-	for _, name := range container.Names() {
-		if strings.HasPrefix(name, "blocks/") && strings.HasSuffix(name, ".md") {
-			id, parseErr := model.ParseID(strings.TrimSuffix(strings.TrimPrefix(name, "blocks/"), ".md"))
-			if parseErr != nil {
-				continue
-			}
-			if body, exists := container.Text(name); exists {
-				bodies[id] = body
-			}
-			continue
-		}
-		if layoutID, layoutOK := layoutMemberID(name); layoutOK {
-			if spec, exists := container.Read(name); exists {
-				layouts[layoutID] = spec
-			}
-		}
-	}
-	return &bookSource{
-		paths: paths, manifest: manifest, manifestData: data, bodies: bodies, layouts: layouts, open: false,
-	}, nil
-}
-
-func loadLayoutsDir(directory string) (map[model.ID][]byte, error) {
-	layouts := map[model.ID][]byte{}
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return layouts, nil
-		}
-		return nil, fail("render.read-failed", "%v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".asciiui") {
-			continue
-		}
-		id, parseErr := model.ParseID(strings.TrimSuffix(entry.Name(), ".asciiui"))
-		if parseErr != nil {
-			continue
-		}
-		data, readErr := os.ReadFile(filepath.Join(directory, entry.Name()))
-		if readErr != nil {
-			return nil, fail("render.read-failed", "%v", readErr)
-		}
-		layouts[id] = data
-	}
-	return layouts, nil
-}
-
-func layoutMemberID(name string) (model.ID, bool) {
-	prefix := "layouts/asciiui/"
-	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".asciiui") {
-		return model.ZeroID, false
-	}
-	id, err := model.ParseID(strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".asciiui"))
-	if err != nil {
-		return model.ZeroID, false
-	}
-	return id, true
+	return &Service{Lifecycle: life, sources: source.New(life)}
 }
 
 // Render builds every file of the book in memory.
 func (service *Service) Render(book model.BookID) (Result, error) {
-	source, err := service.readSource(book)
+	source, err := service.sources.Load(book)
 	if err != nil {
 		return Result{}, err
 	}
 	return service.render(source)
 }
 
-func (service *Service) render(source *bookSource) (Result, error) {
-	manifest := source.manifest
-	bodies := source.bodies
+func (service *Service) render(source *source.Book) (Result, error) {
+	manifest := source.Manifest
+	bodies := source.Bodies
 	// A generated repository layout only exists while the project is a git work tree. Without git
 	// the layout blocks disappear and a chapter that held only the generated block is omitted from
 	// the index, the navigation and the output.
@@ -244,7 +111,7 @@ func (service *Service) render(source *bookSource) (Result, error) {
 		if !manifest.IsLocked(id) || manifest.BlockType(id) != "UILayout" {
 			continue
 		}
-		drawing, drawErr := renderAsciiUI(source.layouts[id], id, service.Overrides)
+		drawing, drawErr := renderAsciiUI(source.Layouts[id], id, service.Overrides)
 		if drawErr != nil {
 			return Result{}, drawErr
 		}
@@ -398,16 +265,6 @@ func loadBodies(paths store.BookPaths) (map[model.ID]string, error) {
 		bodies[id] = string(data)
 	}
 	return bodies, nil
-}
-
-// members returns the render input as a member set for the drift hash. Layouts are excluded so an
-// open and a closed book hash identically.
-func (source *bookSource) members() map[string][]byte {
-	members := map[string][]byte{lifecycle.ManifestMember: source.manifestData}
-	for id, body := range source.bodies {
-		members["blocks/"+id.String()+".md"] = []byte(body)
-	}
-	return members
 }
 
 // Slug derives an anchor or file token from a title. Numbers are never part of it.
@@ -1184,7 +1041,7 @@ type SyncResult struct {
 // from the extracted state when it is open and from the container otherwise; syncing never changes
 // the lifecycle state and a check never creates the output directory.
 func (service *Service) Sync(book model.BookID, outputDir string, options SyncOptions) (SyncResult, error) {
-	source, err := service.readSource(book)
+	source, err := service.sources.Load(book)
 	if err != nil {
 		return SyncResult{}, err
 	}
@@ -1240,7 +1097,7 @@ func (service *Service) Sync(book model.BookID, outputDir string, options SyncOp
 
 	inputHash := store.HashMembers(service.inputMembers(source))
 	outputHash := store.HashMembers(contentMap(result.Files))
-	previous, _, stateErr := source.paths.ReadState()
+	previous, _, stateErr := source.Paths.ReadState()
 	if stateErr != nil {
 		return SyncResult{}, stateErr
 	}
@@ -1276,7 +1133,7 @@ func (service *Service) Sync(book model.BookID, outputDir string, options SyncOp
 			}
 		}
 	}
-	if err := source.paths.WriteState(store.State{InputHash: inputHash, OutputHash: outputHash}); err != nil {
+	if err := source.Paths.WriteState(store.State{InputHash: inputHash, OutputHash: outputHash}); err != nil {
 		return resultSync, err
 	}
 	resultSync.Written = true
@@ -1285,8 +1142,8 @@ func (service *Service) Sync(book model.BookID, outputDir string, options SyncOp
 
 // inputMembers is the drift hash input: manifest and bodies, plus the generated library index when
 // the book is the library. Layout members are excluded so an open and a closed book hash the same.
-func (service *Service) inputMembers(source *bookSource) map[string][]byte {
-	members := source.members()
+func (service *Service) inputMembers(source *source.Book) map[string][]byte {
+	members := source.Members()
 	if len(service.LibraryIndex) > 0 {
 		var builder strings.Builder
 		for _, entry := range service.LibraryIndex {
@@ -1302,15 +1159,15 @@ func (service *Service) inputMembers(source *bookSource) map[string][]byte {
 		navHash += "|" + book.Title + "|" + book.Href
 	}
 	members["nav"] = []byte(navHash)
-	if source.manifest.Layout != nil {
-		tree, err := repolayout.Render(service.ProjectDir, source.manifest.Layout)
+	if source.Manifest.Layout != nil {
+		tree, err := repolayout.Render(service.ProjectDir, source.Manifest.Layout)
 		if err != nil {
 			tree = "unavailable"
 		}
 		members["repo-layout"] = []byte(tree)
 	}
-	if len(source.manifest.Badges) > 0 {
-		values, unresolved := badge.ResolveAll(service.ProjectDir, source.manifest.Badges)
+	if len(source.Manifest.Badges) > 0 {
+		values, unresolved := badge.ResolveAll(service.ProjectDir, source.Manifest.Badges)
 		var builder strings.Builder
 		for _, value := range values {
 			fmt.Fprintf(&builder, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\n",
@@ -1347,18 +1204,18 @@ type Finding struct {
 
 // Check runs the read-only acceptance checks.
 func (service *Service) Check(book model.BookID) ([]Finding, error) {
-	source, err := service.readSource(book)
+	source, err := service.sources.Load(book)
 	if err != nil {
 		return nil, err
 	}
-	manifest := source.manifest
+	manifest := source.Manifest
 	findings := make([]Finding, 0)
 	if issues := manifest.Validate(); issues != nil {
 		for _, issue := range issues.Issues {
 			findings = append(findings, Finding{Code: issue.Code, Message: issue.String(), Blocking: true})
 		}
 	}
-	bodies := source.bodies
+	bodies := source.Bodies
 	layout := LayoutFor(manifest)
 	if len(manifest.Badges) > 0 {
 		_, unresolved := badge.ResolveAll(service.ProjectDir, manifest.Badges)
@@ -1411,7 +1268,7 @@ func (service *Service) Check(book model.BookID) ([]Finding, error) {
 		if !manifest.IsLocked(id) || manifest.BlockType(id) != "UILayout" {
 			continue
 		}
-		if _, layoutErr := renderAsciiUI(source.layouts[id], id, service.Overrides); layoutErr != nil {
+		if _, layoutErr := renderAsciiUI(source.Layouts[id], id, service.Overrides); layoutErr != nil {
 			code := "render.missing-layout"
 			if coded, ok := layoutErr.(interface{ ErrorCode() string }); ok {
 				code = coded.ErrorCode()
@@ -1429,7 +1286,7 @@ func (service *Service) Check(book model.BookID) ([]Finding, error) {
 			})
 		}
 	}
-	if source.open {
+	if source.Open {
 		findings = append(findings, Finding{
 			Code: "render.open-book", Message: "the book is open; close it for the packed state",
 			Blocking: false,
