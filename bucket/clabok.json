@@ -1,0 +1,34 @@
+{
+  "version": "0.5.1",
+  "description": "Command-line authoring tool for structured Markdown books",
+  "homepage": "https://github.com/Blue-Alien-Tec/clabok",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.1/pecia_0.5.1_windows_amd64.zip",
+      "hash": "dad09f6a440abe46b54a1aef07b65d93a904d67e0e6efb843e19d156a3795eca"
+    },
+    "arm64": {
+      "url": "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.1/pecia_0.5.1_windows_arm64.zip",
+      "hash": "3891f9889d3f7fba7bb7a41b85d813cc607a86ad6871ec3e1a25310888ed3ec8"
+    }
+  },
+  "bin": "pecia.exe",
+  "checkver": {
+    "github": "https://github.com/Blue-Alien-Tec/clabok"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/Blue-Alien-Tec/clabok/releases/download/v$version/pecia_$version_windows_amd64.zip"
+      },
+      "arm64": {
+        "url": "https://github.com/Blue-Alien-Tec/clabok/releases/download/v$version/pecia_$version_windows_arm64.zip"
+      }
+    },
+    "hash": {
+      "url": "https://github.com/Blue-Alien-Tec/clabok/releases/download/v$version/SHA256SUMS",
+      "mode": "extract"
+    }
+  }
+}

@@ -18,10 +18,12 @@ This appendix shows the tracked directory structure of the repository. It is gen
 _CLABOK/
   clabok/
   library/
+bucket/         Scoop manifest.
 cmd/
   pecia/        CLI entry point and command wiring.
 Docs/
   clabok/
+Formula/        Homebrew formula.
 internal/       The Go packages, one directory per concern.
   apply/
   asciiui/
@@ -53,7 +55,7 @@ internal/       The Go packages, one directory per concern.
   structure/    The single structure mutation path.
   temp/
   tui/
-scripts/        CI helper scripts.
+scripts/        Check, release and install scripts.
 ```
 <!-- /repolayout:9199884908051996219 -->
 

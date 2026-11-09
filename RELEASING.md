@@ -49,12 +49,12 @@ test the matrix without a tag.
 - `go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1` works; `@latest` resolves to the
   release.
 
-## After the first release
+## Package manifests
 
-The Scoop manifest (`bucket/clabok.json`) and the Homebrew formula (`Formula/clabok.rb`) need the
-real archive hashes from the release. Add or update them after the release and commit the change.
-A separate `homebrew-clabok` tap is the cleaner long-term layout; the formula in this repository is
-the first step.
+`bucket/clabok.json` and `Formula/clabok.rb` carry the archive URLs and SHA256 values for the
+current release. Scoop's `checkver`/`autoupdate` handles later versions; the Homebrew formula needs
+the new URLs and hashes after each release. A separate `homebrew-clabok` tap is the cleaner
+long-term layout; the formula in this repository is the first step.
 
 ## Signing
 
