@@ -3,7 +3,7 @@
 
 [CLABOK](Docs/clabok/README.md) · [Document Index](#document-index)
 
-[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 0.5.0](https://img.shields.io/badge/version-0.5.0-green?style=flat-square) [![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 0.5.1](https://img.shields.io/badge/version-0.5.1-green?style=flat-square) [![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 # CLABOK
 
@@ -25,7 +25,7 @@ That writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows
 directory to `PATH`. Verify the installation with `pecia version`. Pin a release with:
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.0
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1
 ```
 
 Prebuilt binaries for Windows, Linux and macOS are attached to each

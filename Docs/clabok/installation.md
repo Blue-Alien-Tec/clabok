@@ -15,7 +15,7 @@ Install the latest release with `go install`. The command writes `pecia` to `$(g
 
 ```text
 go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.0
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1
 ```
 
 Without Go installed, download a prebuilt archive for Windows, Linux or macOS from the [releases](https://github.com/Blue-Alien-Tec/clabok/releases) page. Each archive contains the binary, the README and the license; `SHA256SUMS` verifies the download. To build from a checkout, run `go build -o pecia ./cmd/pecia`.

@@ -14,16 +14,19 @@ six archives, writes `SHA256SUMS` and publishes the GitHub Release.
 
 ```text
 # Windows
-.\scripts\release.ps1 0.5.0
+.\scripts\release.ps1 0.5.1
 
 # Unix
-./scripts/release.sh 0.5.0
+./scripts/release.sh 0.5.1
 ```
 
 The script refuses a dirty tree, a branch other than `main`, a HEAD that differs from `origin/main`,
-a version that does not match `internal/buildinfo.Version` (`0.5.0` or `0.5.0-dev`), an existing tag,
-unformatted Go files or failing vet/test/build. It then creates `v0.5.0` and pushes it. Use `-DryRun`
+a version that does not match `internal/buildinfo.Version` (`0.5.1` or `0.5.1-dev`), an existing tag,
+unformatted Go files or failing vet/test/build. It then creates `v0.5.1` and pushes it. Use `-DryRun`
 (PowerShell) or `--dry-run` (shell) to run every check without creating or pushing the tag.
+
+Do not re-tag a published version: the Go module proxy keeps the first source for a version. Publish
+the next patch instead.
 
 ## What the workflow does
 
@@ -43,7 +46,7 @@ test the matrix without a tag.
 - The release has six archives and `SHA256SUMS`.
 - `sha256sum -c SHA256SUMS` passes.
 - The downloaded binary reports the tag: `pecia version`.
-- `go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.0` works; `@latest` resolves to the
+- `go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1` works; `@latest` resolves to the
   release.
 
 ## After the first release
