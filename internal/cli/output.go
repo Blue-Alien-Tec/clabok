@@ -32,6 +32,9 @@ type DryRunResult interface {
 type Result struct {
 	Data any
 	Text string
+	// Raw, when set, is written verbatim instead of the JSON envelope. It carries an output format
+	// the envelope cannot express, such as NDJSON.
+	Raw []byte
 }
 
 type errorObject struct {

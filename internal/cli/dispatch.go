@@ -108,6 +108,13 @@ func emitResult(env *Env, command string, result *Result) int {
 		fmt.Fprint(env.Out, ensureTrailingNewline(textOf(result)))
 		return ExitOK
 	}
+	if len(result.Raw) > 0 {
+		if _, err := env.Out.Write(result.Raw); err != nil {
+			fmt.Fprintf(env.Err, "error: %v\n", err)
+			return ExitFailure
+		}
+		return ExitOK
+	}
 	payload := envelope{
 		Schema:  SchemaVersion,
 		OK:      true,

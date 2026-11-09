@@ -1,91 +1,283 @@
 package search
 
 import (
+	"errors"
 	"flag"
-	"fmt"
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
+	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
-
-type payload struct {
-	Book        string  `json:"book"`
-	Query       string  `json:"query"`
-	Count       int     `json:"count"`
-	Occurrences int     `json:"occurrences"`
-	Matches     []Match `json:"matches"`
-}
-
-func (payload payload) Text() string {
-	var builder strings.Builder
-	for _, match := range payload.Matches {
-		fmt.Fprintf(&builder, "%s %d: %s\n", match.ID, match.Line, match.Text)
-	}
-	fmt.Fprintf(&builder, "%d match(es), %d occurrence(s)\n", payload.Count, payload.Occurrences)
-	return builder.String()
-}
 
 // Register adds the find command.
 func Register(registry *cli.Registry) {
-	var book, query, field string
-	var context int
-	var ignoreCase, word, countOnly bool
+	var input inputOptions
 	registry.Add(&cli.Command{
 		Name:    "find",
-		Summary: "search titles and bodies",
-		Usage:   "pecia find --book <id> --query <text> [--field body,title] [--context N]",
+		Summary: "search titles, bodies, layouts and regions",
+		Usage:   "pecia find (--book <id> | --all) --query <text> [--mode literal|glob|regex] [--field body,title] [--result matches|books|blocks|nodes|count]",
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("find")
-			set.StringVar(&book, "book", "", "book id")
-			set.StringVar(&query, "query", "", "text to find")
-			set.StringVar(&field, "field", "body,title", "comma-separated fields")
-			set.IntVar(&context, "context", 0, "context lines around a body match")
-			set.BoolVar(&ignoreCase, "ignore-case", false, "match case-insensitively")
-			set.BoolVar(&word, "word", false, "match whole words only")
-			set.BoolVar(&countOnly, "count", false, "print counts only")
+			set.StringVar(&input.Book, "book", "", "book id")
+			set.BoolVar(&input.All, "all", false, "search every registered book")
+			set.StringVar(&input.Query, "query", "", "text to find")
+			set.StringVar(&input.Mode, "mode", "literal", "match mode: literal, glob or regex")
+			set.StringVar(&input.Field, "field", "", "comma-separated fields (default body,title)")
+			set.StringVar(&input.Kind, "kind", "", "comma-separated node kinds")
+			set.StringVar(&input.Type, "type", "", "comma-separated block types")
+			set.StringVar(&input.Status, "status", "", "comma-separated editorial states")
+			set.StringVar(&input.Part, "part", "", "part name")
+			set.StringVar(&input.Node, "node", "", "node id and subtree")
+			set.StringVar(&input.Block, "block", "", "exactly one placed block")
+			set.BoolVar(&input.Locked, "locked", false, "locked blocks only")
+			set.BoolVar(&input.Unlocked, "unlocked", false, "unlocked blocks only")
+			set.StringVar(&input.Result, "result", "matches", "result mode: matches, books, blocks, nodes or count")
+			set.IntVar(&input.Limit, "limit", 0, "maximum result items")
+			set.IntVar(&input.Offset, "offset", 0, "result items to skip")
+			set.IntVar(&input.Context, "context", 0, "context lines around a match")
+			set.BoolVar(&input.IgnoreCase, "ignore-case", false, "match case-insensitively")
+			set.BoolVar(&input.Word, "word", false, "match whole words only (literal)")
+			set.BoolVar(&input.CountOnly, "count", false, "print counts only")
+			set.BoolVar(&input.Strict, "strict", false, "fail instead of warning")
+			set.StringVar(&input.Format, "format", "json", "output format: json or ndjson")
 			return set
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 0 {
 				return nil, cli.Usage("usage.unexpected-argument", "find takes flags only")
 			}
-			if book == "" {
-				return nil, cli.Usage("usage.missing-argument", "--book is required")
+			options, parseErr := parseOptions(env, input)
+			if parseErr != nil {
+				return nil, parseErr
 			}
-			if query == "" {
-				return nil, cli.Usage("usage.missing-argument", "--query is required")
-			}
-			bookID := model.BookID(book)
-			if !bookID.Valid() {
-				return nil, cli.Usage("usage.invalid-value", "invalid book id %q", book)
-			}
-			fields := make([]string, 0)
-			for _, part := range strings.Split(field, ",") {
-				if trimmed := strings.TrimSpace(part); trimmed != "" {
-					fields = append(fields, trimmed)
-				}
-			}
-			life, _, envErr := lifecycle.FromEnv(env)
+			life, layout, envErr := lifecycle.FromEnv(env)
 			if envErr != nil {
 				return nil, envErr
 			}
-			service := New(life)
-			result, findErr := service.Find(bookID, query, Options{
-				Fields: fields, IgnoreCase: ignoreCase, Word: word, Context: context,
-			})
+			registry, registryErr := store.LoadRegistry(layout.Registry())
+			if registryErr != nil {
+				return nil, cli.Fail("search.registry-invalid", "%v", registryErr)
+			}
+			found, findErr := New(life, registry).Find(options)
 			if findErr != nil {
-				return nil, cli.AsError(findErr)
+				return nil, asCLI(findErr)
 			}
-			matches := result.Matches
-			if countOnly {
-				matches = nil
+			if options.Format == "ndjson" {
+				data, encodeErr := found.NDJSON(options.Limit, options.Offset)
+				if encodeErr != nil {
+					return nil, cli.Fail("search.write-failed", "%v", encodeErr)
+				}
+				return &cli.Result{Raw: data}, nil
 			}
-			return &cli.Result{Data: payload{
-				Book: string(bookID), Query: query, Count: result.Count,
-				Occurrences: result.Occurrences, Matches: matches,
-			}}, nil
+			return &cli.Result{
+				Data: found.Payload(options.Limit, options.Offset),
+				Text: found.Text(options.Limit, options.Offset),
+			}, nil
 		},
 	})
+}
+
+// inputOptions is the raw flag state before validation.
+type inputOptions struct {
+	Book    string
+	All     bool
+	Query   string
+	Mode    string
+	Field   string
+	Kind    string
+	Type    string
+	Status  string
+	Part    string
+	Node    string
+	Block   string
+	Result  string
+	Format  string
+	Context int
+	Limit   int
+	Offset  int
+	// IgnoreCase, Word, Locked and Unlocked refine the match.
+	IgnoreCase bool
+	Word       bool
+	Locked     bool
+	Unlocked   bool
+	CountOnly  bool
+	Strict     bool
+}
+
+func parseOptions(env *cli.Env, input inputOptions) (Options, *cli.Error) {
+	if input.Book == "" && !input.All {
+		return Options{}, cli.Reject("search.scope-required", "one of --book or --all is required")
+	}
+	if input.Book != "" && input.All {
+		return Options{}, cli.Reject("search.scope-conflict", "use either --book or --all")
+	}
+	if input.Book != "" && !model.BookID(input.Book).Valid() {
+		return Options{}, cli.Usage("usage.invalid-value", "invalid book id %q", input.Book)
+	}
+	if input.Node != "" && input.Block != "" {
+		return Options{}, cli.Reject("search.scope-conflict", "use either --node or --block")
+	}
+	if input.Locked && input.Unlocked {
+		return Options{}, cli.Reject("search.scope-conflict", "use either --locked or --unlocked")
+	}
+	mode, known := ParseMode(input.Mode)
+	if !known {
+		return Options{}, cli.Usage("search.invalid-mode", "unknown match mode %q", input.Mode)
+	}
+	fields, fieldErr := parseFields(splitList(input.Field))
+	if fieldErr != nil {
+		return Options{}, toUsage(fieldErr)
+	}
+	filter, filterErr := parseFilter(input)
+	if filterErr != nil {
+		return Options{}, filterErr
+	}
+	if filter.Block != model.ZeroID {
+		if input.Field != "" && fields.title {
+			return Options{}, cli.Usage("search.result-conflict", "--field title does not apply to --block")
+		}
+		fields.title = false
+	}
+	resultMode, resultErr := parseResult(input.Result, input.CountOnly)
+	if resultErr != nil {
+		return Options{}, resultErr
+	}
+	if input.Limit < 0 {
+		return Options{}, cli.Usage("search.invalid-limit", "--limit must not be negative")
+	}
+	if input.Offset < 0 {
+		return Options{}, cli.Usage("search.invalid-offset", "--offset must not be negative")
+	}
+	if resultMode != "matches" && input.Context > 0 {
+		return Options{}, cli.Usage("search.result-conflict", "--context applies only to --result matches")
+	}
+	if resultMode == "count" && (input.Limit > 0 || input.Offset > 0) {
+		return Options{}, cli.Usage("search.result-conflict", "--result count does not page")
+	}
+	format := input.Format
+	switch format {
+	case "json":
+	case "ndjson":
+		if env.Globals.Text {
+			return Options{}, cli.Usage("usage.invalid-value", "--text cannot be combined with --format ndjson")
+		}
+	default:
+		return Options{}, cli.Usage("usage.invalid-value", "unknown format %q; use json or ndjson", format)
+	}
+	return Options{
+		Book: model.BookID(input.Book), All: input.All, Query: input.Query,
+		Fields: fields.names(), Mode: mode, IgnoreCase: input.IgnoreCase,
+		Word: input.Word, Context: input.Context, Filter: filter,
+		Result: resultMode, Limit: input.Limit, Offset: input.Offset,
+		Strict: input.Strict, Format: format,
+	}, nil
+}
+
+func parseFilter(input inputOptions) (Filter, *cli.Error) {
+	filter := Filter{
+		Kinds:    splitList(input.Kind),
+		Types:    splitList(input.Type),
+		Statuses: splitList(input.Status),
+		Part:     strings.TrimSpace(input.Part),
+	}
+	node, nodeErr := parseID(input.Node)
+	if nodeErr != nil {
+		return Filter{}, nodeErr
+	}
+	block, blockErr := parseID(input.Block)
+	if blockErr != nil {
+		return Filter{}, blockErr
+	}
+	filter.Node, filter.Block = node, block
+	if input.Locked {
+		locked := true
+		filter.Locked = &locked
+	}
+	if input.Unlocked {
+		locked := false
+		filter.Locked = &locked
+	}
+	for _, name := range filter.Kinds {
+		if !model.Kind(name).Valid() {
+			return Filter{}, cli.Usage("search.invalid-kind",
+				"unknown node kind %q; use title, chapter, subchapter or link", name)
+		}
+	}
+	for _, name := range filter.Statuses {
+		if name == "unset" {
+			continue
+		}
+		if _, known := model.FindStatus(name); !known {
+			return Filter{}, cli.Usage("search.invalid-status", "unknown status %q", name)
+		}
+	}
+	return filter, nil
+}
+
+func parseResult(value string, countOnly bool) (string, *cli.Error) {
+	result := strings.TrimSpace(value)
+	if result == "" {
+		result = "matches"
+	}
+	if countOnly {
+		if result != "matches" && result != "count" {
+			return "", cli.Usage("search.result-conflict", "--count conflicts with --result %s", result)
+		}
+		result = "count"
+	}
+	switch result {
+	case "matches", "books", "blocks", "nodes", "count":
+		return result, nil
+	}
+	return "", cli.Usage("usage.invalid-value",
+		"unknown result %q; use matches, books, blocks, nodes or count", result)
+}
+
+func parseID(value string) (model.ID, *cli.Error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return model.ZeroID, nil
+	}
+	id, err := model.ParseID(trimmed)
+	if err != nil || id.IsZero() {
+		return model.ZeroID, cli.Usage("usage.invalid-value", "invalid id %q", trimmed)
+	}
+	return id, nil
+}
+
+func splitList(value string) []string {
+	values := make([]string, 0)
+	for _, part := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}
+
+// toUsage maps a search error to the usage exit code.
+func toUsage(err error) *cli.Error {
+	var searchErr *Error
+	if errors.As(err, &searchErr) {
+		return cli.Usage(searchErr.Code, "%s", searchErr.Message)
+	}
+	return cli.AsError(err)
+}
+
+// asCLI maps an engine error to the documented exit code.
+func asCLI(err error) *cli.Error {
+	var searchErr *Error
+	if !errors.As(err, &searchErr) {
+		return cli.AsError(err)
+	}
+	switch searchErr.Code {
+	case "search.scope-required", "search.scope-conflict", "search.unknown-book", "search.unknown-id":
+		return cli.Reject(searchErr.Code, "%s", searchErr.Message)
+	case "search.strict-failed", "search.read-failed", "search.unsupported-schema":
+		return cli.Fail(searchErr.Code, "%s", searchErr.Message)
+	default:
+		return cli.Usage(searchErr.Code, "%s", searchErr.Message)
+	}
 }
