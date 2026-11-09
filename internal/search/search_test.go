@@ -72,7 +72,7 @@ func newScene(t *testing.T) *scene {
 		}
 		paths[id] = bookPaths
 	}
-	return &scene{Service: New(life, registry), Life: life, Layout: layout, Paths: paths}
+	return &scene{Service: New(life, registry, layout.Root), Life: life, Layout: layout, Paths: paths}
 }
 
 func fixtureManifest(t *testing.T) *model.Manifest {

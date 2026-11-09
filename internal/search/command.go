@@ -56,6 +56,8 @@ func Register(registry *cli.Registry) {
 			set.BoolVar(&input.Locked, "locked", false, "locked blocks only")
 			set.BoolVar(&input.Unlocked, "unlocked", false, "unlocked blocks only")
 			set.StringVar(&input.Result, "result", "matches", "result mode: matches, books, blocks, nodes or count")
+			set.StringVar(&input.GroupBy, "group-by", "", "group by type, status, kind or part")
+			set.StringVar(&input.CountBy, "count-by", "", "count per type, status, kind or part")
 			set.IntVar(&input.Limit, "limit", 0, "maximum result items")
 			set.IntVar(&input.Offset, "offset", 0, "result items to skip")
 			set.IntVar(&input.Context, "context", 0, "context lines around a match")
@@ -65,6 +67,8 @@ func Register(registry *cli.Registry) {
 			set.BoolVar(&input.Strict, "strict", false, "fail instead of warning")
 			set.BoolVar(&input.RequireMatch, "require-match", false, "exit 1 when the result is empty")
 			set.BoolVar(&input.Snapshot, "snapshot", false, "take the book lock for a consistent read")
+			set.StringVar(&input.IndexMode, "index", "auto", "index mode: auto, force or off")
+			set.BoolVar(&input.Verify, "verify", false, "re-check indexed lines against the source")
 			set.StringVar(&input.Format, "format", "json", "output format: json or ndjson")
 			return set
 		},
@@ -84,7 +88,7 @@ func Register(registry *cli.Registry) {
 			if registryErr != nil {
 				return nil, cli.Fail("search.registry-invalid", "%v", registryErr)
 			}
-			found, findErr := New(life, registry).Find(options)
+			found, findErr := New(life, registry, layout.Root).Find(options)
 			if findErr != nil {
 				return nil, asCLI(findErr)
 			}
@@ -130,6 +134,8 @@ type inputOptions struct {
 	Ref         string
 	MissingBody bool
 	Result      string
+	GroupBy     string
+	CountBy     string
 	Format      string
 	QueryModes  stringList
 	Context     int
@@ -143,6 +149,8 @@ type inputOptions struct {
 	CountOnly    bool
 	RequireMatch bool
 	Snapshot     bool
+	IndexMode    string
+	Verify       bool
 	Strict       bool
 }
 
@@ -202,9 +210,40 @@ func parseOptions(env *cli.Env, input inputOptions) (Options, *cli.Error) {
 	if resultMode == "count" && (input.Limit > 0 || input.Offset > 0) {
 		return Options{}, cli.Usage("search.result-conflict", "--result count does not page")
 	}
+	switch input.IndexMode {
+	case "auto", "force", "off":
+	default:
+		return Options{}, cli.Usage("usage.invalid-value",
+			"unknown index mode %q; use auto, force or off", input.IndexMode)
+	}
+	if input.IndexMode == "off" && input.Verify {
+		return Options{}, cli.Usage("usage.invalid-value", "--verify needs the index")
+	}
 	if input.MissingBody && resultMode != "blocks" && resultMode != "count" {
 		return Options{}, cli.Usage("search.missing-body-result",
 			"--missing-body needs --result blocks or --result count")
+	}
+	groupBy := strings.TrimSpace(input.GroupBy)
+	countBy := strings.TrimSpace(input.CountBy)
+	if groupBy != "" && countBy != "" {
+		return Options{}, cli.Usage("search.group-conflict", "use either --group-by or --count-by")
+	}
+	group := groupBy
+	countOnlyGroup := false
+	if group == "" && countBy != "" {
+		group = countBy
+		countOnlyGroup = true
+	}
+	if group != "" {
+		if resultMode != "matches" {
+			return Options{}, cli.Usage("search.group-conflict", "grouping needs the default --result matches")
+		}
+		switch group {
+		case "type", "status", "kind", "part":
+		default:
+			return Options{}, cli.Usage("search.invalid-group",
+				"unknown group %q; use type, status, kind or part", group)
+		}
 	}
 	format := input.Format
 	switch format {
@@ -221,7 +260,9 @@ func parseOptions(env *cli.Env, input inputOptions) (Options, *cli.Error) {
 		Fields: fields.names(), FieldsExplicit: input.Field != "", IgnoreCase: input.IgnoreCase,
 		Word: input.Word, Context: input.Context, Filter: filter, Result: resultMode,
 		Limit: input.Limit, Offset: input.Offset, RequireMatch: input.RequireMatch,
-		Snapshot: input.Snapshot, Strict: input.Strict, Format: format,
+		Snapshot: input.Snapshot, GroupBy: group, CountBy: countOnlyGroup,
+		IndexMode: input.IndexMode, Verify: input.Verify,
+		Strict: input.Strict, Format: format,
 	}, nil
 }
 
@@ -393,9 +434,11 @@ func asCLI(err error) *cli.Error {
 		return cli.AsError(err)
 	}
 	switch searchErr.Code {
-	case "search.scope-required", "search.scope-conflict", "search.unknown-book", "search.unknown-id":
+	case "search.scope-required", "search.scope-conflict", "search.unknown-book", "search.unknown-id",
+		"index.missing", "index.stale", "index.corrupt", "index.open-book", "index.unsupported":
 		return cli.Reject(searchErr.Code, "%s", searchErr.Message)
-	case "search.strict-failed", "search.read-failed", "search.unsupported-schema":
+	case "search.strict-failed", "search.read-failed", "search.unsupported-schema",
+		"index.read-failed", "index.write-failed":
 		return cli.Fail(searchErr.Code, "%s", searchErr.Message)
 	default:
 		return cli.Usage(searchErr.Code, "%s", searchErr.Message)

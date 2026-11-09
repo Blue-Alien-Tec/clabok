@@ -10,6 +10,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/coordinator"
 	"github.com/Blue-Alien-Tec/clabok/internal/editorial"
 	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
+	"github.com/Blue-Alien-Tec/clabok/internal/index"
 	"github.com/Blue-Alien-Tec/clabok/internal/library"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/render"
@@ -30,6 +31,7 @@ func main() {
 	apply.Register(registry)
 	body.Register(registry)
 	search.Register(registry)
+	index.Register(registry)
 	tui.Register(registry)
 	temp.Register(registry)
 	render.Register(registry, library.IndexEntries)

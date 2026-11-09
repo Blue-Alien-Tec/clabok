@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/index"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/source"
@@ -125,7 +126,13 @@ type Options struct {
 	FieldsExplicit bool
 	RequireMatch   bool
 	Snapshot       bool
-	Strict         bool
+	// GroupBy is type, status, kind or part; CountBy suppresses the match list.
+	GroupBy string
+	CountBy bool
+	// IndexMode is auto, force or off; Verify re-checks indexed lines against the source.
+	IndexMode string
+	Verify    bool
+	Strict    bool
 }
 
 // Result is the complete unscoped search result before paging.
@@ -137,6 +144,9 @@ type Result struct {
 	Fields   fieldFlags
 	Filter   Filter
 	Result   string
+	GroupBy  string
+	CountBy  bool
+	Index    IndexInfo
 	Ref      *RefInfo
 	Books    []string
 	Matches  []Match
@@ -153,11 +163,15 @@ type Service struct {
 	Lifecycle *lifecycle.Lifecycle
 	Registry  *store.Registry
 	Sources   *source.Service
+	Index     *index.Service
 }
 
 // New returns a search service over one registry.
-func New(life *lifecycle.Lifecycle, registry *store.Registry) *Service {
-	return &Service{Lifecycle: life, Registry: registry, Sources: source.New(life)}
+func New(life *lifecycle.Lifecycle, registry *store.Registry, root string) *Service {
+	return &Service{
+		Lifecycle: life, Registry: registry, Sources: source.New(life),
+		Index: index.New(life, registry, root),
+	}
 }
 
 // Find runs one search. It never opens a book and takes no lock.
@@ -191,6 +205,7 @@ func (service *Service) Find(options Options) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
+		options.Queries = queries
 		if options.Filter.MissingBody {
 			return Result{}, fail("search.missing-body-query", "--missing-body does not take a query")
 		}
@@ -215,10 +230,15 @@ func (service *Service) Find(options Options) (Result, error) {
 			return Result{}, err
 		}
 	}
+	indexMode := options.IndexMode
+	if indexMode == "" {
+		indexMode = "auto"
+	}
 	result := Result{
 		Book: string(options.Book), All: options.All, Queries: queries, Join: join,
 		Fields: fields, Filter: options.Filter, Result: options.Result, Warnings: []Warning{},
-		FilterOnly: filterOnly,
+		FilterOnly: filterOnly, GroupBy: options.GroupBy, CountBy: options.CountBy,
+		Index: IndexInfo{Mode: indexMode},
 	}
 	if options.Filter.Ref != model.ZeroID {
 		result.Ref = &RefInfo{ID: options.Filter.Ref.String()}
@@ -255,6 +275,15 @@ func (service *Service) searchBook(result *Result, entry store.RegistryEntry, op
 		}
 		defer release()
 	}
+	if !filterOnly {
+		handled, indexErr := service.tryIndexed(result, entry, options, matchers, fields, join)
+		if indexErr != nil {
+			return indexErr
+		}
+		if handled {
+			return nil
+		}
+	}
 	book, err := service.Sources.Load(entry.ID)
 	if err != nil {
 		return loadFailure(err)
@@ -285,6 +314,314 @@ func (service *Service) searchBook(result *Result, entry store.RegistryEntry, op
 // bookWarning reports whether a per-book error is a warning in an --all search.
 func bookWarning(code string) bool {
 	return code == "search.read-failed" || code == "search.unsupported-schema"
+}
+
+// tryIndexed uses a fresh index when it can answer the request. It returns handled=false when the
+// caller must scan, and reports the documented index codes under --index force.
+func (service *Service) tryIndexed(result *Result, entry store.RegistryEntry, options Options, matchers []*Matcher, fields fieldFlags, join string) (bool, error) {
+	mode := result.Index.Mode
+	if mode == "off" {
+		return false, nil
+	}
+	state, err := service.Lifecycle.State(entry.ID)
+	if err != nil {
+		return false, err
+	}
+	status := "open"
+	if !state.HasEntry && !state.Extracted {
+		observed, statusErr := service.Index.Status(entry.ID)
+		if statusErr != nil {
+			return false, statusErr
+		}
+		status = observed.State
+	}
+	if status == "fresh" {
+		result.Index.Fresh = true
+	}
+	usable := indexUsable(options)
+	if status == "fresh" && usable {
+		if indexErr := service.searchIndexed(result, entry, options, matchers, fields, join); indexErr != nil {
+			return false, indexErr
+		}
+		result.Index.Used = true
+		return true, nil
+	}
+	if mode == "force" {
+		switch status {
+		case "fresh":
+			return false, fail("index.unsupported", "book %q cannot be served by the index", entry.ID)
+		case "open":
+			return false, fail("index.open-book", "book %q is open; close it to use the index", entry.ID)
+		default:
+			return false, fail("index."+status, "book %q has no fresh index", entry.ID)
+		}
+	}
+	return false, nil
+}
+
+// indexUsable reports whether the request can be answered from postings alone.
+func indexUsable(options Options) bool {
+	if options.Filter.Block != model.ZeroID || options.Filter.Ref != model.ZeroID || options.Filter.MissingBody {
+		return false
+	}
+	if len(options.Queries) == 0 {
+		return false
+	}
+	for _, query := range options.Queries {
+		if _, ok := queryCandidateFor(query); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// queryCandidate is the postings lookup of one query.
+type queryCandidate struct {
+	tokens   []string
+	trigrams []string
+}
+
+func queryCandidateFor(query Query) (queryCandidate, bool) {
+	if query.Fuzzy > 0 || query.Mode == ModeFuzzy {
+		return queryCandidate{}, false
+	}
+	switch query.Mode {
+	case ModeLiteral:
+		words := tokenize(query.Text)
+		if len(words) == 0 {
+			return queryCandidate{}, false
+		}
+		longest := words[0].Text
+		for _, word := range words {
+			if len(word.Text) > len(longest) {
+				longest = word.Text
+			}
+		}
+		return queryCandidate{tokens: []string{strings.ToLower(longest)}}, true
+	case ModeGlob:
+		return prefixCandidate(globPrefix(query.Text))
+	case ModeRegex:
+		return prefixCandidate(regexPrefix(query.Text))
+	}
+	return queryCandidate{}, false
+}
+
+func prefixCandidate(prefix string) (queryCandidate, bool) {
+	runes := []rune(strings.ToLower(prefix))
+	if len(runes) < 3 {
+		return queryCandidate{}, false
+	}
+	trigrams := make([]string, 0, len(runes)-2)
+	for index := 0; index+3 <= len(runes); index++ {
+		trigrams = append(trigrams, string(runes[index:index+3]))
+	}
+	return queryCandidate{trigrams: trigrams}, true
+}
+
+func globPrefix(pattern string) string {
+	var builder strings.Builder
+	for _, character := range pattern {
+		switch character {
+		case '*', '?', '\\':
+			return builder.String()
+		}
+		builder.WriteRune(character)
+	}
+	return builder.String()
+}
+
+func regexPrefix(pattern string) string {
+	var builder strings.Builder
+	for _, character := range pattern {
+		if strings.ContainsRune(`\.+*?()[]{}|^$`, character) {
+			return builder.String()
+		}
+		builder.WriteRune(character)
+	}
+	return builder.String()
+}
+
+func candidateSets(derived *index.BookIndex, queries []Query) []map[int]struct{} {
+	sets := make([]map[int]struct{}, len(queries))
+	for queryIndex, query := range queries {
+		candidate, ok := queryCandidateFor(query)
+		if !ok {
+			sets[queryIndex] = map[int]struct{}{}
+			continue
+		}
+		set := map[int]struct{}{}
+		if len(candidate.tokens) > 0 {
+			for _, token := range candidate.tokens {
+				for _, position := range derived.Tokens[token] {
+					set[position] = struct{}{}
+				}
+			}
+		} else {
+			first := true
+			for _, trigram := range candidate.trigrams {
+				postings := derived.Trigrams[trigram]
+				if first {
+					for _, position := range postings {
+						set[position] = struct{}{}
+					}
+					first = false
+					continue
+				}
+				next := map[int]struct{}{}
+				for _, position := range postings {
+					if _, exists := set[position]; exists {
+						next[position] = struct{}{}
+					}
+				}
+				set = next
+			}
+		}
+		sets[queryIndex] = set
+	}
+	return sets
+}
+
+func selectCandidates(sets []map[int]struct{}, join string) map[int]struct{} {
+	if len(sets) == 0 {
+		return nil
+	}
+	if join != "and" {
+		union := map[int]struct{}{}
+		for _, set := range sets {
+			for position := range set {
+				union[position] = struct{}{}
+			}
+		}
+		return union
+	}
+	selected := sets[0]
+	for _, set := range sets[1:] {
+		next := map[int]struct{}{}
+		for position := range selected {
+			if _, exists := set[position]; exists {
+				next[position] = struct{}{}
+			}
+		}
+		selected = next
+	}
+	return selected
+}
+
+// searchIndexed answers a search from the derived index without loading bodies.
+func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry, options Options, matchers []*Matcher, fields fieldFlags, join string) error {
+	derived, err := service.Index.Load(entry.ID)
+	if err != nil {
+		return fail("index.corrupt", "%v", err)
+	}
+	book, err := service.Sources.LoadManifest(entry.ID)
+	if err != nil {
+		return loadFailure(err)
+	}
+	result.Books = append(result.Books, string(entry.ID))
+	for _, id := range derived.Missing {
+		result.Warnings = append(result.Warnings, Warning{
+			Code: "search.missing-body", Book: string(entry.ID),
+			Message: fmt.Sprintf("block %s has no body", id),
+		})
+	}
+	if result.Ref != nil && ownsID(book, options.Filter.Ref) {
+		result.Ref.Exists = true
+	}
+	info := newBookInfo(book, entry.Path)
+	set, filterErr := newFilterSet(info, options.Filter, options.IgnoreCase)
+	if filterErr != nil {
+		return filterErr
+	}
+	selected := selectCandidates(candidateSets(derived, options.Queries), join)
+	if selected == nil {
+		return nil
+	}
+	var bodies map[model.ID]string
+	if options.Verify {
+		blocks := make([]model.ID, 0)
+		seen := map[model.ID]struct{}{}
+		for position := range selected {
+			if position >= len(derived.Entries) {
+				continue
+			}
+			value := derived.Entries[position]
+			if value.Field != "body" || value.Block == "" {
+				continue
+			}
+			id, parseErr := model.ParseID(value.Block)
+			if parseErr != nil {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			blocks = append(blocks, id)
+		}
+		if len(blocks) > 0 {
+			loaded, loadErr := service.Sources.LoadBodies(entry.ID, blocks)
+			if loadErr != nil {
+				return loadFailure(loadErr)
+			}
+			bodies = loaded.Bodies
+		}
+	}
+	lineJoin := options.Result == "" || options.Result == "matches" ||
+		options.Result == "count" || options.GroupBy != ""
+	joinAnd := join == "and" && len(matchers) > 1
+	for position := 0; position < len(derived.Entries); position++ {
+		if _, exists := selected[position]; !exists {
+			continue
+		}
+		value := derived.Entries[position]
+		if !fields.has(value.Field) {
+			continue
+		}
+		var blockID model.ID
+		if value.Block != "" {
+			parsed, parseErr := model.ParseID(value.Block)
+			if parseErr != nil {
+				continue
+			}
+			blockID = parsed
+		}
+		var owner *nodeInfo
+		if value.Node != "" {
+			if parsed, parseErr := model.ParseID(value.Node); parseErr == nil {
+				owner = info.Nodes[parsed]
+			}
+		}
+		if value.Field == "title" {
+			if !set.titleAllowed(owner) {
+				continue
+			}
+		} else if !set.blockAllowed(info, owner, blockID, nil) {
+			continue
+		}
+		text := value.Text
+		if bodies != nil && value.Field == "body" {
+			if body, exists := bodies[blockID]; exists {
+				lines := splitLines(body)
+				if value.Line-1 < len(lines) && lines[value.Line-1] != text {
+					result.Warnings = append(result.Warnings, Warning{
+						Code: "index.verify-mismatch", Book: string(entry.ID),
+						Message: fmt.Sprintf("block %s line %d differs from the index", blockID, value.Line),
+					})
+					text = lines[value.Line-1]
+				}
+			}
+		}
+		spans := matchLine(matchers, text)
+		if len(spans) == 0 {
+			continue
+		}
+		if lineJoin && joinAnd && !coversQueries(spans, len(matchers)) {
+			continue
+		}
+		result.Matches = append(result.Matches,
+			newMatch(info, owner, blockID, nil, value.Field, value.Line, text, spans))
+	}
+	return nil
 }
 
 // validateFilterOnly enforces the filter-only listing contract.

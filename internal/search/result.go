@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
@@ -114,6 +115,15 @@ type NodeItem struct {
 	PerQuery    []QueryStats `json:"perQuery,omitempty"`
 }
 
+// GroupItem aggregates the matches of one group key.
+type GroupItem struct {
+	Key         string       `json:"key"`
+	Count       int          `json:"count"`
+	Occurrences int          `json:"occurrences"`
+	FirstLine   int          `json:"firstLine"`
+	PerQuery    []QueryStats `json:"perQuery,omitempty"`
+}
+
 type matchesPayload struct {
 	header
 	Matches []Match `json:"matches"`
@@ -141,6 +151,17 @@ type countPayload struct {
 	Nodes  int `json:"nodes"`
 }
 
+type groupedPayload struct {
+	header
+	Groups  []GroupItem `json:"groups"`
+	Matches []Match     `json:"matches,omitempty"`
+}
+
+type groupedCountPayload struct {
+	header
+	Groups []GroupItem `json:"groups"`
+}
+
 // prepared is the paged view of one result.
 type prepared struct {
 	header     header
@@ -148,6 +169,9 @@ type prepared struct {
 	books      []BookItem
 	blocks     []BlockItem
 	nodes      []NodeItem
+	groups     []GroupItem
+	grouped    bool
+	countBy    bool
 	bookCount  int
 	blockCount int
 	nodeCount  int
@@ -194,6 +218,18 @@ func (result Result) prepare(limit, offset int) prepared {
 			view.blockCount = len(result.ListBlocks)
 			view.nodeCount = len(result.ListNodes)
 			view.bookCount = len(result.ListBooks)
+		}
+		return view
+	}
+	if result.GroupBy != "" {
+		all := groupItems(result.Matches, result.GroupBy, queryCount)
+		view.grouped = true
+		view.countBy = result.CountBy
+		view.header.Count = len(all)
+		view.groups, view.header.Truncated = pageItems(all, limit, offset)
+		view.header.Returned = len(view.groups)
+		if !result.CountBy {
+			view.matches = result.Matches
 		}
 		return view
 	}
@@ -279,6 +315,10 @@ func (result Result) header() header {
 	if join == "" {
 		join = "or"
 	}
+	index := result.Index
+	if index.Mode == "" {
+		index.Mode = "auto"
+	}
 	return header{
 		SchemaVersion: SchemaVersion,
 		Book:          result.Book,
@@ -286,9 +326,9 @@ func (result Result) header() header {
 		Queries:       queries,
 		Join:          join,
 		Fuzzy:         fuzzy,
-		GroupBy:       "",
+		GroupBy:       result.GroupBy,
 		Ref:           result.Ref,
-		Index:         IndexInfo{Mode: "auto"},
+		Index:         index,
 		Mode:          mode,
 		Scope: ScopeInfo{
 			Mode: scopeMode, Books: books, Fields: result.Fields.names(),
@@ -304,6 +344,12 @@ func (result Result) Count() int { return result.prepare(0, 0).header.Count }
 // Payload returns the JSON payload for the chosen result mode.
 func (result Result) Payload(limit, offset int) any {
 	view := result.prepare(limit, offset)
+	if result.GroupBy != "" {
+		if result.CountBy {
+			return groupedCountPayload{header: view.header, Groups: view.groups}
+		}
+		return groupedPayload{header: view.header, Groups: view.groups, Matches: view.matches}
+	}
 	switch result.Result {
 	case "books":
 		return booksPayload{header: view.header, Books: view.books}
@@ -331,30 +377,45 @@ func (result Result) NDJSON(limit, offset int) ([]byte, error) {
 	if err := writeNDJSON(&buffer, meta); err != nil {
 		return nil, err
 	}
-	switch result.Result {
-	case "books":
-		for _, item := range view.books {
-			if err := writeNDJSON(&buffer, ndjsonItem[BookItem]{Type: "book", Item: item}); err != nil {
-				return nil, err
-			}
-		}
-	case "blocks":
-		for _, item := range view.blocks {
-			if err := writeNDJSON(&buffer, ndjsonItem[BlockItem]{Type: "block", Item: item}); err != nil {
-				return nil, err
-			}
-		}
-	case "nodes":
-		for _, item := range view.nodes {
-			if err := writeNDJSON(&buffer, ndjsonItem[NodeItem]{Type: "node", Item: item}); err != nil {
-				return nil, err
-			}
-		}
-	default:
-		if result.Result != "count" {
+	if view.grouped {
+		if !view.countBy {
 			for _, item := range view.matches {
 				if err := writeNDJSON(&buffer, ndjsonItem[Match]{Type: "match", Item: item}); err != nil {
 					return nil, err
+				}
+			}
+		}
+		for _, item := range view.groups {
+			if err := writeNDJSON(&buffer, ndjsonItem[GroupItem]{Type: "group", Item: item}); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		switch result.Result {
+		case "books":
+			for _, item := range view.books {
+				if err := writeNDJSON(&buffer, ndjsonItem[BookItem]{Type: "book", Item: item}); err != nil {
+					return nil, err
+				}
+			}
+		case "blocks":
+			for _, item := range view.blocks {
+				if err := writeNDJSON(&buffer, ndjsonItem[BlockItem]{Type: "block", Item: item}); err != nil {
+					return nil, err
+				}
+			}
+		case "nodes":
+			for _, item := range view.nodes {
+				if err := writeNDJSON(&buffer, ndjsonItem[NodeItem]{Type: "node", Item: item}); err != nil {
+					return nil, err
+				}
+			}
+		default:
+			if result.Result != "count" {
+				for _, item := range view.matches {
+					if err := writeNDJSON(&buffer, ndjsonItem[Match]{Type: "match", Item: item}); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
@@ -638,10 +699,87 @@ func nodesOccurrences(items []NodeItem) int {
 	return total
 }
 
+// groupKey derives the group key of one match.
+func groupKey(match Match, groupBy string) string {
+	key := ""
+	switch groupBy {
+	case "type":
+		key = match.BlockType
+	case "status":
+		if match.Kind == "title" {
+			key = match.NodeStatus
+		} else {
+			key = match.BlockStatus
+		}
+	case "kind":
+		key = match.NodeKind
+	case "part":
+		key = match.NodePart
+	}
+	if key == "" {
+		return "unset"
+	}
+	return key
+}
+
+// groupItems aggregates the matches by key. Keys are ordered case-insensitively, and equal keys
+// keep the structural order of their first hit.
+func groupItems(matches []Match, groupBy string, queryCount int) []GroupItem {
+	order := make([]string, 0)
+	index := map[string]*GroupItem{}
+	stats := map[string]map[int]*QueryStats{}
+	for _, match := range matches {
+		key := groupKey(match, groupBy)
+		item := index[key]
+		if item == nil {
+			item = &GroupItem{Key: key, FirstLine: match.Line}
+			index[key] = item
+			order = append(order, key)
+			stats[key] = map[int]*QueryStats{}
+		}
+		item.Count++
+		item.Occurrences += match.Occurrences
+		collectStats(stats[key], match)
+	}
+	items := make([]GroupItem, 0, len(order))
+	for _, key := range order {
+		item := *index[key]
+		if queryCount > 1 {
+			item.PerQuery = statsList(stats[key])
+		}
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(left, right int) bool {
+		return strings.ToLower(items[left].Key) < strings.ToLower(items[right].Key)
+	})
+	return items
+}
+
 // Text renders the human form of one result.
 func (result Result) Text(limit, offset int) string {
 	view := result.prepare(limit, offset)
 	var builder strings.Builder
+	if result.GroupBy != "" {
+		for _, group := range view.groups {
+			fmt.Fprintf(&builder, "%s: %d match(es), %d occurrence(s)\n",
+				group.Key, group.Count, group.Occurrences)
+		}
+		if !result.CountBy {
+			for _, match := range view.matches {
+				target := match.Node
+				if match.Block != "" {
+					target = match.Block
+				}
+				fmt.Fprintf(&builder, "%s:%s:%d:%d: %s\n",
+					match.Book, target, match.Line, match.Column, match.Text)
+			}
+		}
+		fmt.Fprintf(&builder, "%d group(s)\n", view.header.Count)
+		for _, warning := range view.header.Warnings {
+			fmt.Fprintf(&builder, "warning: %s: %s\n", warning.Code, warning.Message)
+		}
+		return builder.String()
+	}
 	switch result.Result {
 	case "books":
 		for _, item := range view.books {
