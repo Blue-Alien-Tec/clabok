@@ -5,6 +5,7 @@
 package apply
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/config"
+	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
 	"github.com/Blue-Alien-Tec/clabok/internal/idspace"
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
@@ -52,6 +55,7 @@ type rawStep struct {
 	Recursive bool   `json:"recursive,omitempty"`
 	Key       string `json:"key,omitempty"`
 	Value     string `json:"value,omitempty"`
+	Text      string `json:"text,omitempty"`
 }
 
 type planFile struct {
@@ -91,7 +95,7 @@ func parseStep(index int, raw rawStep) (structure.Step, error) {
 		if err != nil {
 			return structure.Step{}, located(where, err)
 		}
-		return structure.Step{Op: "add", Title: raw.Title, Type: raw.Type, Placement: placement}, nil
+		return structure.Step{Op: "add", Title: raw.Title, Type: raw.Type, Placement: placement, Value: raw.Text}, nil
 	case "rename":
 		target, err := idOf(raw.Target, where+".target")
 		if err != nil {
@@ -128,6 +132,12 @@ func parseStep(index int, raw rawStep) (structure.Step, error) {
 			return structure.Step{}, fail("apply.invalid-step", "%s needs key and value", where)
 		}
 		return structure.Step{Op: "setting", Key: raw.Key, Value: raw.Value}, nil
+	case "body":
+		target, err := idOf(raw.Target, where+".target")
+		if err != nil {
+			return structure.Step{}, err
+		}
+		return structure.Step{Op: "body", Target: target, Value: raw.Text}, nil
 	default:
 		return structure.Step{}, fail("apply.invalid-step", "%s.op: unknown operation %q", where, raw.Op)
 	}
@@ -281,6 +291,15 @@ func applyCommand() *cli.Command {
 			if envErr != nil {
 				return nil, envErr
 			}
+			values, configErr := config.Load(env)
+			if configErr != nil {
+				return nil, configErr
+			}
+			gate := grammar.NewGate(values.GrammarEndpoint,
+				grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()))
+			if proseErr := checkPlanProse(gate, steps); proseErr != nil {
+				return nil, proseErr
+			}
 			service := structure.New(life, idspace.New(life, layout))
 			receipts, applyErr := service.Execute(bookID, steps, env.Globals.DryRun)
 			if applyErr != nil {
@@ -289,6 +308,30 @@ func applyCommand() *cli.Command {
 			return &cli.Result{Data: payloadOf(bookID, steps, receipts, env.Globals.DryRun)}, nil
 		},
 	}
+}
+
+// checkPlanProse runs the grammar gate over every body text in the plan before anything is written,
+// so a blocked finding leaves the book untouched.
+func checkPlanProse(gate *grammar.Gate, steps []structure.Step) *cli.Error {
+	for _, step := range steps {
+		text := ""
+		block := model.ZeroID
+		switch {
+		case step.Op == "body":
+			text, block = step.Value, step.Target
+		case step.Op == "add" && step.Value != "":
+			text = step.Value
+		default:
+			continue
+		}
+		report := gate.Evaluate(context.Background(), block, text)
+		if report.Blocked() {
+			return cli.Fail("body.grammar-blocked",
+				"the grammar check found %d finding(s)", len(report.Findings)).
+				WithHint("fix the findings or set grammar.policy to warn in clabok.json")
+		}
+	}
+	return nil
 }
 
 func payloadOf(book model.BookID, steps []structure.Step, receipts []structure.Receipt, dryRun bool) payload {

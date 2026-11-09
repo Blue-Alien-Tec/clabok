@@ -29,6 +29,8 @@ Project helpers: `config`, `library defaults`, `version` and `help`. `serve` sta
 
 Exit codes: 0 success, 1 failure, 2 usage and 3 rejected. The JSON envelope carries `schema`, `ok`, `command` and either `data` or `error` with a stable code, a message and an optional hint and details.
 
+`apply` executes a declarative JSON plan against an open book under one lock and one rollback point. Plan version 1 supports `add`, optionally with `text` for a newly created block, plus `rename`, `move`, `remove`, `type`, `setting` and `body`, which sets an existing placed block. Every body text passes the grammar gate, and a failing step leaves the book unchanged.
+
 
 ---
 

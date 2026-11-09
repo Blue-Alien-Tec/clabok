@@ -2,6 +2,7 @@ package apply
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -327,5 +328,86 @@ func TestApplyCommandDryRun(t *testing.T) {
 	}
 	if !strings.Contains(stdout, `"dryRun": true`) {
 		t.Fatalf("unexpected receipt %s", stdout)
+	}
+}
+
+func TestParseBodySteps(t *testing.T) {
+	steps, err := Parse([]byte(`{"version":1,"steps":[
+		{"op":"add","parent":"10","title":"New","type":"text","text":"Hello"},
+		{"op":"body","target":"11","text":"Replaced"}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("steps %d", len(steps))
+	}
+	if steps[0].Value != "Hello" || steps[0].Type != "text" {
+		t.Fatalf("add step %+v", steps[0])
+	}
+	if steps[1].Op != "body" || steps[1].Target != 11 || steps[1].Value != "Replaced" {
+		t.Fatalf("body step %+v", steps[1])
+	}
+}
+
+func TestExecuteBodySteps(t *testing.T) {
+	service, _, paths := newScene(t)
+	subchapter, err := service.Add("fixture", "Sub", structure.Placement{Parent: 10}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := Parse([]byte(fmt.Sprintf(`{"version":1,"steps":[
+		{"op":"add","parent":"%s","title":"New","type":"text","text":"Hello body"},
+		{"op":"body","target":"11","text":"Replaced body"}
+	]}`, subchapter.Target)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts, err := service.Execute("fixture", steps, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipts) != 2 || receipts[0].Target.IsZero() {
+		t.Fatalf("receipts %+v", receipts)
+	}
+	created, err := os.ReadFile(filepath.Join(paths.BlocksDir, receipts[0].Target.String()+".md"))
+	if err != nil || string(created) != "Hello body" {
+		t.Fatalf("created body %q %v", created, err)
+	}
+	replaced, err := os.ReadFile(filepath.Join(paths.BlocksDir, "11.md"))
+	if err != nil || string(replaced) != "Replaced body" {
+		t.Fatalf("replaced body %q %v", replaced, err)
+	}
+}
+
+func expectStructureCode(t *testing.T, err error, code string) {
+	t.Helper()
+	coded, ok := err.(interface{ ErrorCode() string })
+	if !ok || coded.ErrorCode() != code {
+		t.Fatalf("expected %s, got %v", code, err)
+	}
+}
+
+func TestBodyStepRefusesLockedBlock(t *testing.T) {
+	service, _, _ := newScene(t)
+	receipt, err := service.AddLockedBlock("fixture", 10, "UILayout", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := []structure.Step{{Op: "body", Target: receipt.Target, Value: "nope"}}
+	if _, err := service.Execute("fixture", steps, false); err == nil {
+		t.Fatal("a locked block accepted a body step")
+	} else {
+		expectStructureCode(t, err, "structure.locked")
+	}
+}
+
+func TestAddTextOnNodeRejected(t *testing.T) {
+	service, _, _ := newScene(t)
+	steps := []structure.Step{{Op: "add", Title: "Chapter", Placement: structure.Append(1), Value: "text"}}
+	if _, err := service.Execute("fixture", steps, false); err == nil {
+		t.Fatal("a node accepted add text")
+	} else {
+		expectStructureCode(t, err, "structure.text-on-node")
 	}
 }

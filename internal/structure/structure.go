@@ -561,6 +561,8 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 		return applySetting(manifest, step)
 	case "prose":
 		return applyProse(manifest, ids, step)
+	case "body":
+		return applyBody(manifest, step)
 	case "footer":
 		return applyFooter(manifest, ids, step)
 	case "footer-clear":
@@ -604,12 +606,32 @@ func applyAdd(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, erro
 		if step.Type != "" {
 			manifest.SetMeta(id, model.BlockMeta{Type: step.Type})
 		}
+		if step.Value != "" {
+			result.bodies = map[model.ID]string{id: step.Value}
+		}
 	} else {
+		if step.Value != "" {
+			return mutation{}, fail("structure.text-on-node", "text needs a block; a node has no body")
+		}
 		node := &model.Node{ID: id, Kind: model.Kind(kind), Title: cleanTitle}
 		parent.Children = insertNode(parent.Children, index, node)
 		result.receipt.Order = childIDs(parent.Children)
 	}
 	return result, nil
+}
+
+// applyBody sets the body of an existing placed block inside the same transaction.
+func applyBody(manifest *model.Manifest, step Step) (mutation, error) {
+	if step.Target.IsZero() || !manifest.IsPlaced(step.Target) {
+		return mutation{}, fail("structure.unknown-block", "block %s is not placed", step.Target)
+	}
+	if manifest.IsLocked(step.Target) {
+		return mutation{}, fail("structure.locked", "block %s is locked; its body cannot be changed", step.Target)
+	}
+	return mutation{
+		receipt: Receipt{Book: manifest.ID, Target: step.Target, Block: step.Target, Kind: "body", Changed: true},
+		bodies:  map[model.ID]string{step.Target: step.Value},
+	}, nil
 }
 
 func applyAddLink(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, error) {
