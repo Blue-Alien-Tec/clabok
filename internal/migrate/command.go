@@ -38,16 +38,17 @@ func (report Report) Text() string {
 func Register(registry *cli.Registry) {
 	var book string
 	var all, write, strict bool
-	var to int
+	var to, keep int
 	registry.Add(&cli.Command{
 		Name:    "migrate",
 		Summary: "report, plan and apply book and store schema migrations",
-		Usage:   "pecia migrate <status|plan|apply> [--book <id> | --all] [--to <version>] [--write] [--strict]",
+		Usage:   "pecia migrate <status|plan|apply|cleanup> [--book <id> | --all] [--to <version>] [--keep N] [--write] [--strict]",
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("migrate")
 			set.StringVar(&book, "book", "", "book id")
 			set.BoolVar(&all, "all", false, "every book plus the store metadata")
 			set.IntVar(&to, "to", 0, "manifest target version")
+			set.IntVar(&keep, "keep", 10, "cleanup: history entries to keep")
 			set.BoolVar(&write, "write", false, "apply the plan")
 			set.BoolVar(&strict, "strict", false, "fail on the first error")
 			return set
@@ -60,13 +61,16 @@ func Register(registry *cli.Registry) {
 				return nil, cli.Usage("usage.unexpected-argument", "migrate takes one action")
 			}
 			switch action {
-			case "status", "plan", "apply":
+			case "status", "plan", "apply", "cleanup":
 			default:
 				return nil, cli.Usage("usage.invalid-value",
-					"unknown migrate action %q; use status, plan or apply", action)
+					"unknown migrate action %q; use status, plan, apply or cleanup", action)
 			}
 			if book != "" && !model.BookID(book).Valid() {
 				return nil, cli.Usage("usage.invalid-value", "invalid book id %q", book)
+			}
+			if action == "cleanup" && (book != "" || all) {
+				return nil, cli.Reject("migrate.scope-conflict", "migrate cleanup is store-wide")
 			}
 			life, layout, envErr := lifecycle.FromEnv(env)
 			if envErr != nil {
@@ -91,6 +95,12 @@ func Register(registry *cli.Registry) {
 				report, err = service.Apply(model.BookID(book), all, to, false, strict)
 			case "apply":
 				report, err = service.Apply(model.BookID(book), all, to, write && !env.Globals.DryRun, strict)
+			case "cleanup":
+				cleanup, cleanupErr := service.Cleanup(keep, write && !env.Globals.DryRun)
+				if cleanupErr != nil {
+					return nil, asCLI(cleanupErr)
+				}
+				return &cli.Result{Data: cleanup, Text: cleanup.Text()}, nil
 			}
 			if err != nil {
 				return nil, asCLI(err)

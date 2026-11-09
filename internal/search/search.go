@@ -6,6 +6,7 @@ package search
 import (
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/index"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
+	"github.com/Blue-Alien-Tec/clabok/internal/render"
 	"github.com/Blue-Alien-Tec/clabok/internal/source"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
@@ -46,6 +48,7 @@ type Match struct {
 	Kind        string        `json:"kind"`
 	Book        string        `json:"book"`
 	BookPath    string        `json:"bookPath"`
+	File        string        `json:"file,omitempty"`
 	Node        string        `json:"node,omitempty"`
 	NodeKind    string        `json:"nodeKind,omitempty"`
 	NodeTitle   string        `json:"nodeTitle,omitempty"`
@@ -558,6 +561,7 @@ func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry,
 		result.Ref.Exists = true
 	}
 	info := newBookInfo(book, entry.Path)
+	files := render.LayoutFor(book.Manifest)
 	set, filterErr := newFilterSet(info, options.Filter, options.IgnoreCase)
 	if filterErr != nil {
 		return filterErr
@@ -660,7 +664,7 @@ func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry,
 			continue
 		}
 		result.Matches = append(result.Matches,
-			newMatch(info, owner, blockID, nil, value.Field, value.Line, text, spans))
+			newMatch(info, owner, blockID, nil, value.Field, value.Line, text, spans, files))
 	}
 	return nil
 }
@@ -931,6 +935,7 @@ func loadFailure(err error) error {
 // scanBook appends the matches of one book in structural order.
 func scanBook(result *Result, info *bookInfo, set *filterSet, matchers []*Matcher, fields fieldFlags, context int, join, resultMode string) {
 	manifest := info.Book.Manifest
+	files := render.LayoutFor(manifest)
 	lineJoin := resultMode == "" || resultMode == "matches" || resultMode == "count"
 	joinAnd := join == "and" && len(matchers) > 1
 	for _, node := range info.Ordered {
@@ -938,18 +943,18 @@ func scanBook(result *Result, info *bookInfo, set *filterSet, matchers []*Matche
 			spans := matchLine(matchers, node.Node.Title)
 			if len(spans) > 0 && (!lineJoin || !joinAnd || coversQueries(spans, len(matchers))) {
 				result.Matches = append(result.Matches,
-					newMatch(info, node, model.ZeroID, nil, "title", 1, node.Node.Title, spans))
+					newMatch(info, node, model.ZeroID, nil, "title", 1, node.Node.Title, spans, files))
 			}
 		}
 		for _, id := range node.Node.Blocks {
 			if fields.body && set.blockAllowed(info, node, id, nil) && manifest.BlockType(id) != "RepoLayout" {
 				if body, exists := info.Book.Body(id); exists {
-					appendLines(result, info, node, id, nil, "body", body, matchers, context, lineJoin, joinAnd)
+					appendLines(result, info, node, id, nil, "body", body, matchers, files, context, lineJoin, joinAnd)
 				}
 			}
 			if fields.layout && set.blockAllowed(info, node, id, nil) {
 				if spec, exists := info.Book.Layout(id); exists {
-					appendLines(result, info, node, id, nil, "layout", string(spec), matchers, context, lineJoin, joinAnd)
+					appendLines(result, info, node, id, nil, "layout", string(spec), matchers, files, context, lineJoin, joinAnd)
 				}
 			}
 		}
@@ -965,7 +970,7 @@ func scanBook(result *Result, info *bookInfo, set *filterSet, matchers []*Matche
 				continue
 			}
 			if body, exists := info.Book.Body(id); exists {
-				appendLines(result, info, owner, id, region, field, body, matchers, context, lineJoin, joinAnd)
+				appendLines(result, info, owner, id, region, field, body, matchers, files, context, lineJoin, joinAnd)
 			}
 		}
 	}
@@ -1001,7 +1006,7 @@ func (flags fieldFlags) has(field string) bool {
 	return false
 }
 
-func appendLines(result *Result, info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, field, text string, matchers []*Matcher, context int, lineJoin, joinAnd bool) {
+func appendLines(result *Result, info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, field, text string, matchers []*Matcher, files map[model.ID]render.LinkTarget, context int, lineJoin, joinAnd bool) {
 	lines := splitLines(text)
 	for index, line := range lines {
 		spans := matchLine(matchers, line)
@@ -1011,7 +1016,7 @@ func appendLines(result *Result, info *bookInfo, owner *nodeInfo, block model.ID
 		if lineJoin && joinAnd && !coversQueries(spans, len(matchers)) {
 			continue
 		}
-		match := newMatch(info, owner, block, region, field, index+1, line, spans)
+		match := newMatch(info, owner, block, region, field, index+1, line, spans, files)
 		if context > 0 {
 			match.Context = contextLines(lines, index, context)
 			match.Before = contextBefore(lines, index, context)
@@ -1048,9 +1053,24 @@ func coversQueries(spans []Span, count int) bool {
 	return len(seen) == count
 }
 
-func newMatch(info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, field string, line int, text string, spans []Span) Match {
+func newMatch(info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, field string, line int, text string, spans []Span, files map[model.ID]render.LinkTarget) Match {
+	rendered := "README.md"
+	if block != model.ZeroID {
+		if target, exists := files[block]; exists {
+			rendered = target.File
+		} else if owner != nil {
+			if target, exists := files[owner.Node.ID]; exists {
+				rendered = target.File
+			}
+		}
+	} else if owner != nil {
+		if target, exists := files[owner.Node.ID]; exists {
+			rendered = target.File
+		}
+	}
 	match := Match{
 		Kind: "block", Book: string(info.Book.ID), BookPath: info.Path,
+		File:  path.Join(info.Path, rendered),
 		Field: field, Line: line, Text: text, Spans: spans, Occurrences: len(spans),
 		Column: spans[0].Column, Offset: spans[0].Offset, Length: spans[0].Length,
 	}

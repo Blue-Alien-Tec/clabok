@@ -2,6 +2,8 @@ package migrate
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -101,6 +103,39 @@ func TestMigrateOpenBookCommand(t *testing.T) {
 		commandArgs(scene, "migrate", "apply", "--book", "fixture", "--write")...)
 	if code != cli.ExitReject || !strings.Contains(stderr, "migrate.book-open") {
 		t.Fatalf("open book exit %d: %s", code, stderr)
+	}
+}
+
+func TestMigrateCleanupCommand(t *testing.T) {
+	scene := newScene(t, 3, 2)
+	root := scene.Layout.MigrationsRoot()
+	for _, name := range []string{"20260101T000000.000000000Z", "20260102T000000.000000000Z"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, stderr := run(t, scene.Layout.Root,
+		commandArgs(scene, "migrate", "cleanup", "--keep", "1")...)
+	if code != cli.ExitOK {
+		t.Fatalf("cleanup dry run exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, `"dryRun": true`) && !strings.Contains(stdout, `"dryRun":true`) {
+		t.Fatalf("cleanup payload %s", stdout)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 2 {
+		t.Fatal("a dry run removed entries")
+	}
+	code, _, stderr = run(t, scene.Layout.Root,
+		commandArgs(scene, "migrate", "cleanup", "--keep", "1", "--write")...)
+	if code != cli.ExitOK {
+		t.Fatalf("cleanup write exit %d: %s", code, stderr)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 1 {
+		t.Fatal("cleanup did not keep one entry")
+	}
+	code, _, _ = run(t, scene.Layout.Root, commandArgs(scene, "migrate", "cleanup", "--all")...)
+	if code != cli.ExitReject {
+		t.Fatalf("cleanup with --all exit %d", code)
 	}
 }
 

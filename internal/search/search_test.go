@@ -81,6 +81,7 @@ func fixtureManifest(t *testing.T) *model.Manifest {
 	if err != nil {
 		t.Fatal(err)
 	}
+	manifest.Settings.Output = model.OutputChapter
 	manifest.Status = &model.StatusConfig{Enabled: true}
 	manifest.Root.Status = "wip"
 	manifest.Root.Children = []*model.Node{{
@@ -140,6 +141,24 @@ func findBook(t *testing.T, scene *scene, book model.BookID, query string, optio
 		t.Fatalf("find %q: %v", query, err)
 	}
 	return result
+}
+
+func TestMatchRenderedFile(t *testing.T) {
+	scene := newScene(t)
+	result := findBook(t, scene, "fixture", "Hello", Options{})
+	for _, match := range result.Matches {
+		if match.File != "Docs/fixture/one.md" {
+			t.Fatalf("block %s file %q", match.Block, match.File)
+		}
+	}
+	title := findBook(t, scene, "fixture", "Fixture", Options{})
+	if len(title.Matches) != 1 || title.Matches[0].File != "Docs/fixture/README.md" {
+		t.Fatalf("title %+v", title.Matches)
+	}
+	footer := findBook(t, scene, "fixture", "footer", Options{Fields: []string{"footer"}})
+	if len(footer.Matches) != 1 || footer.Matches[0].File != "Docs/fixture/README.md" {
+		t.Fatalf("footer %+v", footer.Matches)
+	}
 }
 
 func TestFindDefaultFields(t *testing.T) {

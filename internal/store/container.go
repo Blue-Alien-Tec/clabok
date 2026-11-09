@@ -182,6 +182,30 @@ func writeArchive(members map[string][]byte) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
+// PeekFormat reads the container format from the archive without verifying the member set or the
+// checksums. It is the migration view of a container whose format may be older than Format.
+func PeekFormat(data []byte) (int, error) {
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return 0, fail("store.container-corrupt", "not a container archive: %v", err)
+	}
+	for _, file := range reader.File {
+		if file.Name != metaMember {
+			continue
+		}
+		content, readErr := readMember(file)
+		if readErr != nil {
+			return 0, readErr
+		}
+		var meta metaFile
+		if decodeErr := json.Unmarshal(content, &meta); decodeErr != nil {
+			return 0, fail("store.container-corrupt", "invalid %s: %v", metaMember, decodeErr)
+		}
+		return meta.Format, nil
+	}
+	return 0, fail("store.container-corrupt", "missing %s", metaMember)
+}
+
 // Parse reads and verifies a container. It checks the format, the member methods, the member set
 // and every checksum before it returns.
 func Parse(data []byte) (*Container, error) {

@@ -27,6 +27,8 @@ Open and close are the storage state. Open extracts the container into the store
 
 Validation runs on every mutation and on close. It checks the tree, placement, body presence, the prose rule, status assignments, the layout configuration, badges and identifiers, and it reports all issues in one pass.
 
+Persisted formats carry explicit versions. A book written by an older release is still read, but any manifest or body write refuses with `migrate.required` until `pecia migrate apply --book <id> --write` upgrades it; `book open` and `book close` stay available, and close preserves the source manifest version.
+
 
 ---
 

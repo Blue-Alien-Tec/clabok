@@ -35,6 +35,7 @@ internal/       The Go packages, one directory per concern.
   jsonstrict/
   library/
   lifecycle/    Open, close, snapshots, rollback and locks.
+  migrate/
   model/        Manifest v3, validation and the status vocabulary.
   prose/
   refs/
