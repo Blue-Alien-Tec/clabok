@@ -1,9 +1,11 @@
 package search
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
+	"github.com/Blue-Alien-Tec/clabok/internal/refs"
 	"github.com/Blue-Alien-Tec/clabok/internal/source"
 )
 
@@ -102,7 +104,7 @@ func newBookInfo(book *source.Book, outputPath string) *bookInfo {
 		entry := &nodeInfo{Node: node, Parent: parent}
 		entry.Path = node.Title
 		if parent != nil && parent.Path != "" {
-			entry.Path = parent.Path + " / " + node.Title
+			entry.Path = parent.Path + "/" + node.Title
 		}
 		entry.Part = node.Part
 		if entry.Part == "" && parent != nil {
@@ -161,19 +163,30 @@ func (info *bookInfo) subtree(id model.ID) map[model.ID]struct{} {
 	return ids
 }
 
-// filterSet is a compiled --kind/--type/--status/--part/--node/--block/--locked filter.
+// filterSet is a compiled --kind/--type/--status/--part/--node/--block/--locked/--node-path filter.
 type filterSet struct {
-	nodeIDs  map[model.ID]struct{}
-	block    model.ID
-	kinds    map[model.Kind]struct{}
-	types    map[string]struct{}
-	statuses map[string]struct{}
-	part     string
-	locked   *bool
+	nodeIDs     map[model.ID]struct{}
+	block       model.ID
+	kinds       map[model.Kind]struct{}
+	types       map[string]struct{}
+	statuses    map[string]struct{}
+	part        string
+	locked      *bool
+	nodePath    *regexp.Regexp
+	ref         model.ID
+	missingBody bool
 }
 
-func newFilterSet(info *bookInfo, filter Filter) (*filterSet, error) {
-	set := &filterSet{block: filter.Block, part: filter.Part, locked: filter.Locked}
+func newFilterSet(info *bookInfo, filter Filter, ignoreCase bool) (*filterSet, error) {
+	set := &filterSet{block: filter.Block, part: filter.Part, locked: filter.Locked,
+		ref: filter.Ref, missingBody: filter.MissingBody}
+	if strings.TrimSpace(filter.NodePath) != "" {
+		expression, err := regexp.Compile(globExpression(filter.NodePath, ignoreCase))
+		if err != nil {
+			return nil, fail("search.invalid-glob", "invalid node path glob %q: %v", filter.NodePath, err)
+		}
+		set.nodePath = expression
+	}
 	if filter.Node != model.ZeroID {
 		ids := info.subtree(filter.Node)
 		if ids == nil {
@@ -252,6 +265,12 @@ func (set *filterSet) titleAllowed(info *nodeInfo) bool {
 	if set.part != "" && info.Part != set.part {
 		return false
 	}
+	if set.nodePath != nil && !set.nodePath.MatchString(info.Path) {
+		return false
+	}
+	if set.ref != model.ZeroID || set.missingBody {
+		return false
+	}
 	return true
 }
 
@@ -311,10 +330,42 @@ func (set *filterSet) blockAllowed(info *bookInfo, owner *nodeInfo, block model.
 			return false
 		}
 	}
+	if set.nodePath != nil {
+		if owner == nil || !set.nodePath.MatchString(owner.Path) {
+			return false
+		}
+	}
 	if set.locked != nil && meta.Locked != *set.locked {
 		return false
 	}
+	if set.missingBody {
+		if body, exists := info.Book.Body(block); exists && strings.TrimSpace(body) != "" {
+			return false
+		}
+	}
+	if set.ref != model.ZeroID && !blockReferences(info, block, set.ref) {
+		return false
+	}
 	return true
+}
+
+// blockReferences reports whether the body or layout spec of a block contains a reference to id.
+func blockReferences(info *bookInfo, block model.ID, id model.ID) bool {
+	texts := make([]string, 0, 2)
+	if body, exists := info.Book.Body(block); exists {
+		texts = append(texts, body)
+	}
+	if spec, exists := info.Book.Layout(block); exists {
+		texts = append(texts, string(spec))
+	}
+	for _, text := range texts {
+		for _, match := range refs.Pattern.FindAllStringSubmatch(text, -1) {
+			if match[1] == id.String() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // targetsBlock reports whether a notes region is attached to the block.

@@ -22,6 +22,7 @@
 - [Configuration](configuration.md#configuration)
 - [Command-Line Reference](command-line-reference.md#command-line-reference)
 - [Terminal UI](terminal-ui.md#terminal-ui)
+- [Search and Discovery](search-and-discovery.md#search-and-discovery)
 - [Development](development.md#development)
 - [Repository Layout](repository-layout.md#repository-layout)
 - [License](license.md#license)

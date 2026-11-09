@@ -11,19 +11,37 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
+// maxQueries bounds one search request.
+const maxQueries = 8
+
+// stringList is a repeatable flag value.
+type stringList []string
+
+// String returns the comma-joined values for the flag help.
+func (list *stringList) String() string { return strings.Join(*list, ",") }
+
+// Set appends one value.
+func (list *stringList) Set(value string) error {
+	*list = append(*list, value)
+	return nil
+}
+
 // Register adds the find command.
 func Register(registry *cli.Registry) {
 	var input inputOptions
 	registry.Add(&cli.Command{
 		Name:    "find",
 		Summary: "search titles, bodies, layouts and regions",
-		Usage:   "pecia find (--book <id> | --all) --query <text> [--mode literal|glob|regex] [--field body,title] [--result matches|books|blocks|nodes|count]",
+		Usage:   "pecia find (--book <id> | --all) --query <text> [--query <text> ...] [--join and|or] [--mode literal|glob|regex] [--result matches|books|blocks|nodes|count]",
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("find")
 			set.StringVar(&input.Book, "book", "", "book id")
 			set.BoolVar(&input.All, "all", false, "search every registered book")
-			set.StringVar(&input.Query, "query", "", "text to find")
-			set.StringVar(&input.Mode, "mode", "literal", "match mode: literal, glob or regex")
+			set.Var(&input.Queries, "query", "text to find (repeatable)")
+			set.Var(&input.QueryModes, "query-mode", "per-query mode (repeatable)")
+			set.StringVar(&input.Join, "join", "or", "combine queries with and or or")
+			set.StringVar(&input.Mode, "mode", "literal", "default match mode: literal, glob or regex")
+			set.IntVar(&input.Fuzzy, "fuzzy", 0, "fuzzy edit distance 1 to 3 (literal)")
 			set.StringVar(&input.Field, "field", "", "comma-separated fields (default body,title)")
 			set.StringVar(&input.Kind, "kind", "", "comma-separated node kinds")
 			set.StringVar(&input.Type, "type", "", "comma-separated block types")
@@ -31,6 +49,10 @@ func Register(registry *cli.Registry) {
 			set.StringVar(&input.Part, "part", "", "part name")
 			set.StringVar(&input.Node, "node", "", "node id and subtree")
 			set.StringVar(&input.Block, "block", "", "exactly one placed block")
+			set.StringVar(&input.NodePath, "node-path", "", "glob over the node title path")
+			set.StringVar(&input.BookPath, "book-path", "", "glob over the registry output path (--all)")
+			set.StringVar(&input.Ref, "ref", "", "blocks that reference this id")
+			set.BoolVar(&input.MissingBody, "missing-body", false, "blocks without a body")
 			set.BoolVar(&input.Locked, "locked", false, "locked blocks only")
 			set.BoolVar(&input.Unlocked, "unlocked", false, "unlocked blocks only")
 			set.StringVar(&input.Result, "result", "matches", "result mode: matches, books, blocks, nodes or count")
@@ -41,6 +63,8 @@ func Register(registry *cli.Registry) {
 			set.BoolVar(&input.Word, "word", false, "match whole words only (literal)")
 			set.BoolVar(&input.CountOnly, "count", false, "print counts only")
 			set.BoolVar(&input.Strict, "strict", false, "fail instead of warning")
+			set.BoolVar(&input.RequireMatch, "require-match", false, "exit 1 when the result is empty")
+			set.BoolVar(&input.Snapshot, "snapshot", false, "take the book lock for a consistent read")
 			set.StringVar(&input.Format, "format", "json", "output format: json or ndjson")
 			return set
 		},
@@ -64,46 +88,62 @@ func Register(registry *cli.Registry) {
 			if findErr != nil {
 				return nil, asCLI(findErr)
 			}
+			var result *cli.Result
 			if options.Format == "ndjson" {
 				data, encodeErr := found.NDJSON(options.Limit, options.Offset)
 				if encodeErr != nil {
 					return nil, cli.Fail("search.write-failed", "%v", encodeErr)
 				}
-				return &cli.Result{Raw: data}, nil
+				result = &cli.Result{Raw: data}
+			} else {
+				result = &cli.Result{
+					Data: found.Payload(options.Limit, options.Offset),
+					Text: found.Text(options.Limit, options.Offset),
+				}
 			}
-			return &cli.Result{
-				Data: found.Payload(options.Limit, options.Offset),
-				Text: found.Text(options.Limit, options.Offset),
-			}, nil
+			if options.RequireMatch && found.Count() == 0 {
+				result.Exit = cli.ExitFailure
+				result.Notice = cli.Fail("search.no-match", "no match for the given query")
+			}
+			return result, nil
 		},
 	})
 }
 
 // inputOptions is the raw flag state before validation.
 type inputOptions struct {
-	Book    string
-	All     bool
-	Query   string
-	Mode    string
-	Field   string
-	Kind    string
-	Type    string
-	Status  string
-	Part    string
-	Node    string
-	Block   string
-	Result  string
-	Format  string
-	Context int
-	Limit   int
-	Offset  int
+	Book        string
+	All         bool
+	Queries     stringList
+	Join        string
+	Mode        string
+	Fuzzy       int
+	Field       string
+	Kind        string
+	Type        string
+	Status      string
+	Part        string
+	Node        string
+	Block       string
+	NodePath    string
+	BookPath    string
+	Ref         string
+	MissingBody bool
+	Result      string
+	Format      string
+	QueryModes  stringList
+	Context     int
+	Limit       int
+	Offset      int
 	// IgnoreCase, Word, Locked and Unlocked refine the match.
-	IgnoreCase bool
-	Word       bool
-	Locked     bool
-	Unlocked   bool
-	CountOnly  bool
-	Strict     bool
+	IgnoreCase   bool
+	Word         bool
+	Locked       bool
+	Unlocked     bool
+	CountOnly    bool
+	RequireMatch bool
+	Snapshot     bool
+	Strict       bool
 }
 
 func parseOptions(env *cli.Env, input inputOptions) (Options, *cli.Error) {
@@ -122,9 +162,15 @@ func parseOptions(env *cli.Env, input inputOptions) (Options, *cli.Error) {
 	if input.Locked && input.Unlocked {
 		return Options{}, cli.Reject("search.scope-conflict", "use either --locked or --unlocked")
 	}
-	mode, known := ParseMode(input.Mode)
-	if !known {
-		return Options{}, cli.Usage("search.invalid-mode", "unknown match mode %q", input.Mode)
+	if input.BookPath != "" && !input.All {
+		return Options{}, cli.Reject("search.scope-conflict", "--book-path needs --all")
+	}
+	if input.MissingBody && len(input.Queries) > 0 {
+		return Options{}, cli.Usage("search.missing-body-query", "--missing-body does not take a query")
+	}
+	queries, queryErr := parseQueries(input)
+	if queryErr != nil {
+		return Options{}, queryErr
 	}
 	fields, fieldErr := parseFields(splitList(input.Field))
 	if fieldErr != nil {
@@ -156,6 +202,10 @@ func parseOptions(env *cli.Env, input inputOptions) (Options, *cli.Error) {
 	if resultMode == "count" && (input.Limit > 0 || input.Offset > 0) {
 		return Options{}, cli.Usage("search.result-conflict", "--result count does not page")
 	}
+	if input.MissingBody && resultMode != "blocks" && resultMode != "count" {
+		return Options{}, cli.Usage("search.missing-body-result",
+			"--missing-body needs --result blocks or --result count")
+	}
 	format := input.Format
 	switch format {
 	case "json":
@@ -167,20 +217,86 @@ func parseOptions(env *cli.Env, input inputOptions) (Options, *cli.Error) {
 		return Options{}, cli.Usage("usage.invalid-value", "unknown format %q; use json or ndjson", format)
 	}
 	return Options{
-		Book: model.BookID(input.Book), All: input.All, Query: input.Query,
-		Fields: fields.names(), Mode: mode, IgnoreCase: input.IgnoreCase,
-		Word: input.Word, Context: input.Context, Filter: filter,
-		Result: resultMode, Limit: input.Limit, Offset: input.Offset,
-		Strict: input.Strict, Format: format,
+		Book: model.BookID(input.Book), All: input.All, Queries: queries, Join: input.Join,
+		Fields: fields.names(), FieldsExplicit: input.Field != "", IgnoreCase: input.IgnoreCase,
+		Word: input.Word, Context: input.Context, Filter: filter, Result: resultMode,
+		Limit: input.Limit, Offset: input.Offset, RequireMatch: input.RequireMatch,
+		Snapshot: input.Snapshot, Strict: input.Strict, Format: format,
 	}, nil
+}
+
+func parseQueries(input inputOptions) ([]Query, *cli.Error) {
+	if len(input.Queries) == 0 {
+		return nil, nil
+	}
+	if len(input.Queries) > maxQueries {
+		return nil, cli.Usage("search.too-many-queries", "at most %d queries are allowed", maxQueries)
+	}
+	seen := make(map[string]struct{}, len(input.Queries))
+	globalMode, known := ParseMode(input.Mode)
+	if !known {
+		return nil, cli.Usage("search.invalid-mode", "unknown match mode %q", input.Mode)
+	}
+	if input.Fuzzy < 0 || input.Fuzzy > 3 {
+		return nil, cli.Usage("search.invalid-fuzzy", "--fuzzy accepts 1 to 3")
+	}
+	if len(input.QueryModes) != 0 && len(input.QueryModes) != len(input.Queries) {
+		return nil, cli.Usage("search.query-mode-count",
+			"--query-mode needs one value per --query")
+	}
+	queries := make([]Query, len(input.Queries))
+	fuzzyActive := input.Fuzzy > 0
+	for index, text := range input.Queries {
+		key := strings.TrimSpace(text)
+		if key == "" {
+			return nil, cli.Usage("search.empty-query", "query %d is empty", index+1)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return nil, cli.Usage("search.duplicate-query", "query %q is repeated", key)
+		}
+		seen[key] = struct{}{}
+		mode := globalMode
+		if len(input.QueryModes) != 0 {
+			perMode, modeKnown := ParseQueryMode(input.QueryModes[index])
+			if !modeKnown {
+				return nil, cli.Usage("search.invalid-mode",
+					"unknown query mode %q", input.QueryModes[index])
+			}
+			mode = perMode
+		}
+		distance := 0
+		switch mode {
+		case ModeFuzzy:
+			distance = input.Fuzzy
+			if distance == 0 {
+				distance = 1
+			}
+			fuzzyActive = true
+		case ModeLiteral:
+			distance = input.Fuzzy
+			fuzzyActive = fuzzyActive || distance > 0
+		default:
+			if input.Fuzzy > 0 {
+				return nil, cli.Usage("search.fuzzy-mode", "--fuzzy needs literal matching")
+			}
+		}
+		queries[index] = Query{Text: text, Mode: mode, Fuzzy: distance}
+	}
+	if input.Word && fuzzyActive {
+		return nil, cli.Usage("search.fuzzy-word", "--word cannot be combined with --fuzzy")
+	}
+	return queries, nil
 }
 
 func parseFilter(input inputOptions) (Filter, *cli.Error) {
 	filter := Filter{
-		Kinds:    splitList(input.Kind),
-		Types:    splitList(input.Type),
-		Statuses: splitList(input.Status),
-		Part:     strings.TrimSpace(input.Part),
+		Kinds:       splitList(input.Kind),
+		Types:       splitList(input.Type),
+		Statuses:    splitList(input.Status),
+		Part:        strings.TrimSpace(input.Part),
+		NodePath:    strings.TrimSpace(input.NodePath),
+		BookPath:    strings.TrimSpace(input.BookPath),
+		MissingBody: input.MissingBody,
 	}
 	node, nodeErr := parseID(input.Node)
 	if nodeErr != nil {
@@ -190,7 +306,11 @@ func parseFilter(input inputOptions) (Filter, *cli.Error) {
 	if blockErr != nil {
 		return Filter{}, blockErr
 	}
-	filter.Node, filter.Block = node, block
+	ref, refErr := parseID(input.Ref)
+	if refErr != nil {
+		return Filter{}, refErr
+	}
+	filter.Node, filter.Block, filter.Ref = node, block, ref
 	if input.Locked {
 		locked := true
 		filter.Locked = &locked

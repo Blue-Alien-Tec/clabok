@@ -104,28 +104,33 @@ func call(command *Command, env *Env, args []string) (result *Result, err error)
 }
 
 func emitResult(env *Env, command string, result *Result) int {
+	code := ExitOK
 	if env.Globals.Text {
 		fmt.Fprint(env.Out, ensureTrailingNewline(textOf(result)))
-		return ExitOK
-	}
-	if len(result.Raw) > 0 {
+	} else if len(result.Raw) > 0 {
 		if _, err := env.Out.Write(result.Raw); err != nil {
 			fmt.Fprintf(env.Err, "error: %v\n", err)
 			return ExitFailure
 		}
-		return ExitOK
+	} else {
+		payload := envelope{
+			Schema:  SchemaVersion,
+			OK:      true,
+			Command: command,
+			Data:    result.Data,
+		}
+		if err := writeJSON(env.Out, payload); err != nil {
+			fmt.Fprintf(env.Err, "error: %v\n", err)
+			return ExitFailure
+		}
 	}
-	payload := envelope{
-		Schema:  SchemaVersion,
-		OK:      true,
-		Command: command,
-		Data:    result.Data,
+	if result.Notice != nil {
+		emitError(env, command, result.Notice)
 	}
-	if err := writeJSON(env.Out, payload); err != nil {
-		fmt.Fprintf(env.Err, "error: %v\n", err)
-		return ExitFailure
+	if result.Exit != 0 {
+		code = result.Exit
 	}
-	return ExitOK
+	return code
 }
 
 func emitError(env *Env, command string, outcome *Error) {

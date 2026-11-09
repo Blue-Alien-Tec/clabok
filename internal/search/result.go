@@ -47,6 +47,14 @@ type ScopeInfo struct {
 	Locked   *bool    `json:"locked"`
 }
 
+// QueryStats are the per-query counters of one group item.
+type QueryStats struct {
+	Query       int `json:"query"`
+	Count       int `json:"count"`
+	Occurrences int `json:"occurrences"`
+	FirstLine   int `json:"firstLine"`
+}
+
 type header struct {
 	SchemaVersion int         `json:"schemaVersion"`
 	Book          string      `json:"book"`
@@ -68,38 +76,42 @@ type header struct {
 
 // BookItem aggregates the matches of one book.
 type BookItem struct {
-	Book        string `json:"book"`
-	Path        string `json:"path"`
-	Count       int    `json:"count"`
-	Occurrences int    `json:"occurrences"`
+	Book        string       `json:"book"`
+	Path        string       `json:"path"`
+	Count       int          `json:"count"`
+	Occurrences int          `json:"occurrences"`
+	PerQuery    []QueryStats `json:"perQuery,omitempty"`
 }
 
 // BlockItem aggregates the matches of one block and field.
 type BlockItem struct {
-	Book        string `json:"book"`
-	Block       string `json:"block"`
-	Node        string `json:"node,omitempty"`
-	NodeTitle   string `json:"nodeTitle,omitempty"`
-	NodePath    string `json:"nodePath,omitempty"`
-	Type        string `json:"type,omitempty"`
-	Status      string `json:"status,omitempty"`
-	Locked      bool   `json:"locked"`
-	Field       string `json:"field"`
-	FirstLine   int    `json:"firstLine"`
-	Count       int    `json:"count"`
-	Occurrences int    `json:"occurrences"`
+	Book        string       `json:"book"`
+	Block       string       `json:"block"`
+	Node        string       `json:"node,omitempty"`
+	NodeTitle   string       `json:"nodeTitle,omitempty"`
+	NodePath    string       `json:"nodePath,omitempty"`
+	Type        string       `json:"type,omitempty"`
+	Status      string       `json:"status,omitempty"`
+	Locked      bool         `json:"locked"`
+	Field       string       `json:"field"`
+	FirstLine   int          `json:"firstLine"`
+	Count       int          `json:"count"`
+	Occurrences int          `json:"occurrences"`
+	PerQuery    []QueryStats `json:"perQuery,omitempty"`
 }
 
 // NodeItem aggregates the direct matches of one node.
 type NodeItem struct {
-	Book     string `json:"book"`
-	Node     string `json:"node"`
-	NodeKind string `json:"nodeKind"`
-	Title    string `json:"title"`
-	Part     string `json:"part,omitempty"`
-	Status   string `json:"status,omitempty"`
-	NodePath string `json:"nodePath"`
-	Count    int    `json:"count"`
+	Book        string       `json:"book"`
+	Node        string       `json:"node"`
+	NodeKind    string       `json:"nodeKind"`
+	Title       string       `json:"title"`
+	Part        string       `json:"part,omitempty"`
+	Status      string       `json:"status,omitempty"`
+	NodePath    string       `json:"nodePath"`
+	Count       int          `json:"count"`
+	Occurrences int          `json:"occurrences"`
+	PerQuery    []QueryStats `json:"perQuery,omitempty"`
 }
 
 type matchesPayload struct {
@@ -131,12 +143,11 @@ type countPayload struct {
 
 // prepared is the paged view of one result.
 type prepared struct {
-	header  header
-	matches []Match
-	books   []BookItem
-	blocks  []BlockItem
-	nodes   []NodeItem
-	// counts holds the distinct entity counts for the count result.
+	header     header
+	matches    []Match
+	books      []BookItem
+	blocks     []BlockItem
+	nodes      []NodeItem
 	bookCount  int
 	blockCount int
 	nodeCount  int
@@ -145,6 +156,8 @@ type prepared struct {
 // prepare computes the units, the counters and the paging of one result.
 func (result Result) prepare(limit, offset int) prepared {
 	view := prepared{header: result.header()}
+	queryCount := len(result.Queries)
+	joinAnd := result.Join == "and" && queryCount > 1
 	occurrences := 0
 	for _, match := range result.Matches {
 		occurrences += match.Occurrences
@@ -158,30 +171,59 @@ func (result Result) prepare(limit, offset int) prepared {
 	if mode == "" {
 		mode = "matches"
 	}
+	if result.FilterOnly {
+		view.header.Occurrences = 0
+		switch mode {
+		case "blocks":
+			view.blockCount = len(result.ListBlocks)
+			view.header.Count = len(result.ListBlocks)
+			view.blocks, view.header.Truncated = pageItems(result.ListBlocks, limit, offset)
+			view.header.Returned = len(view.blocks)
+		case "nodes":
+			view.nodeCount = len(result.ListNodes)
+			view.header.Count = len(result.ListNodes)
+			view.nodes, view.header.Truncated = pageItems(result.ListNodes, limit, offset)
+			view.header.Returned = len(view.nodes)
+		case "books":
+			view.bookCount = len(result.ListBooks)
+			view.header.Count = len(result.ListBooks)
+			view.books, view.header.Truncated = pageItems(result.ListBooks, limit, offset)
+			view.header.Returned = len(view.books)
+		case "count":
+			view.header.Count = len(result.ListBlocks)
+			view.blockCount = len(result.ListBlocks)
+			view.nodeCount = len(result.ListNodes)
+			view.bookCount = len(result.ListBooks)
+		}
+		return view
+	}
 	switch mode {
 	case "books":
-		all := bookItems(result.Matches)
+		all := bookItems(result.Matches, joinAnd, queryCount)
 		view.bookCount = len(all)
 		view.header.Count = len(all)
+		view.header.Occurrences = booksOccurrences(all)
 		view.books, view.header.Truncated = pageItems(all, limit, offset)
 		view.header.Returned = len(view.books)
 	case "blocks":
-		all := blockItems(result.Matches)
+		all := blockItems(result.Matches, joinAnd, queryCount)
 		view.blockCount = len(all)
 		view.header.Count = len(all)
+		view.header.Occurrences = blocksOccurrences(all)
 		view.blocks, view.header.Truncated = pageItems(all, limit, offset)
 		view.header.Returned = len(view.blocks)
 	case "nodes":
-		all := nodeItems(result.Matches)
+		all := nodeItems(result.Matches, joinAnd, queryCount)
 		view.nodeCount = len(all)
 		view.header.Count = len(all)
+		view.header.Occurrences = nodesOccurrences(all)
 		view.nodes, view.header.Truncated = pageItems(all, limit, offset)
 		view.header.Returned = len(view.nodes)
 	case "count":
 		view.header.Count = len(result.Matches)
-		view.bookCount = len(bookItems(result.Matches))
-		view.blockCount = len(blockItems(result.Matches))
-		view.nodeCount = len(nodeItems(result.Matches))
+		view.bookCount = len(bookItems(result.Matches, joinAnd, queryCount))
+		view.blockCount = len(blockItems(result.Matches, joinAnd, queryCount))
+		view.nodeCount = len(nodeItems(result.Matches, joinAnd, queryCount))
 	default:
 		view.header.Count = len(result.Matches)
 		view.matches, view.header.Truncated = pageItems(result.Matches, limit, offset)
@@ -219,15 +261,35 @@ func (result Result) header() header {
 	if result.All {
 		scopeMode = "all"
 	}
+	queries := make([]QueryInfo, len(result.Queries))
+	fuzzy := 0
+	mode := ""
+	query := ""
+	for index, entry := range result.Queries {
+		queries[index] = QueryInfo{Index: index, Text: entry.Text, Mode: string(entry.Mode), Fuzzy: entry.Fuzzy}
+		if entry.Fuzzy > fuzzy {
+			fuzzy = entry.Fuzzy
+		}
+		if index == 0 {
+			mode = string(entry.Mode)
+			query = entry.Text
+		}
+	}
+	join := result.Join
+	if join == "" {
+		join = "or"
+	}
 	return header{
 		SchemaVersion: SchemaVersion,
 		Book:          result.Book,
-		Query:         result.Query,
-		Queries:       []QueryInfo{{Index: 0, Text: result.Query, Mode: string(result.Mode), Fuzzy: 0}},
-		Join:          "or",
+		Query:         query,
+		Queries:       queries,
+		Join:          join,
+		Fuzzy:         fuzzy,
 		GroupBy:       "",
+		Ref:           result.Ref,
 		Index:         IndexInfo{Mode: "auto"},
-		Mode:          string(result.Mode),
+		Mode:          mode,
 		Scope: ScopeInfo{
 			Mode: scopeMode, Books: books, Fields: result.Fields.names(),
 			Node: node, Block: block, Kinds: kinds, Types: types,
@@ -235,6 +297,9 @@ func (result Result) header() header {
 		},
 	}
 }
+
+// Count returns the total number of result items before paging.
+func (result Result) Count() int { return result.prepare(0, 0).header.Count }
 
 // Payload returns the JSON payload for the chosen result mode.
 func (result Result) Payload(limit, offset int) any {
@@ -378,68 +443,199 @@ func pageItems[T any](items []T, limit, offset int) ([]T, bool) {
 	return paged, end < len(items)
 }
 
-func bookItems(matches []Match) []BookItem {
-	items := make([]BookItem, 0)
-	index := map[string]int{}
-	for _, match := range matches {
-		position, exists := index[match.Book]
-		if !exists {
-			position = len(items)
-			index[match.Book] = position
-			items = append(items, BookItem{Book: match.Book, Path: match.BookPath})
+func statsList(stats map[int]*QueryStats) []QueryStats {
+	if len(stats) == 0 {
+		return nil
+	}
+	entries := make([]QueryStats, 0, len(stats))
+	for _, entry := range stats {
+		entries = append(entries, *entry)
+	}
+	for left := 0; left < len(entries); left++ {
+		for right := left + 1; right < len(entries); right++ {
+			if entries[right].Query < entries[left].Query {
+				entries[left], entries[right] = entries[right], entries[left]
+			}
 		}
-		items[position].Count++
-		items[position].Occurrences += match.Occurrences
+	}
+	return entries
+}
+
+func collectStats(stats map[int]*QueryStats, match Match) {
+	distinct := make(map[int]struct{}, len(match.Spans))
+	for _, span := range match.Spans {
+		distinct[span.Query] = struct{}{}
+		entry := stats[span.Query]
+		if entry == nil {
+			entry = &QueryStats{Query: span.Query, FirstLine: match.Line}
+			stats[span.Query] = entry
+		}
+		entry.Occurrences++
+	}
+	for query := range distinct {
+		stats[query].Count++
+	}
+}
+
+func collectQueries(queries map[int]struct{}, match Match) {
+	for _, span := range match.Spans {
+		queries[span.Query] = struct{}{}
+	}
+}
+
+func bookItems(matches []Match, joinAnd bool, queryCount int) []BookItem {
+	type aggregate struct {
+		item    BookItem
+		queries map[int]struct{}
+		stats   map[int]*QueryStats
+	}
+	order := make([]string, 0)
+	index := map[string]*aggregate{}
+	for _, match := range matches {
+		entry := index[match.Book]
+		if entry == nil {
+			entry = &aggregate{
+				item:    BookItem{Book: match.Book, Path: match.BookPath},
+				queries: map[int]struct{}{},
+				stats:   map[int]*QueryStats{},
+			}
+			index[match.Book] = entry
+			order = append(order, match.Book)
+		}
+		entry.item.Count++
+		entry.item.Occurrences += match.Occurrences
+		collectStats(entry.stats, match)
+		collectQueries(entry.queries, match)
+	}
+	items := make([]BookItem, 0, len(order))
+	for _, key := range order {
+		entry := index[key]
+		if joinAnd && len(entry.queries) < queryCount {
+			continue
+		}
+		if queryCount > 1 {
+			entry.item.PerQuery = statsList(entry.stats)
+		}
+		items = append(items, entry.item)
 	}
 	return items
 }
 
-func blockItems(matches []Match) []BlockItem {
-	items := make([]BlockItem, 0)
-	index := map[string]int{}
+func blockItems(matches []Match, joinAnd bool, queryCount int) []BlockItem {
+	type aggregate struct {
+		item    BlockItem
+		queries map[int]struct{}
+		stats   map[int]*QueryStats
+	}
+	order := make([]string, 0)
+	index := map[string]*aggregate{}
 	for _, match := range matches {
 		if match.Block == "" {
 			continue
 		}
 		key := match.Book + "\x00" + match.Block + "\x00" + match.Field
-		position, exists := index[key]
-		if !exists {
-			position = len(items)
-			index[key] = position
-			items = append(items, BlockItem{
-				Book: match.Book, Block: match.Block, Node: match.Node,
-				NodeTitle: match.NodeTitle, NodePath: match.NodePath,
-				Type: match.BlockType, Status: match.BlockStatus, Locked: match.BlockLocked,
-				Field: match.Field, FirstLine: match.Line,
-			})
+		entry := index[key]
+		if entry == nil {
+			entry = &aggregate{
+				item: BlockItem{
+					Book: match.Book, Block: match.Block, Node: match.Node,
+					NodeTitle: match.NodeTitle, NodePath: match.NodePath,
+					Type: match.BlockType, Status: match.BlockStatus, Locked: match.BlockLocked,
+					Field: match.Field, FirstLine: match.Line,
+				},
+				queries: map[int]struct{}{},
+				stats:   map[int]*QueryStats{},
+			}
+			index[key] = entry
+			order = append(order, key)
 		}
-		items[position].Count++
-		items[position].Occurrences += match.Occurrences
+		entry.item.Count++
+		entry.item.Occurrences += match.Occurrences
+		collectStats(entry.stats, match)
+		collectQueries(entry.queries, match)
+	}
+	items := make([]BlockItem, 0, len(order))
+	for _, key := range order {
+		entry := index[key]
+		if joinAnd && len(entry.queries) < queryCount {
+			continue
+		}
+		if queryCount > 1 {
+			entry.item.PerQuery = statsList(entry.stats)
+		}
+		items = append(items, entry.item)
 	}
 	return items
 }
 
-func nodeItems(matches []Match) []NodeItem {
-	items := make([]NodeItem, 0)
-	index := map[string]int{}
+func nodeItems(matches []Match, joinAnd bool, queryCount int) []NodeItem {
+	type aggregate struct {
+		item    NodeItem
+		queries map[int]struct{}
+		stats   map[int]*QueryStats
+	}
+	order := make([]string, 0)
+	index := map[string]*aggregate{}
 	for _, match := range matches {
 		if match.Node == "" {
 			continue
 		}
 		key := match.Book + "\x00" + match.Node
-		position, exists := index[key]
-		if !exists {
-			position = len(items)
-			index[key] = position
-			items = append(items, NodeItem{
-				Book: match.Book, Node: match.Node, NodeKind: match.NodeKind,
-				Title: match.NodeTitle, Part: match.NodePart, Status: match.NodeStatus,
-				NodePath: match.NodePath,
-			})
+		entry := index[key]
+		if entry == nil {
+			entry = &aggregate{
+				item: NodeItem{
+					Book: match.Book, Node: match.Node, NodeKind: match.NodeKind,
+					Title: match.NodeTitle, Part: match.NodePart, Status: match.NodeStatus,
+					NodePath: match.NodePath,
+				},
+				queries: map[int]struct{}{},
+				stats:   map[int]*QueryStats{},
+			}
+			index[key] = entry
+			order = append(order, key)
 		}
-		items[position].Count++
+		entry.item.Count++
+		entry.item.Occurrences += match.Occurrences
+		collectStats(entry.stats, match)
+		collectQueries(entry.queries, match)
+	}
+	items := make([]NodeItem, 0, len(order))
+	for _, key := range order {
+		entry := index[key]
+		if joinAnd && len(entry.queries) < queryCount {
+			continue
+		}
+		if queryCount > 1 {
+			entry.item.PerQuery = statsList(entry.stats)
+		}
+		items = append(items, entry.item)
 	}
 	return items
+}
+
+func booksOccurrences(items []BookItem) int {
+	total := 0
+	for _, item := range items {
+		total += item.Occurrences
+	}
+	return total
+}
+
+func blocksOccurrences(items []BlockItem) int {
+	total := 0
+	for _, item := range items {
+		total += item.Occurrences
+	}
+	return total
+}
+
+func nodesOccurrences(items []NodeItem) int {
+	total := 0
+	for _, item := range items {
+		total += item.Occurrences
+	}
+	return total
 }
 
 // Text renders the human form of one result.

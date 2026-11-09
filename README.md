@@ -20,6 +20,7 @@ pecia book new --title "Guide"
 pecia book open guide
 pecia add --book guide --title "Getting Started"
 pecia body set --book guide 0 --parent <chapter> --body "Hello from CLABOK."
+pecia find --book guide --query "Hello" --result blocks
 pecia book close guide
 pecia sync --write
 ```

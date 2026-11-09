@@ -23,7 +23,7 @@ Grammar: `grammar check`, `grammar apply` and the server lifecycle commands; `te
 
 Render and inspect: `sync` renders, `check` reports findings and `verify` runs the acceptance view. `library sync` renders every registered book.
 
-Read-only helpers: `find` searches bodies and titles, `flush` lists or removes stale transient inputs, `rollback list` and `rollback restore` manage the undo packages.
+Read-only helpers: `find` searches titles, bodies, layouts and regions across one book or the whole library with modes, fields, metadata filters and four result shapes; `flush` lists or removes stale transient inputs; `rollback list` and `rollback restore` manage the undo packages.
 
 Project helpers: `config`, `library defaults`, `version` and `help`. `serve` starts the optional coordinator daemon used by the daemon concurrency mode.
 

@@ -6,6 +6,8 @@ package search
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -75,13 +77,24 @@ type Warning struct {
 
 // Filter is the compiled scope filter of one search.
 type Filter struct {
-	Node     model.ID
-	Block    model.ID
-	Kinds    []string
-	Types    []string
-	Statuses []string
-	Part     string
-	Locked   *bool
+	Node        model.ID
+	Block       model.ID
+	Kinds       []string
+	Types       []string
+	Statuses    []string
+	Part        string
+	Locked      *bool
+	NodePath    string
+	BookPath    string
+	Ref         model.ID
+	MissingBody bool
+}
+
+// Query is one submitted search query.
+type Query struct {
+	Text  string
+	Mode  Mode
+	Fuzzy int
 }
 
 // Options controls one search.
@@ -90,9 +103,13 @@ type Options struct {
 	Book model.BookID
 	All  bool
 
-	Query      string
-	Fields     []string
-	Mode       Mode
+	// Queries are the submitted queries. Query is the single-query compatibility field.
+	Queries []Query
+	Query   string
+	Fields  []string
+	Mode    Mode
+	// Join is and or or; the empty value means or.
+	Join       string
 	IgnoreCase bool
 	Word       bool
 	Context    int
@@ -104,21 +121,31 @@ type Options struct {
 	Offset int
 	Format string
 
-	Strict bool
+	// FieldsExplicit reports whether the caller set --field; a filter-only listing needs it.
+	FieldsExplicit bool
+	RequireMatch   bool
+	Snapshot       bool
+	Strict         bool
 }
 
 // Result is the complete unscoped search result before paging.
 type Result struct {
 	Book     string
 	All      bool
-	Query    string
-	Mode     Mode
+	Queries  []Query
+	Join     string
 	Fields   fieldFlags
 	Filter   Filter
 	Result   string
+	Ref      *RefInfo
 	Books    []string
 	Matches  []Match
 	Warnings []Warning
+	// A filter-only listing has no matches; the entities are collected directly.
+	FilterOnly bool
+	ListBlocks []BlockItem
+	ListNodes  []NodeItem
+	ListBooks  []BookItem
 }
 
 // Service searches registered books.
@@ -141,31 +168,60 @@ func (service *Service) Find(options Options) (Result, error) {
 	if !options.All && options.Book == "" {
 		return Result{}, fail("search.scope-required", "one of --book or --all is required")
 	}
-	if strings.TrimSpace(options.Query) == "" {
-		return Result{}, fail("search.empty-query", "a query is required")
+	var queries []Query
+	filterOnly := len(options.Queries) == 0 && strings.TrimSpace(options.Query) == ""
+	var compiled []*Matcher
+	join := options.Join
+	if join == "" {
+		join = "or"
+	}
+	if join != "and" && join != "or" {
+		return Result{}, fail("search.invalid-join", "unknown join %q; use and or or", join)
 	}
 	fields, err := parseFields(options.Fields)
 	if err != nil {
 		return Result{}, err
 	}
-	mode := options.Mode
-	if mode == "" {
-		mode = ModeLiteral
-	}
-	matcher, err := Compile(options.Query, MatcherOptions{
-		Mode: mode, IgnoreCase: options.IgnoreCase, Word: options.Word,
-	})
-	if err != nil {
-		return Result{}, err
+	if filterOnly {
+		if filterErr := validateFilterOnly(options); filterErr != nil {
+			return Result{}, filterErr
+		}
+	} else {
+		queries, err = compileQueries(options)
+		if err != nil {
+			return Result{}, err
+		}
+		if options.Filter.MissingBody {
+			return Result{}, fail("search.missing-body-query", "--missing-body does not take a query")
+		}
+		compiled = make([]*Matcher, len(queries))
+		for index, query := range queries {
+			matcher, matchErr := Compile(query.Text, MatcherOptions{
+				Mode: query.Mode, IgnoreCase: options.IgnoreCase, Word: options.Word, Fuzzy: query.Fuzzy,
+			})
+			if matchErr != nil {
+				return Result{}, matchErr
+			}
+			compiled[index] = matcher
+		}
 	}
 	entries, err := service.scope(options)
 	if err != nil {
 		return Result{}, err
 	}
+	if options.Filter.BookPath != "" {
+		entries, err = filterBookPaths(entries, options.Filter.BookPath, options.IgnoreCase)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	result := Result{
-		Book: string(options.Book), All: options.All, Query: options.Query,
-		Mode: mode, Fields: fields, Filter: options.Filter,
-		Result: options.Result, Warnings: []Warning{},
+		Book: string(options.Book), All: options.All, Queries: queries, Join: join,
+		Fields: fields, Filter: options.Filter, Result: options.Result, Warnings: []Warning{},
+		FilterOnly: filterOnly,
+	}
+	if options.Filter.Ref != model.ZeroID {
+		result.Ref = &RefInfo{ID: options.Filter.Ref.String()}
 	}
 	entries, warnings, err := service.resolveOwners(entries, options)
 	result.Warnings = append(result.Warnings, warnings...)
@@ -173,34 +229,218 @@ func (service *Service) Find(options Options) (Result, error) {
 		return Result{}, err
 	}
 	for _, entry := range entries {
-		book, loadErr := service.Sources.Load(entry.ID)
-		if loadErr != nil {
-			if !options.All {
-				return Result{}, loadFailure(loadErr)
+		if bookErr := service.searchBook(&result, entry, options, compiled, fields, join, filterOnly); bookErr != nil {
+			var searchErr *Error
+			if options.All && errors.As(bookErr, &searchErr) && bookWarning(searchErr.Code) {
+				result.Warnings = append(result.Warnings, Warning{
+					Code: searchErr.Code, Book: string(entry.ID), Message: searchErr.Message,
+				})
+				continue
 			}
-			result.Warnings = append(result.Warnings, Warning{
-				Code: "search.read-failed", Book: string(entry.ID), Message: loadErr.Error(),
-			})
-			continue
+			return Result{}, bookErr
 		}
-		result.Books = append(result.Books, string(entry.ID))
-		for _, id := range book.MissingBodies() {
-			result.Warnings = append(result.Warnings, Warning{
-				Code: "search.missing-body", Book: string(entry.ID),
-				Message: fmt.Sprintf("block %s has no body", id),
-			})
-		}
-		info := newBookInfo(book, entry.Path)
-		set, filterErr := newFilterSet(info, options.Filter)
-		if filterErr != nil {
-			return Result{}, filterErr
-		}
-		scanBook(&result, info, set, matcher, fields, options.Context)
 	}
 	if options.Strict && len(result.Warnings) > 0 {
 		return Result{}, fail("search.strict-failed", "%d warning(s) treated as failure", len(result.Warnings))
 	}
 	return result, nil
+}
+
+// searchBook loads, locks and searches one registered book.
+func (service *Service) searchBook(result *Result, entry store.RegistryEntry, options Options, matchers []*Matcher, fields fieldFlags, join string, filterOnly bool) error {
+	if options.Snapshot {
+		release, lockErr := service.Lifecycle.LockBookShared(entry.ID)
+		if lockErr != nil {
+			return fail("search.lock-failed", "book %q: %v", entry.ID, lockErr)
+		}
+		defer release()
+	}
+	book, err := service.Sources.Load(entry.ID)
+	if err != nil {
+		return loadFailure(err)
+	}
+	result.Books = append(result.Books, string(entry.ID))
+	for _, id := range book.MissingBodies() {
+		result.Warnings = append(result.Warnings, Warning{
+			Code: "search.missing-body", Book: string(entry.ID),
+			Message: fmt.Sprintf("block %s has no body", id),
+		})
+	}
+	if result.Ref != nil && ownsID(book, options.Filter.Ref) {
+		result.Ref.Exists = true
+	}
+	info := newBookInfo(book, entry.Path)
+	set, filterErr := newFilterSet(info, options.Filter, options.IgnoreCase)
+	if filterErr != nil {
+		return filterErr
+	}
+	if filterOnly {
+		listFilterOnly(result, info, set, fields)
+		return nil
+	}
+	scanBook(result, info, set, matchers, fields, options.Context, join, options.Result)
+	return nil
+}
+
+// bookWarning reports whether a per-book error is a warning in an --all search.
+func bookWarning(code string) bool {
+	return code == "search.read-failed" || code == "search.unsupported-schema"
+}
+
+// validateFilterOnly enforces the filter-only listing contract.
+func validateFilterOnly(options Options) error {
+	switch options.Result {
+	case "blocks", "nodes", "books", "count":
+	default:
+		return fail("search.empty-query", "a query is required for --result matches")
+	}
+	if !options.FieldsExplicit && filterEmpty(options.Filter) {
+		return fail("search.empty-query", "a query or an explicit filter is required")
+	}
+	return nil
+}
+
+func filterEmpty(filter Filter) bool {
+	return filter.Node == model.ZeroID && filter.Block == model.ZeroID &&
+		len(filter.Kinds) == 0 && len(filter.Types) == 0 && len(filter.Statuses) == 0 &&
+		filter.Part == "" && filter.Locked == nil && filter.NodePath == "" &&
+		filter.BookPath == "" && filter.Ref == model.ZeroID && !filter.MissingBody
+}
+
+// filterBookPaths keeps the entries whose output path matches the glob.
+func filterBookPaths(entries []store.RegistryEntry, pattern string, ignoreCase bool) ([]store.RegistryEntry, error) {
+	expression, err := regexp.Compile(globExpression(pattern, ignoreCase))
+	if err != nil {
+		return nil, fail("search.invalid-glob", "invalid book path glob %q: %v", pattern, err)
+	}
+	filtered := make([]store.RegistryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if expression.MatchString(entry.Path) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered, nil
+}
+
+// listFilterOnly collects the entities that pass the filters without a text query.
+func listFilterOnly(result *Result, info *bookInfo, set *filterSet, fields fieldFlags) {
+	seen := map[model.ID]struct{}{}
+	blocks := 0
+	for _, node := range info.Ordered {
+		if set.titleAllowed(node) {
+			seen[node.Node.ID] = struct{}{}
+		}
+		for _, id := range node.Node.Blocks {
+			if !set.blockAllowed(info, node, id, nil) {
+				continue
+			}
+			blocks += listBlock(result, info, node, id, nil, fields)
+			seen[node.Node.ID] = struct{}{}
+		}
+	}
+	for _, region := range info.Book.Manifest.Regions {
+		field := regionField(region.Kind)
+		if !fields.has(field) {
+			continue
+		}
+		owner := info.regionNode(region)
+		for _, id := range region.Blocks {
+			if !set.blockAllowed(info, owner, id, region) {
+				continue
+			}
+			blocks += listBlock(result, info, owner, id, region, fields)
+			if owner != nil {
+				seen[owner.Node.ID] = struct{}{}
+			}
+		}
+	}
+	for _, node := range info.Ordered {
+		if _, exists := seen[node.Node.ID]; !exists {
+			continue
+		}
+		result.ListNodes = append(result.ListNodes, NodeItem{
+			Book: string(info.Book.ID), Node: node.Node.ID.String(),
+			NodeKind: string(node.Node.Kind), Title: node.Node.Title, Part: node.Part,
+			Status: node.Node.Status, NodePath: node.Path,
+		})
+	}
+	if blocks > 0 || len(seen) > 0 {
+		result.ListBooks = append(result.ListBooks, BookItem{Book: string(info.Book.ID), Path: info.Path})
+	}
+}
+
+func listBlock(result *Result, info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, fields fieldFlags) int {
+	listed := 0
+	meta := info.Book.Manifest.Meta(block)
+	for _, field := range listedFields(info, block, region, fields) {
+		item := BlockItem{
+			Book: string(info.Book.ID), Block: block.String(), Field: field,
+			Type: meta.Type, Status: meta.Status, Locked: meta.Locked,
+		}
+		if owner != nil {
+			item.Node = owner.Node.ID.String()
+			item.NodeTitle = owner.Node.Title
+			item.NodePath = owner.Path
+		}
+		result.ListBlocks = append(result.ListBlocks, item)
+		listed++
+	}
+	return listed
+}
+
+func listedFields(info *bookInfo, block model.ID, region *model.Region, fields fieldFlags) []string {
+	if region != nil {
+		field := regionField(region.Kind)
+		if fields.has(field) {
+			return []string{field}
+		}
+		return nil
+	}
+	names := make([]string, 0, 2)
+	if fields.body {
+		names = append(names, "body")
+	}
+	if fields.layout {
+		if _, exists := info.Book.Layout(block); exists {
+			names = append(names, "layout")
+		}
+	}
+	return names
+}
+
+// compileQueries normalizes the submitted queries and rejects duplicate or excessive lists.
+func compileQueries(options Options) ([]Query, error) {
+	queries := options.Queries
+	if len(queries) == 0 {
+		if strings.TrimSpace(options.Query) == "" {
+			return nil, fail("search.empty-query", "a query is required")
+		}
+		queries = []Query{{Text: options.Query, Mode: options.Mode}}
+	}
+	if len(queries) > 8 {
+		return nil, fail("search.too-many-queries", "at most 8 queries are allowed")
+	}
+	seen := make(map[string]struct{}, len(queries))
+	normalized := make([]Query, len(queries))
+	for index, query := range queries {
+		key := strings.TrimSpace(query.Text)
+		if key == "" {
+			return nil, fail("search.empty-query", "query %d is empty", index+1)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return nil, fail("search.duplicate-query", "query %q is repeated", key)
+		}
+		seen[key] = struct{}{}
+		mode := query.Mode
+		if mode == "" {
+			mode = options.Mode
+		}
+		if mode == "" {
+			mode = ModeLiteral
+		}
+		normalized[index] = Query{Text: query.Text, Mode: mode, Fuzzy: query.Fuzzy}
+	}
+	return normalized, nil
 }
 
 func (service *Service) scope(options Options) ([]store.RegistryEntry, error) {
@@ -288,11 +528,14 @@ func loadFailure(err error) error {
 }
 
 // scanBook appends the matches of one book in structural order.
-func scanBook(result *Result, info *bookInfo, set *filterSet, matcher *Matcher, fields fieldFlags, context int) {
+func scanBook(result *Result, info *bookInfo, set *filterSet, matchers []*Matcher, fields fieldFlags, context int, join, resultMode string) {
 	manifest := info.Book.Manifest
+	lineJoin := resultMode == "" || resultMode == "matches" || resultMode == "count"
+	joinAnd := join == "and" && len(matchers) > 1
 	for _, node := range info.Ordered {
 		if fields.title && set.titleAllowed(node) {
-			if spans := matcher.Match(node.Node.Title); len(spans) > 0 {
+			spans := matchLine(matchers, node.Node.Title)
+			if len(spans) > 0 && (!lineJoin || !joinAnd || coversQueries(spans, len(matchers))) {
 				result.Matches = append(result.Matches,
 					newMatch(info, node, model.ZeroID, nil, "title", 1, node.Node.Title, spans))
 			}
@@ -300,12 +543,12 @@ func scanBook(result *Result, info *bookInfo, set *filterSet, matcher *Matcher, 
 		for _, id := range node.Node.Blocks {
 			if fields.body && set.blockAllowed(info, node, id, nil) && manifest.BlockType(id) != "RepoLayout" {
 				if body, exists := info.Book.Body(id); exists {
-					appendLines(result, info, node, id, nil, "body", body, matcher, context)
+					appendLines(result, info, node, id, nil, "body", body, matchers, context, lineJoin, joinAnd)
 				}
 			}
 			if fields.layout && set.blockAllowed(info, node, id, nil) {
 				if spec, exists := info.Book.Layout(id); exists {
-					appendLines(result, info, node, id, nil, "layout", string(spec), matcher, context)
+					appendLines(result, info, node, id, nil, "layout", string(spec), matchers, context, lineJoin, joinAnd)
 				}
 			}
 		}
@@ -321,7 +564,7 @@ func scanBook(result *Result, info *bookInfo, set *filterSet, matcher *Matcher, 
 				continue
 			}
 			if body, exists := info.Book.Body(id); exists {
-				appendLines(result, info, owner, id, region, field, body, matcher, context)
+				appendLines(result, info, owner, id, region, field, body, matchers, context, lineJoin, joinAnd)
 			}
 		}
 	}
@@ -357,11 +600,14 @@ func (flags fieldFlags) has(field string) bool {
 	return false
 }
 
-func appendLines(result *Result, info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, field, text string, matcher *Matcher, context int) {
+func appendLines(result *Result, info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, field, text string, matchers []*Matcher, context int, lineJoin, joinAnd bool) {
 	lines := splitLines(text)
 	for index, line := range lines {
-		spans := matcher.Match(line)
+		spans := matchLine(matchers, line)
 		if len(spans) == 0 {
+			continue
+		}
+		if lineJoin && joinAnd && !coversQueries(spans, len(matchers)) {
 			continue
 		}
 		match := newMatch(info, owner, block, region, field, index+1, line, spans)
@@ -372,6 +618,33 @@ func appendLines(result *Result, info *bookInfo, owner *nodeInfo, block model.ID
 		}
 		result.Matches = append(result.Matches, match)
 	}
+}
+
+// matchLine collects the spans of every query on one line and sorts them by position.
+func matchLine(matchers []*Matcher, line string) []Span {
+	spans := make([]Span, 0)
+	for index, matcher := range matchers {
+		for _, span := range matcher.Match(line) {
+			span.Query = index
+			spans = append(spans, span)
+		}
+	}
+	sort.Slice(spans, func(left, right int) bool {
+		if spans[left].Offset != spans[right].Offset {
+			return spans[left].Offset < spans[right].Offset
+		}
+		return spans[left].Query < spans[right].Query
+	})
+	return spans
+}
+
+// coversQueries reports whether the spans contain a hit for every query.
+func coversQueries(spans []Span, count int) bool {
+	seen := make(map[int]struct{}, count)
+	for _, span := range spans {
+		seen[span.Query] = struct{}{}
+	}
+	return len(seen) == count
 }
 
 func newMatch(info *bookInfo, owner *nodeInfo, block model.ID, region *model.Region, field string, line int, text string, spans []Span) Match {

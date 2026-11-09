@@ -35,6 +35,11 @@ type Result struct {
 	// Raw, when set, is written verbatim instead of the JSON envelope. It carries an output format
 	// the envelope cannot express, such as NDJSON.
 	Raw []byte
+	// Exit overrides the process exit code; zero means success.
+	Exit int
+	// Notice is written to stderr after a successful payload, for an outcome that is not a failure
+	// but needs a code, such as search.no-match.
+	Notice *Error
 }
 
 type errorObject struct {

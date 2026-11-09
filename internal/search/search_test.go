@@ -41,6 +41,7 @@ func newScene(t *testing.T) *scene {
 		"blocks/12.md":               "drawn\n",
 		"blocks/21.md":               "Hello there\n",
 		"blocks/22.md":               "SHOULD NOT MATCH\nHello generated\n",
+		"blocks/24.md":               "See [[id:99]] and [[id:10]].\n",
 		"blocks/31.md":               "index prose Hello\n",
 		"blocks/33.md":               "note Hello\n",
 		"blocks/35.md":               "footer Hello\n",
@@ -87,7 +88,7 @@ func fixtureManifest(t *testing.T) *model.Manifest {
 		Blocks: []model.ID{11, 12},
 		Children: []*model.Node{{
 			ID: 20, Kind: model.KindSubchapter, Title: "Two", Status: "draft",
-			Blocks: []model.ID{21, 22, 23},
+			Blocks: []model.ID{21, 22, 23, 24},
 		}},
 	}}
 	manifest.Regions = []*model.Region{
@@ -101,6 +102,7 @@ func fixtureManifest(t *testing.T) *model.Manifest {
 		21: {Status: "final"},
 		22: {Type: "RepoLayout", Locked: true},
 		23: {Type: "text"},
+		24: {Type: "text"},
 	}
 	return manifest
 }
