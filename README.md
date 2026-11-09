@@ -3,7 +3,7 @@
 
 [CLABOK](Docs/clabok/README.md) · [Document Index](#document-index)
 
-[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 0.5.1](https://img.shields.io/badge/version-0.5.1-green?style=flat-square) [![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 0.5.2](https://img.shields.io/badge/version-0.5.2-green?style=flat-square) [![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 # CLABOK
 
@@ -18,7 +18,7 @@ Go 1.27.3 or newer. The module has no third-party dependencies. A LanguageTool s
 **Install**
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.2
 ```
 
 That writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that

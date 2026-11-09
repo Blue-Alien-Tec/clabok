@@ -1028,13 +1028,14 @@ type SyncOptions struct {
 
 // SyncResult reports a sync run.
 type SyncResult struct {
-	Mode    model.OutputMode
-	Status  store.Status
-	Files   []string
-	Changed []string
-	Foreign []string
-	Pruned  []string
-	Written bool
+	Mode     model.OutputMode
+	Status   store.Status
+	Files    []string
+	Changed  []string
+	Foreign  []string
+	BackedUp []string
+	Pruned   []string
+	Written  bool
 }
 
 // Sync compares the rendered book with the output directory and writes on request. The book is read
@@ -1114,14 +1115,25 @@ func (service *Service) Sync(book model.BookID, outputDir string, options SyncOp
 	}
 	if len(foreign) > 0 && !options.Force {
 		return resultSync, fail("render.foreign-file",
-			"%s has no generated marker for book %s; pass --force to overwrite",
+			"%s has no generated marker for book %s; pass --force to back it up as <name>.bak and overwrite",
 			strings.Join(foreign, ", "), book)
+	}
+	foreignSet := make(map[string]bool, len(foreign))
+	for _, name := range foreign {
+		foreignSet[name] = true
 	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return resultSync, fail("render.write-failed", "%v", err)
 	}
 	for _, file := range result.Files {
 		target := filepath.Join(outputDir, filepath.FromSlash(file.Path))
+		if foreignSet[file.Path] && options.Force {
+			backup, backupErr := backupForeign(outputDir, file.Path)
+			if backupErr != nil {
+				return resultSync, fail("render.backup-failed", "%s: %v", file.Path, backupErr)
+			}
+			resultSync.BackedUp = append(resultSync.BackedUp, backup)
+		}
 		if err := store.WriteAtomic(target, []byte(file.Content)); err != nil {
 			return resultSync, err
 		}
@@ -1138,6 +1150,30 @@ func (service *Service) Sync(book model.BookID, outputDir string, options SyncOp
 	}
 	resultSync.Written = true
 	return resultSync, nil
+}
+
+// backupForeign renames a foreign output file to a collision-free ".bak" name and returns the
+// relative backup path. The original bytes are preserved.
+func backupForeign(outputDir, rel string) (string, error) {
+	base := strings.TrimSuffix(rel, ".md")
+	candidate := base + ".bak"
+	for suffix := 1; ; suffix++ {
+		backup := filepath.Join(outputDir, filepath.FromSlash(candidate))
+		_, statErr := os.Stat(backup)
+		if errors.Is(statErr, os.ErrNotExist) {
+			break
+		}
+		if statErr != nil {
+			return "", statErr
+		}
+		candidate = fmt.Sprintf("%s.bak.%d", base, suffix)
+	}
+	target := filepath.Join(outputDir, filepath.FromSlash(rel))
+	backup := filepath.Join(outputDir, filepath.FromSlash(candidate))
+	if err := os.Rename(target, backup); err != nil {
+		return "", err
+	}
+	return candidate, nil
 }
 
 // inputMembers is the drift hash input: manifest and bodies, plus the generated library index when

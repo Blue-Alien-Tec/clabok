@@ -41,6 +41,7 @@ type NewBookResult struct {
 	Root     string         `json:"root,omitempty"`
 	Settings model.Settings `json:"settings"`
 	Files    []string       `json:"files,omitempty"`
+	BackedUp []string       `json:"backedUp,omitempty"`
 	Written  bool           `json:"written"`
 }
 
@@ -51,7 +52,11 @@ func (result NewBookResult) Text() string {
 	if result.DryRun {
 		return fmt.Sprintf("dry run: create %s (%s) at %s", result.ID, result.Kind, result.Path)
 	}
-	return fmt.Sprintf("%s: created %s at %s (%d file(s))", result.ID, result.Kind, result.Path, len(result.Files))
+	text := fmt.Sprintf("%s: created %s at %s (%d file(s))", result.ID, result.Kind, result.Path, len(result.Files))
+	if len(result.BackedUp) > 0 {
+		text += "; backed up " + strings.Join(result.BackedUp, ", ")
+	}
+	return text
 }
 
 // NewBook creates a closed container, registers it and renders its first output.
@@ -172,6 +177,7 @@ func (service *Service) NewBook(options NewBookOptions, dryRun bool) (NewBookRes
 		return result, cli.AsError(syncErr)
 	}
 	result.Files = syncResult.Files
+	result.BackedUp = syncResult.BackedUp
 	if kind == store.KindBook {
 		if refreshErr := service.refreshLibrary(registry, options.Force); refreshErr != nil {
 			return result, refreshErr

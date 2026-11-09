@@ -40,7 +40,7 @@ func newBookCommand() *cli.Command {
 			set.IntVar(&indexDepth, "index-depth", -1, "index depth")
 			set.BoolVar(&allowOutside, "allow-outside", false, "allow a path outside the docs root")
 			set.BoolVar(&libraryBook, "library", false, "create the library book at the project root")
-			set.BoolVar(&force, "force", false, "render into a non-empty directory")
+			set.BoolVar(&force, "force", false, "render into a non-empty directory and back up foreign files")
 			flags = set
 			return set
 		},
@@ -254,7 +254,7 @@ func syncCommand() *cli.Command {
 			set.BoolVar(&check, "check", false, "report drift and fail on it")
 			set.BoolVar(&write, "write", false, "write changed files")
 			set.BoolVar(&prune, "prune", false, "remove generated files the mode no longer produces")
-			set.BoolVar(&force, "force", false, "overwrite files without the generated marker")
+			set.BoolVar(&force, "force", false, "back up and overwrite files without the generated marker")
 			return set
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {

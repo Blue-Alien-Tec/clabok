@@ -11,7 +11,7 @@
 
 Rendering is a pure function of the manifest, the bodies, the book settings and the repository facts. It reads the open extract or the packed container without changing the lifecycle state.
 
-`sync` renders one book, or every registered book when `--book` is omitted. `--write` writes, `--check` reports drift, `--prune` removes stale files, `--force` overwrites foreign files and `--dry-run` previews; `--out` writes to another directory.
+`sync` renders one book, or every registered book when `--book` is omitted. `--write` writes, `--check` reports drift, `--prune` removes stale files, `--force` backs up foreign files as `<name>.bak` and overwrites them, and `--dry-run` previews; `--out` writes to another directory.
 
 Three output modes exist. Monolith writes one README, chapter writes one file per chapter plus the README index, and part writes one file per part plus the part indexes.
 
@@ -25,7 +25,7 @@ The library README is the repository home: badges, title, the library content an
 
 Render findings cover missing bodies, unknown status, unresolved badges, missing layouts, dangling references and structural problems. `check` reports the findings; `verify` runs the acceptance view of the same book.
 
-Foreign files are never overwritten unless `--force` is set, and `--prune` removes only files the renderer owns. A generated banner at the top marks every owned file.
+Foreign files are never overwritten unless `--force` is set; `--force` renames each foreign file to `<name>.bak` first, adding `.bak.1`, `.bak.2` on a collision, so the old bytes are preserved. `--prune` removes only files the renderer owns. A generated banner at the top marks every owned file.
 
 Determinism is a contract: the same inputs produce the same bytes, and every input participates in the hash, including the manifest, the bodies, the navigation, the badges and the repository layout.
 

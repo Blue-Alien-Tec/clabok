@@ -13,4 +13,4 @@ const (
 )
 
 // Version is the development version; the milestone close bumps it.
-var Version = "0.5.1"
+var Version = "0.5.2"

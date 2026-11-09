@@ -245,6 +245,22 @@ func TestNewBookPathExistsNeedsForce(t *testing.T) {
 	}
 }
 
+func TestNewLibraryBacksUpExistingReadme(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "README.md"), []byte("hand written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK", "--force")
+	readme := readFile(t, filepath.Join(directory, "README.md"))
+	if !strings.HasPrefix(readme, render.Marker) {
+		t.Fatalf("the library README is not generated:\n%s", readme)
+	}
+	backup := readFile(t, filepath.Join(directory, "README.bak"))
+	if backup != "hand written\n" {
+		t.Fatalf("the existing README was not preserved: %q", backup)
+	}
+}
+
 func TestNewBookIDCollision(t *testing.T) {
 	directory := t.TempDir()
 	first := dataOf(t, runOK(t, directory, "book", "new", "--title", "Guide"))

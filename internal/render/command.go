@@ -22,16 +22,17 @@ type CatalogFunc func(*cli.Env) ([]IndexEntry, *cli.Error)
 var catalog CatalogFunc
 
 type syncPayload struct {
-	DryRun  bool     `json:"dryRun"`
-	Book    string   `json:"book"`
-	Out     string   `json:"out"`
-	Mode    string   `json:"mode"`
-	Status  string   `json:"status"`
-	Files   []string `json:"files"`
-	Changed []string `json:"changed,omitempty"`
-	Foreign []string `json:"foreign,omitempty"`
-	Pruned  []string `json:"pruned,omitempty"`
-	Written bool     `json:"written"`
+	DryRun   bool     `json:"dryRun"`
+	Book     string   `json:"book"`
+	Out      string   `json:"out"`
+	Mode     string   `json:"mode"`
+	Status   string   `json:"status"`
+	Files    []string `json:"files"`
+	Changed  []string `json:"changed,omitempty"`
+	Foreign  []string `json:"foreign,omitempty"`
+	BackedUp []string `json:"backedUp,omitempty"`
+	Pruned   []string `json:"pruned,omitempty"`
+	Written  bool     `json:"written"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -51,6 +52,9 @@ func (payload syncPayload) Text() string {
 	for _, name := range payload.Foreign {
 		fmt.Fprintf(&builder, "  foreign %s\n", name)
 	}
+	for _, name := range payload.BackedUp {
+		fmt.Fprintf(&builder, "  backed up %s\n", name)
+	}
 	return builder.String()
 }
 
@@ -60,17 +64,18 @@ type libraryBookError struct {
 }
 
 type libraryBookPayload struct {
-	ID      string            `json:"id"`
-	Path    string            `json:"path"`
-	Kind    string            `json:"kind"`
-	Mode    string            `json:"mode,omitempty"`
-	Status  string            `json:"status,omitempty"`
-	Files   []string          `json:"files,omitempty"`
-	Changed []string          `json:"changed,omitempty"`
-	Foreign []string          `json:"foreign,omitempty"`
-	Pruned  []string          `json:"pruned,omitempty"`
-	Written bool              `json:"written"`
-	Error   *libraryBookError `json:"error,omitempty"`
+	ID       string            `json:"id"`
+	Path     string            `json:"path"`
+	Kind     string            `json:"kind"`
+	Mode     string            `json:"mode,omitempty"`
+	Status   string            `json:"status,omitempty"`
+	Files    []string          `json:"files,omitempty"`
+	Changed  []string          `json:"changed,omitempty"`
+	Foreign  []string          `json:"foreign,omitempty"`
+	BackedUp []string          `json:"backedUp,omitempty"`
+	Pruned   []string          `json:"pruned,omitempty"`
+	Written  bool              `json:"written"`
+	Error    *libraryBookError `json:"error,omitempty"`
 }
 
 type librarySyncPayload struct {
@@ -103,6 +108,9 @@ func (payload librarySyncPayload) Text() string {
 		}
 		fmt.Fprintf(&builder, "%s: %s (%d file(s), %d changed)\n",
 			book.ID, state, len(book.Files), len(book.Changed))
+		for _, name := range book.BackedUp {
+			fmt.Fprintf(&builder, "  backed up %s\n", name)
+		}
 	}
 	fmt.Fprintf(&builder, "%d book(s), %d with changes, clean=%t\n",
 		len(payload.Books), changed, payload.Clean)
@@ -153,7 +161,7 @@ func syncCommand() *cli.Command {
 			set.BoolVar(&check, "check", false, "report drift without writing and fail on drift")
 			set.BoolVar(&write, "write", false, "write changed files")
 			set.BoolVar(&prune, "prune", false, "remove generated files the mode no longer produces")
-			set.BoolVar(&force, "force", false, "overwrite files without the generated marker")
+			set.BoolVar(&force, "force", false, "back up and overwrite files without the generated marker")
 			return set
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
@@ -234,7 +242,8 @@ func runSyncBook(env *cli.Env, book model.BookID, out string, check, write, prun
 	payload := syncPayload{
 		DryRun: dryRun, Book: string(book), Out: target, Mode: string(syncResult.Mode),
 		Status: string(syncResult.Status), Files: syncResult.Files, Changed: syncResult.Changed,
-		Foreign: syncResult.Foreign, Pruned: syncResult.Pruned, Written: syncResult.Written,
+		Foreign: syncResult.Foreign, BackedUp: syncResult.BackedUp, Pruned: syncResult.Pruned,
+		Written: syncResult.Written,
 	}
 	if check && !env.Globals.DryRun && !cleanBook(syncResult.Changed, syncResult.Foreign, syncResult.Pruned) {
 		return nil, cli.Fail("render.drift", "book %q has drift", book).
@@ -308,6 +317,7 @@ func RunLibrarySync(env *cli.Env, check, write, prune, force bool) (*cli.Result,
 		bookPayload.Files = syncResult.Files
 		bookPayload.Changed = syncResult.Changed
 		bookPayload.Foreign = syncResult.Foreign
+		bookPayload.BackedUp = syncResult.BackedUp
 		bookPayload.Pruned = syncResult.Pruned
 		bookPayload.Written = syncResult.Written
 		if !syncClean(syncResult, prune) {

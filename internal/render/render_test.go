@@ -269,7 +269,7 @@ func TestSyncDriftAfterBodyEdit(t *testing.T) {
 	}
 }
 
-func TestSyncForeignFile(t *testing.T) {
+func TestSyncForeignFileBacksUp(t *testing.T) {
 	s := newScene(t, model.OutputMonolith)
 	output := t.TempDir()
 	if err := os.WriteFile(filepath.Join(output, "README.md"), []byte("hand written\n"), 0o644); err != nil {
@@ -278,8 +278,26 @@ func TestSyncForeignFile(t *testing.T) {
 	if _, err := s.service.Sync("fixture", output, SyncOptions{Write: true}); err == nil {
 		t.Fatal("expected render.foreign-file")
 	}
-	if _, err := s.service.Sync("fixture", output, SyncOptions{Write: true, Force: true}); err != nil {
+	unchanged, err := os.ReadFile(filepath.Join(output, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(unchanged) != "hand written\n" {
+		t.Fatal("the refusal changed the foreign file")
+	}
+	result, err := s.service.Sync("fixture", output, SyncOptions{Write: true, Force: true})
+	if err != nil {
 		t.Fatalf("force: %v", err)
+	}
+	if len(result.BackedUp) != 1 || result.BackedUp[0] != "README.bak" {
+		t.Fatalf("backed up %v", result.BackedUp)
+	}
+	backup, err := os.ReadFile(filepath.Join(output, "README.bak"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != "hand written\n" {
+		t.Fatalf("backup changed: %q", backup)
 	}
 	data, err := os.ReadFile(filepath.Join(output, "README.md"))
 	if err != nil {
@@ -287,6 +305,38 @@ func TestSyncForeignFile(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(data), Marker) {
 		t.Fatal("force did not overwrite")
+	}
+}
+
+func TestSyncForeignFileBackupCollision(t *testing.T) {
+	s := newScene(t, model.OutputMonolith)
+	output := t.TempDir()
+	if err := os.WriteFile(filepath.Join(output, "README.md"), []byte("hand written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(output, "README.bak"), []byte("older\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.service.Sync("fixture", output, SyncOptions{Write: true, Force: true})
+	if err != nil {
+		t.Fatalf("force: %v", err)
+	}
+	if len(result.BackedUp) != 1 || result.BackedUp[0] != "README.bak.1" {
+		t.Fatalf("backed up %v", result.BackedUp)
+	}
+	backup, err := os.ReadFile(filepath.Join(output, "README.bak.1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != "hand written\n" {
+		t.Fatalf("backup changed: %q", backup)
+	}
+	old, err := os.ReadFile(filepath.Join(output, "README.bak"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(old) != "older\n" {
+		t.Fatalf("the existing backup was overwritten: %q", old)
 	}
 }
 
