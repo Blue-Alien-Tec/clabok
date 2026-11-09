@@ -41,16 +41,17 @@ func (result payload) Text() string {
 // Register adds the index command.
 func Register(registry *cli.Registry) {
 	var book string
-	var all, write bool
+	var all, write, verify bool
 	registry.Add(&cli.Command{
 		Name:    "index",
 		Summary: "build, inspect or clear the derived search index",
-		Usage:   "pecia index <status|build|clear> [--book <id> | --all] [--write]",
+		Usage:   "pecia index <status|build|clear> [--book <id> | --all] [--write] [--verify]",
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("index")
 			set.StringVar(&book, "book", "", "book id")
 			set.BoolVar(&all, "all", false, "every registered book")
 			set.BoolVar(&write, "write", false, "write the index")
+			set.BoolVar(&verify, "verify", false, "status: compare the full container hash")
 			return set
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
@@ -65,6 +66,9 @@ func Register(registry *cli.Registry) {
 			default:
 				return nil, cli.Usage("usage.invalid-value",
 					"unknown index action %q; use status, build or clear", action)
+			}
+			if verify && action != "status" {
+				return nil, cli.Usage("usage.invalid-value", "--verify applies to index status")
 			}
 			if book != "" && all {
 				return nil, cli.Reject("index.scope-conflict", "use either --book or --all")
@@ -104,7 +108,13 @@ func Register(registry *cli.Registry) {
 				Books: make([]Status, 0, len(ids)), Warnings: []Warning{},
 			}
 			for _, id := range ids {
-				status, err := service.Status(id)
+				var status Status
+				var err error
+				if verify {
+					status, err = service.StatusVerified(id)
+				} else {
+					status, err = service.Status(id)
+				}
 				if err != nil {
 					return nil, cli.Fail("index.read-failed", "%v", err)
 				}

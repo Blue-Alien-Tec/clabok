@@ -29,6 +29,8 @@ func TestIndexedSearchMatchesScan(t *testing.T) {
 		{Filter: Filter{NodePath: "Fixture/One/Two"}, Query: "Hello"},
 		{Query: "Hel+o", Mode: ModeRegex},
 		{Query: "One*", Mode: ModeGlob},
+		{Queries: []Query{{Text: "Helo", Mode: ModeFuzzy}}},
+		{Queries: []Query{{Text: "Helo", Mode: ModeLiteral, Fuzzy: 1}}},
 		{Query: "Hello", Result: "blocks"},
 		{Query: "Hello", GroupBy: "type"},
 	}
@@ -59,34 +61,43 @@ func TestIndexedSearchMatchesScan(t *testing.T) {
 	}
 }
 
+func TestIndexedSearchFuzzy(t *testing.T) {
+	scene := newScene(t)
+	buildIndex(t, scene)
+	scanned, err := scene.Service.Find(Options{
+		Book: "fixture", Queries: []Query{{Text: "Helo", Mode: ModeFuzzy}}, IndexMode: "off",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := scene.Service.Find(Options{
+		Book: "fixture", Queries: []Query{{Text: "Helo", Mode: ModeFuzzy}}, IndexMode: "force",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !indexed.Index.Used {
+		t.Fatalf("fuzzy did not use the index: %+v", indexed.Index)
+	}
+	if !reflect.DeepEqual(scanned.Matches, indexed.Matches) {
+		t.Fatalf("fuzzy indexed and scanned results differ")
+	}
+	if len(indexed.Matches) != 3 {
+		t.Fatalf("fuzzy matches %+v", indexed.Matches)
+	}
+}
+
 func TestIndexedSearchFallsBackToScan(t *testing.T) {
 	scene := newScene(t)
 	buildIndex(t, scene)
 	result, err := scene.Service.Find(Options{
-		Book: "fixture", Queries: []Query{{Text: "Helo", Mode: ModeFuzzy}},
-		IndexMode: "auto",
+		Book: "fixture", Query: ",,", IndexMode: "auto",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Index.Used {
-		t.Fatal("a fuzzy query used the index")
-	}
-	if len(result.Matches) != 3 {
-		t.Fatalf("scan fallback matches %+v", result.Matches)
-	}
-	chopped, err := scene.Service.Find(Options{
-		Book: "fixture", IndexMode: "auto",
-		Queries: []Query{{Text: "Helo", Mode: ModeLiteral, Fuzzy: 1}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if chopped.Index.Used {
-		t.Fatal("a literal query with --fuzzy used the index")
-	}
-	if len(chopped.Matches) != 3 {
-		t.Fatalf("fuzzy literal matches %+v", chopped.Matches)
+		t.Fatal("a punctuation-only query used the index")
 	}
 }
 
@@ -97,11 +108,11 @@ func TestIndexForceAndVerify(t *testing.T) {
 	}
 	buildIndex(t, scene)
 	if _, err := scene.Service.Find(Options{
-		Book: "fixture", IndexMode: "force", Queries: []Query{{Text: "Helo", Mode: ModeFuzzy}},
+		Book: "fixture", IndexMode: "force", Query: ",,",
 	}); errorCode(err) != "index.unsupported" {
-		t.Fatalf("force fuzzy: %v", err)
+		t.Fatalf("force without a usable literal: %v", err)
 	}
-	path := filepath.Join(scene.Layout.Root, "index", "fixture.json")
+	path := filepath.Join(scene.Layout.Root, "index", "fixture.lines")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +159,20 @@ func TestIndexStaleUnderForce(t *testing.T) {
 	}
 	if _, err := scene.Service.Find(Options{Book: "fixture", Query: "Hello", IndexMode: "auto"}); errorCode(err) != "search.read-failed" {
 		t.Fatalf("a changed container did not fail the scan: %v", err)
+	}
+}
+
+func TestAllNodeResolutionUsesFreshIndex(t *testing.T) {
+	scene := newScene(t)
+	buildIndex(t, scene)
+	result, err := scene.Service.Find(Options{
+		All: true, Query: "Hello", IndexMode: "force", Filter: Filter{Node: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Books) != 1 || result.Books[0] != "fixture" {
+		t.Fatalf("books %+v", result.Books)
 	}
 }
 

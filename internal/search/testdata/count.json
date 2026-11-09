@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "book": "fixture",
+  "query": "Hello",
+  "queries": [
+    {
+      "index": 0,
+      "text": "Hello",
+      "mode": "literal",
+      "fuzzy": 0
+    }
+  ],
+  "join": "or",
+  "fuzzy": 0,
+  "groupBy": "",
+  "ref": null,
+  "index": {
+    "mode": "off",
+    "used": false,
+    "fresh": false
+  },
+  "mode": "literal",
+  "scope": {
+    "mode": "book",
+    "books": [
+      "fixture"
+    ],
+    "fields": [
+      "title",
+      "body"
+    ],
+    "node": "",
+    "block": "",
+    "kinds": [],
+    "types": [],
+    "statuses": [],
+    "part": "",
+    "locked": null
+  },
+  "count": 3,
+  "occurrences": 3,
+  "returned": 0,
+  "truncated": false,
+  "warnings": [
+    {
+      "code": "search.missing-body",
+      "book": "fixture",
+      "message": "block 23 has no body"
+    }
+  ],
+  "books": 1,
+  "blocks": 2,
+  "nodes": 2
+}

@@ -2,6 +2,7 @@ package index
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,18 +112,26 @@ func TestBuildIsDeterministic(t *testing.T) {
 	if _, err := scene.Service.Build("fixture"); err != nil {
 		t.Fatal(err)
 	}
-	first, err := os.ReadFile(scene.Service.bookPath("fixture"))
+	firstPostings, err := os.ReadFile(scene.Service.postingsPath("fixture"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstLines, err := os.ReadFile(scene.Service.linesPath("fixture"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := scene.Service.Build("fixture"); err != nil {
 		t.Fatal(err)
 	}
-	second, err := os.ReadFile(scene.Service.bookPath("fixture"))
+	secondPostings, err := os.ReadFile(scene.Service.postingsPath("fixture"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(first, second) {
+	secondLines, err := os.ReadFile(scene.Service.linesPath("fixture"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstPostings, secondPostings) || !bytes.Equal(firstLines, secondLines) {
 		t.Fatal("two builds of the same input differ")
 	}
 }
@@ -139,7 +148,7 @@ func TestStaleAndCorrupt(t *testing.T) {
 	if err != nil || status.State != "stale" {
 		t.Fatalf("stale status %+v %v", status, err)
 	}
-	if err := os.WriteFile(scene.Service.bookPath("fixture"), []byte("not json"), 0o644); err != nil {
+	if err := os.WriteFile(scene.Service.postingsPath("fixture"), []byte("not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	status, err = scene.Service.Status("fixture")
@@ -161,6 +170,122 @@ func TestOpenBookIsSkipped(t *testing.T) {
 		t.Fatal("an open book was indexed")
 	} else if coded, ok := err.(interface{ ErrorCode() string }); !ok || coded.ErrorCode() != "index.open-book" {
 		t.Fatalf("build error %v", err)
+	}
+}
+
+func TestLoadCachesByFingerprint(t *testing.T) {
+	scene := newScene(t)
+	if _, err := scene.Service.Build("fixture"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := scene.Service.Load("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Entries) == 0 {
+		t.Fatal("empty index")
+	}
+	tampered := `{"version":1,"book":"fixture","entries":[],"tokens":{},"trigrams":{}}`
+	if err := os.WriteFile(scene.Service.postingsPath("fixture"), []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := scene.Service.Load("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cached.Entries) != len(first.Entries) {
+		t.Fatal("the cache did not serve the unchanged fingerprint")
+	}
+	if _, err := scene.Service.Build("fixture"); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, err := scene.Service.Load("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rebuilt.Entries) != len(first.Entries) {
+		t.Fatalf("rebuilt entries %d", len(rebuilt.Entries))
+	}
+}
+
+func TestBuildRespectsTheBookLock(t *testing.T) {
+	scene := newScene(t)
+	release, err := scene.Life.LockBookExclusive("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scene.Service.Build("fixture"); err == nil {
+		release()
+		t.Fatal("build ignored the held book lock")
+	} else if coded, ok := err.(interface{ ErrorCode() string }); !ok || coded.ErrorCode() != "index.lock-failed" {
+		release()
+		t.Fatalf("build error %v", err)
+	}
+	release()
+	if _, err := scene.Service.Build("fixture"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStatusVerifyDetectsAFullHashChange(t *testing.T) {
+	scene := newScene(t)
+	if _, err := scene.Service.Build("fixture"); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := scene.Service.LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Books) != 1 || manifest.Books[0].FullHash == "" {
+		t.Fatalf("manifest %+v", manifest)
+	}
+	manifest.Books[0].FullHash = "0000"
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scene.Service.manifestPath(), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := scene.Service.Status("fixture")
+	if err != nil || status.State != "fresh" {
+		t.Fatalf("cheap status %+v %v", status, err)
+	}
+	verified, err := scene.Service.StatusVerified("fixture")
+	if err != nil || verified.State != "stale" {
+		t.Fatalf("verified status %+v %v", verified, err)
+	}
+}
+
+func TestIndexStatusVerifyCommand(t *testing.T) {
+	scene := newScene(t)
+	if _, err := scene.Service.Build("fixture"); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := scene.Service.LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Books[0].FullHash = "0000"
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scene.Service.manifestPath(), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := run(t, scene.Layout.Root, commandArgs(scene, "index", "status", "--book", "fixture")...)
+	if code != cli.ExitOK || !strings.Contains(stdout, `"state": "fresh"`) {
+		t.Fatalf("plain status %d: %s %s", code, stdout, stderr)
+	}
+	code, stdout, stderr = run(t, scene.Layout.Root,
+		commandArgs(scene, "index", "status", "--book", "fixture", "--verify")...)
+	if code != cli.ExitOK || !strings.Contains(stdout, `"state": "stale"`) {
+		t.Fatalf("verified status %d: %s %s", code, stdout, stderr)
+	}
+	code, _, _ = run(t, scene.Layout.Root, commandArgs(scene, "index", "build", "--book", "fixture", "--verify")...)
+	if code != cli.ExitUsage {
+		t.Fatalf("verify on build exit %d", code)
 	}
 }
 
@@ -222,8 +347,11 @@ func TestIndexCommand(t *testing.T) {
 	if code != cli.ExitOK || !strings.Contains(stdout, `"state": "cleared"`) {
 		t.Fatalf("clear %d: %s %s", code, stdout, stderr)
 	}
-	if _, err := os.Stat(scene.Service.bookPath("fixture")); !os.IsNotExist(err) {
-		t.Fatal("clear left the index file")
+	if _, err := os.Stat(scene.Service.postingsPath("fixture")); !os.IsNotExist(err) {
+		t.Fatal("clear left the postings file")
+	}
+	if _, err := os.Stat(scene.Service.linesPath("fixture")); !os.IsNotExist(err) {
+		t.Fatal("clear left the lines file")
 	}
 }
 

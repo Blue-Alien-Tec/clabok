@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
@@ -38,12 +39,17 @@ func fail(code, format string, args ...any) *Error {
 // Service loads books through the lifecycle, without opening or locking them.
 type Service struct {
 	Lifecycle *lifecycle.Lifecycle
+	bodyLoads atomic.Int64
 }
 
 // New returns a source service.
 func New(life *lifecycle.Lifecycle) *Service {
 	return &Service{Lifecycle: life}
 }
+
+// BodyReads reports how many block bodies this service has read. It is a diagnostic for the indexed
+// search path, which must not parse every body.
+func (service *Service) BodyReads() int64 { return service.bodyLoads.Load() }
 
 // selection controls how much of a book a load reads.
 type selection struct {
@@ -87,13 +93,18 @@ func (service *Service) load(id model.BookID, choice selection) (*Book, error) {
 	if state.Extracted {
 		book, extractErr := readExtracted(paths, choice)
 		if extractErr == nil {
+			service.bodyLoads.Add(int64(len(book.Bodies)))
 			return book, nil
 		}
 		if !errors.Is(extractErr, os.ErrNotExist) {
 			return nil, extractErr
 		}
 	}
-	return readContainer(paths, choice)
+	book, err := readContainer(paths, choice)
+	if err == nil && book != nil {
+		service.bodyLoads.Add(int64(len(book.Bodies)))
+	}
+	return book, err
 }
 
 func readExtracted(paths store.BookPaths, choice selection) (*Book, error) {

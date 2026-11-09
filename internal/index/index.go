@@ -1,6 +1,7 @@
 package index
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,8 +22,9 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
-// Version is the index format version. It is independent of the book schema.
-const Version = 1
+// Version is the index format version. It is independent of the book schema and changes whenever
+// the derived layout changes, so an old index is ignored instead of misread.
+const Version = 2
 
 const (
 	manifestName = "manifest.json"
@@ -57,6 +59,7 @@ type Fingerprint struct {
 type BookEntry struct {
 	ID          model.BookID `json:"id"`
 	Fingerprint Fingerprint  `json:"fingerprint"`
+	FullHash    string       `json:"fullHash,omitempty"`
 	Size        int64        `json:"size"`
 }
 
@@ -66,7 +69,7 @@ type Manifest struct {
 	Books   []BookEntry `json:"books"`
 }
 
-// Entry is one indexed line.
+// Entry is one indexed line with its text.
 type Entry struct {
 	Node  string `json:"node,omitempty"`
 	Block string `json:"block,omitempty"`
@@ -75,16 +78,35 @@ type Entry struct {
 	Text  string `json:"text"`
 }
 
-// BookIndex is the derived content of one book.
-type BookIndex struct {
+// EntryMeta is the postings-side metadata of one line; the text lives in the lines file.
+type EntryMeta struct {
+	Node  string `json:"node,omitempty"`
+	Block string `json:"block,omitempty"`
+	Field string `json:"field"`
+	Line  int    `json:"line"`
+}
+
+// Postings is the section a query reads first: metadata, postings, offsets and missing bodies.
+type Postings struct {
 	Version  int              `json:"version"`
 	Book     model.BookID     `json:"book"`
-	Entries  []Entry          `json:"entries"`
+	Entries  []EntryMeta      `json:"entries"`
 	Tokens   map[string][]int `json:"tokens"`
 	Trigrams map[string][]int `json:"trigrams"`
-	// Missing lists the placed blocks without a body, so the indexed search reports the same
-	// warning as a scan without reading any body.
-	Missing []string `json:"missing,omitempty"`
+	Missing  []string         `json:"missing,omitempty"`
+	Owned    []string         `json:"owned,omitempty"`
+	Offsets  []int64          `json:"offsets"`
+}
+
+// BookIndex is the assembled derived content of one book: postings plus line text.
+type BookIndex struct {
+	Version  int
+	Book     model.BookID
+	Entries  []Entry
+	Tokens   map[string][]int
+	Trigrams map[string][]int
+	Missing  []string
+	Owned    []string
 }
 
 // Status is the observed state of one book index.
@@ -103,20 +125,22 @@ type Service struct {
 	Root      string
 	Now       func() time.Time
 
-	mutex sync.Mutex
-	cache map[model.BookID]cachedIndex
+	mutex      sync.Mutex
+	cache      map[model.BookID]cachedPostings
+	cacheOrder []model.BookID
+	maxCache   int
 }
 
-type cachedIndex struct {
+type cachedPostings struct {
 	fingerprint Fingerprint
-	index       *BookIndex
+	postings    *Postings
 }
 
 // New returns an index service over one store root and registry.
 func New(life *lifecycle.Lifecycle, registry *store.Registry, root string) *Service {
 	return &Service{
 		Lifecycle: life, Registry: registry, Root: root, Now: time.Now,
-		cache: map[model.BookID]cachedIndex{},
+		cache: map[model.BookID]cachedPostings{}, maxCache: 8,
 	}
 }
 
@@ -126,8 +150,12 @@ func (service *Service) manifestPath() string {
 	return filepath.Join(service.directory(), manifestName)
 }
 
-func (service *Service) bookPath(id model.BookID) string {
-	return filepath.Join(service.directory(), string(id)+".json")
+func (service *Service) postingsPath(id model.BookID) string {
+	return filepath.Join(service.directory(), string(id)+".postings.json")
+}
+
+func (service *Service) linesPath(id model.BookID) string {
+	return filepath.Join(service.directory(), string(id)+".lines")
 }
 
 // LoadManifest reads the global manifest. A missing file is an empty manifest.
@@ -166,20 +194,24 @@ func (service *Service) Status(id model.BookID) (Status, error) {
 	if !exists {
 		return Status{Book: id, State: "missing"}, nil
 	}
-	info, statErr := os.Stat(service.bookPath(id))
+	postingsInfo, statErr := os.Stat(service.postingsPath(id))
 	if errors.Is(statErr, os.ErrNotExist) {
 		return Status{Book: id, State: "missing"}, nil
 	}
 	if statErr != nil {
 		return Status{Book: id, State: "corrupt"}, nil
 	}
-	data, readErr := os.ReadFile(service.bookPath(id))
+	linesInfo, linesErr := os.Stat(service.linesPath(id))
+	if linesErr != nil {
+		return Status{Book: id, State: "corrupt", Size: postingsInfo.Size()}, nil
+	}
+	data, readErr := os.ReadFile(service.postingsPath(id))
 	if readErr != nil {
 		return Status{Book: id, State: "corrupt"}, nil
 	}
-	var book BookIndex
-	if decodeErr := json.Unmarshal(data, &book); decodeErr != nil || book.Version != Version {
-		return Status{Book: id, State: "corrupt", Size: info.Size()}, nil
+	var postings Postings
+	if decodeErr := json.Unmarshal(data, &postings); decodeErr != nil || postings.Version != Version {
+		return Status{Book: id, State: "corrupt", Size: postingsInfo.Size()}, nil
 	}
 	paths, pathErr := service.Lifecycle.Paths(id)
 	if pathErr != nil {
@@ -187,11 +219,11 @@ func (service *Service) Status(id model.BookID) (Status, error) {
 	}
 	current, printErr := fingerprint(paths.Container)
 	if printErr != nil {
-		return Status{Book: id, State: "corrupt", Size: info.Size()}, nil
+		return Status{Book: id, State: "corrupt", Size: postingsInfo.Size()}, nil
 	}
 	status := Status{
-		Book: id, Version: book.Version, Size: info.Size(),
-		BuiltAt: info.ModTime().UTC().Format(time.RFC3339),
+		Book: id, Version: postings.Version, Size: postingsInfo.Size() + linesInfo.Size(),
+		BuiltAt: postingsInfo.ModTime().UTC().Format(time.RFC3339),
 	}
 	if current != entry.Fingerprint {
 		status.State = "stale"
@@ -201,11 +233,52 @@ func (service *Service) Status(id model.BookID) (Status, error) {
 	return status, nil
 }
 
-// Build derives and writes the index of one closed book.
+// StatusVerified additionally compares the full container hash; it is the `index status --verify`
+// view and detects a stale index that the cheap fingerprint missed.
+func (service *Service) StatusVerified(id model.BookID) (Status, error) {
+	status, err := service.Status(id)
+	if err != nil || status.State != "fresh" {
+		return status, err
+	}
+	manifest, manifestErr := service.LoadManifest()
+	if manifestErr != nil {
+		return status, nil
+	}
+	entry, exists := findEntry(manifest, id)
+	if !exists || entry.FullHash == "" {
+		status.State = "stale"
+		return status, nil
+	}
+	paths, pathErr := service.Lifecycle.Paths(id)
+	if pathErr != nil {
+		return Status{}, pathErr
+	}
+	current, hashErr := fullHash(paths.Container)
+	if hashErr != nil {
+		return Status{}, fail("index.read-failed", "%v", hashErr)
+	}
+	if current != entry.FullHash {
+		status.State = "stale"
+	}
+	return status, nil
+}
+
+// Build derives and writes the index of one closed book. The postings and the lines file are
+// written first and the manifest last, so a crash leaves a stale entry instead of a partial index.
 func (service *Service) Build(id model.BookID) (Status, error) {
 	if err := service.Lifecycle.RequireClosed(id); err != nil {
 		return Status{}, fail("index.open-book", "book %q is open; close it first", id)
 	}
+	storeRelease, lockErr := service.Lifecycle.LockStore()
+	if lockErr != nil {
+		return Status{}, fail("index.lock-failed", "%v", lockErr)
+	}
+	defer storeRelease()
+	bookRelease, lockErr := service.Lifecycle.LockBookExclusive(id)
+	if lockErr != nil {
+		return Status{}, fail("index.lock-failed", "%v", lockErr)
+	}
+	defer bookRelease()
 	paths, err := service.Lifecycle.Paths(id)
 	if err != nil {
 		return Status{}, err
@@ -218,15 +291,36 @@ func (service *Service) Build(id model.BookID) (Status, error) {
 	if err := os.MkdirAll(service.directory(), 0o755); err != nil {
 		return Status{}, fail("index.write-failed", "%v", err)
 	}
-	data, err := json.MarshalIndent(derived, "", "  ")
+	var lines bytes.Buffer
+	metas := make([]EntryMeta, len(derived.Entries))
+	offsets := make([]int64, len(derived.Entries))
+	for position, entry := range derived.Entries {
+		offsets[position] = int64(lines.Len())
+		lines.WriteString(entry.Text)
+		lines.WriteByte('\n')
+		metas[position] = EntryMeta{
+			Node: entry.Node, Block: entry.Block, Field: entry.Field, Line: entry.Line,
+		}
+	}
+	postings := &Postings{
+		Version: Version, Book: id, Entries: metas, Tokens: derived.Tokens,
+		Trigrams: derived.Trigrams, Missing: derived.Missing, Owned: derived.Owned, Offsets: offsets,
+	}
+	encoded, err := json.MarshalIndent(postings, "", "  ")
 	if err != nil {
 		return Status{}, fail("index.write-failed", "%v", err)
 	}
-	target := service.bookPath(id)
-	if err := store.WriteAtomic(target, append(data, '\n')); err != nil {
+	if err := store.WriteAtomic(service.linesPath(id), lines.Bytes()); err != nil {
 		return Status{}, fail("index.write-failed", "%v", err)
 	}
-	info, err := os.Stat(target)
+	if err := store.WriteAtomic(service.postingsPath(id), append(encoded, '\n')); err != nil {
+		return Status{}, fail("index.write-failed", "%v", err)
+	}
+	postingsInfo, err := os.Stat(service.postingsPath(id))
+	if err != nil {
+		return Status{}, fail("index.write-failed", "%v", err)
+	}
+	linesInfo, err := os.Stat(service.linesPath(id))
 	if err != nil {
 		return Status{}, fail("index.write-failed", "%v", err)
 	}
@@ -234,45 +328,58 @@ func (service *Service) Build(id model.BookID) (Status, error) {
 	if err != nil {
 		return Status{}, fail("index.read-failed", "%v", err)
 	}
+	full, err := fullHash(paths.Container)
+	if err != nil {
+		return Status{}, fail("index.read-failed", "%v", err)
+	}
 	manifest, err := service.LoadManifest()
 	if err != nil {
 		manifest = &Manifest{Version: Version}
 	}
-	upsertEntry(manifest, BookEntry{ID: id, Fingerprint: print, Size: info.Size()})
+	size := postingsInfo.Size() + linesInfo.Size()
+	upsertEntry(manifest, BookEntry{ID: id, Fingerprint: print, FullHash: full, Size: size})
 	if err := service.saveManifest(manifest); err != nil {
 		return Status{}, err
 	}
-	service.mutex.Lock()
-	delete(service.cache, id)
-	service.mutex.Unlock()
+	service.forget(id)
 	return Status{
-		Book: id, State: "fresh", Version: Version, Size: info.Size(),
-		BuiltAt: info.ModTime().UTC().Format(time.RFC3339),
+		Book: id, State: "fresh", Version: Version, Size: size,
+		BuiltAt: postingsInfo.ModTime().UTC().Format(time.RFC3339),
 	}, nil
 }
 
 // Clear removes the index of one book.
 func (service *Service) Clear(id model.BookID) error {
+	storeRelease, lockErr := service.Lifecycle.LockStore()
+	if lockErr != nil {
+		return fail("index.lock-failed", "%v", lockErr)
+	}
+	defer storeRelease()
+	bookRelease, lockErr := service.Lifecycle.LockBookExclusive(id)
+	if lockErr != nil {
+		return fail("index.lock-failed", "%v", lockErr)
+	}
+	defer bookRelease()
 	manifest, err := service.LoadManifest()
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(service.bookPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fail("index.write-failed", "%v", err)
+	for _, path := range []string{service.postingsPath(id), service.linesPath(id)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fail("index.write-failed", "%v", err)
+		}
 	}
 	if removeEntry(manifest, id) {
 		if err := service.saveManifest(manifest); err != nil {
 			return err
 		}
 	}
-	service.mutex.Lock()
-	delete(service.cache, id)
-	service.mutex.Unlock()
+	service.forget(id)
 	return nil
 }
 
-// Load reads the derived index of one book and caches it by fingerprint.
-func (service *Service) Load(id model.BookID) (*BookIndex, error) {
+// LoadPostings reads the postings section and caches it by fingerprint.
+func (service *Service) LoadPostings(id model.BookID) (*Postings, error) {
 	manifest, err := service.LoadManifest()
 	if err != nil {
 		return nil, err
@@ -285,23 +392,116 @@ func (service *Service) Load(id model.BookID) (*BookIndex, error) {
 	cached, cachedOK := service.cache[id]
 	service.mutex.Unlock()
 	if cachedOK && cached.fingerprint == entry.Fingerprint {
-		return cached.index, nil
+		return cached.postings, nil
 	}
-	data, err := os.ReadFile(service.bookPath(id))
+	data, err := os.ReadFile(service.postingsPath(id))
 	if err != nil {
 		return nil, fail("index.missing", "no index for book %q", id)
 	}
-	var derived BookIndex
-	if decodeErr := json.Unmarshal(data, &derived); decodeErr != nil {
+	var postings Postings
+	if decodeErr := json.Unmarshal(data, &postings); decodeErr != nil {
 		return nil, fail("index.corrupt", "%v", decodeErr)
 	}
-	if derived.Version != Version {
-		return nil, fail("index.corrupt", "unsupported index version %d", derived.Version)
+	if postings.Version != Version {
+		return nil, fail("index.corrupt", "unsupported index version %d", postings.Version)
 	}
 	service.mutex.Lock()
-	service.cache[id] = cachedIndex{fingerprint: entry.Fingerprint, index: &derived}
+	service.remember(id, cachedPostings{fingerprint: entry.Fingerprint, postings: &postings})
 	service.mutex.Unlock()
-	return &derived, nil
+	return &postings, nil
+}
+
+// remember stores a postings cache entry and keeps the cache bounded.
+func (service *Service) remember(id model.BookID, entry cachedPostings) {
+	if _, exists := service.cache[id]; !exists {
+		service.cacheOrder = append(service.cacheOrder, id)
+	}
+	service.cache[id] = entry
+	limit := service.maxCache
+	if limit <= 0 {
+		limit = 8
+	}
+	for len(service.cacheOrder) > limit {
+		oldest := service.cacheOrder[0]
+		service.cacheOrder = service.cacheOrder[1:]
+		delete(service.cache, oldest)
+	}
+}
+
+// forget drops the cache entry of one book.
+func (service *Service) forget(id model.BookID) {
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	delete(service.cache, id)
+	for index := range service.cacheOrder {
+		if service.cacheOrder[index] == id {
+			service.cacheOrder = append(service.cacheOrder[:index], service.cacheOrder[index+1:]...)
+			break
+		}
+	}
+}
+
+// ReadTexts reads only the requested entry texts from the lines file.
+func (service *Service) ReadTexts(book model.BookID, postings *Postings, positions []int) (map[int]string, error) {
+	file, err := os.Open(service.linesPath(book))
+	if err != nil {
+		return nil, fail("index.read-failed", "%v", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fail("index.read-failed", "%v", err)
+	}
+	texts := make(map[int]string, len(positions))
+	for _, position := range positions {
+		if position < 0 || position >= len(postings.Offsets) {
+			continue
+		}
+		start := postings.Offsets[position]
+		end := info.Size()
+		if position+1 < len(postings.Offsets) {
+			end = postings.Offsets[position+1]
+		}
+		if end < start {
+			continue
+		}
+		buffer := make([]byte, end-start)
+		count, readErr := file.ReadAt(buffer, start)
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return nil, fail("index.read-failed", "%v", readErr)
+		}
+		texts[position] = strings.TrimSuffix(string(buffer[:count]), "\n")
+	}
+	return texts, nil
+}
+
+// Load assembles the postings and every line text. It is intended for diagnostics and tests; the
+// search path uses LoadPostings and ReadTexts.
+func (service *Service) Load(id model.BookID) (*BookIndex, error) {
+	postings, err := service.LoadPostings(id)
+	if err != nil {
+		return nil, err
+	}
+	positions := make([]int, len(postings.Entries))
+	for position := range positions {
+		positions[position] = position
+	}
+	texts, err := service.ReadTexts(id, postings, positions)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]Entry, len(postings.Entries))
+	for position, meta := range postings.Entries {
+		entries[position] = Entry{
+			Node: meta.Node, Block: meta.Block, Field: meta.Field, Line: meta.Line,
+			Text: texts[position],
+		}
+	}
+	return &BookIndex{
+		Version: postings.Version, Book: postings.Book, Entries: entries,
+		Tokens: postings.Tokens, Trigrams: postings.Trigrams, Missing: postings.Missing,
+		Owned: postings.Owned,
+	}, nil
 }
 
 // Fresh reports whether the index of a closed book matches its container.
@@ -368,6 +568,9 @@ func derive(book *source.Book) *BookIndex {
 	}
 	for _, id := range book.MissingBodies() {
 		derived.Missing = append(derived.Missing, id.String())
+	}
+	for _, id := range book.Manifest.OwnedIDs() {
+		derived.Owned = append(derived.Owned, id.String())
 	}
 	if book.Manifest == nil {
 		return derived
@@ -540,4 +743,18 @@ func hashRange(file *os.File, offset, length int64) (string, error) {
 	}
 	sum := sha256.Sum256(buffer[:count])
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// fullHash hashes the whole container for `index status --verify`.
+func fullHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }

@@ -3,7 +3,7 @@
 
 [CLABOK](Docs/clabok/README.md) · [Document Index](#document-index)
 
-[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 1.5.0-dev](https://img.shields.io/badge/version-1.5.0--dev-green?style=flat-square) [![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)](https://go.dev) ![module: github.com/Blue-Alien-Tec/clabok](https://img.shields.io/badge/module-github.com%2FBlue--Alien--Tec%2Fclabok-lightgrey?style=flat-square) [![remote: Blue-Alien-Tec/clabok](https://img.shields.io/badge/remote-Blue--Alien--Tec%2Fclabok-lightgrey?style=flat-square)](https://github.com/Blue-Alien-Tec/clabok) ![version: 1.5.1-dev](https://img.shields.io/badge/version-1.5.1--dev-green?style=flat-square) [![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 # CLABOK
 

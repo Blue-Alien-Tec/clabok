@@ -126,6 +126,43 @@ func TestRegexEmptyMatch(t *testing.T) {
 	}
 }
 
+func TestFuzzyVariants(t *testing.T) {
+	cases := []struct {
+		query    string
+		text     string
+		distance int
+		want     int
+	}{
+		{"hell", "hello", 1, 1},
+		{"hallo", "hello", 1, 1},
+		{"hxllx", "hello", 2, 1},
+		{"abc", "xyz", 3, 1},
+		{"abc", "xyz", 2, 0},
+		{"grüse", "grüße", 1, 1},
+		{"HELLO", "hello", 1, 1},
+	}
+	for _, test := range cases {
+		matcher, err := Compile(test.query, MatcherOptions{
+			Mode: ModeFuzzy, Fuzzy: test.distance, IgnoreCase: true,
+		})
+		if err != nil {
+			t.Fatalf("%q: %v", test.query, err)
+		}
+		spans := matcher.Match(test.text)
+		if len(spans) != test.want {
+			t.Fatalf("%q on %q: %+v", test.query, test.text, spans)
+		}
+	}
+	phrase, err := Compile("quick brown", MatcherOptions{Mode: ModeFuzzy, Fuzzy: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans := phrase.Match("the quick, brown fox")
+	if len(spans) != 2 || spans[0].Text != "quick" || spans[1].Text != "brown" {
+		t.Fatalf("punctuation phrase %+v", spans)
+	}
+}
+
 func TestMatcherRejects(t *testing.T) {
 	if _, err := Compile("(", MatcherOptions{Mode: ModeRegex}); errorCode(err) != "search.invalid-regex" {
 		t.Fatalf("invalid regex: %v", err)

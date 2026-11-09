@@ -377,13 +377,27 @@ func indexUsable(options Options) bool {
 
 // queryCandidate is the postings lookup of one query.
 type queryCandidate struct {
-	tokens   []string
-	trigrams []string
+	tokens      []string
+	trigrams    []string
+	fuzzyTokens []string
+	distance    int
 }
 
 func queryCandidateFor(query Query) (queryCandidate, bool) {
-	if query.Fuzzy > 0 || query.Mode == ModeFuzzy {
-		return queryCandidate{}, false
+	if query.Mode == ModeFuzzy || query.Fuzzy > 0 {
+		distance := query.Fuzzy
+		if distance == 0 {
+			distance = 1
+		}
+		words := tokenize(query.Text)
+		if len(words) == 0 {
+			return queryCandidate{}, false
+		}
+		tokens := make([]string, len(words))
+		for index, word := range words {
+			tokens[index] = strings.ToLower(word.Text)
+		}
+		return queryCandidate{fuzzyTokens: tokens, distance: distance}, true
 	}
 	switch query.Mode {
 	case ModeLiteral:
@@ -441,7 +455,7 @@ func regexPrefix(pattern string) string {
 	return builder.String()
 }
 
-func candidateSets(derived *index.BookIndex, queries []Query) []map[int]struct{} {
+func candidateSets(postings *index.Postings, queries []Query) []map[int]struct{} {
 	sets := make([]map[int]struct{}, len(queries))
 	for queryIndex, query := range queries {
 		candidate, ok := queryCandidateFor(query)
@@ -450,25 +464,41 @@ func candidateSets(derived *index.BookIndex, queries []Query) []map[int]struct{}
 			continue
 		}
 		set := map[int]struct{}{}
-		if len(candidate.tokens) > 0 {
+		if len(candidate.fuzzyTokens) > 0 {
+			for _, word := range candidate.fuzzyTokens {
+				wordLength := len([]rune(word))
+				for token, positions := range postings.Tokens {
+					tokenLength := len([]rune(token))
+					if wordLength-tokenLength > candidate.distance || tokenLength-wordLength > candidate.distance {
+						continue
+					}
+					if editDistance(word, token) > candidate.distance {
+						continue
+					}
+					for _, position := range positions {
+						set[position] = struct{}{}
+					}
+				}
+			}
+		} else if len(candidate.tokens) > 0 {
 			for _, token := range candidate.tokens {
-				for _, position := range derived.Tokens[token] {
+				for _, position := range postings.Tokens[token] {
 					set[position] = struct{}{}
 				}
 			}
 		} else {
 			first := true
 			for _, trigram := range candidate.trigrams {
-				postings := derived.Trigrams[trigram]
+				positions := postings.Trigrams[trigram]
 				if first {
-					for _, position := range postings {
+					for _, position := range positions {
 						set[position] = struct{}{}
 					}
 					first = false
 					continue
 				}
 				next := map[int]struct{}{}
-				for _, position := range postings {
+				for _, position := range positions {
 					if _, exists := set[position]; exists {
 						next[position] = struct{}{}
 					}
@@ -509,7 +539,7 @@ func selectCandidates(sets []map[int]struct{}, join string) map[int]struct{} {
 
 // searchIndexed answers a search from the derived index without loading bodies.
 func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry, options Options, matchers []*Matcher, fields fieldFlags, join string) error {
-	derived, err := service.Index.Load(entry.ID)
+	postings, err := service.Index.LoadPostings(entry.ID)
 	if err != nil {
 		return fail("index.corrupt", "%v", err)
 	}
@@ -518,7 +548,7 @@ func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry,
 		return loadFailure(err)
 	}
 	result.Books = append(result.Books, string(entry.ID))
-	for _, id := range derived.Missing {
+	for _, id := range postings.Missing {
 		result.Warnings = append(result.Warnings, Warning{
 			Code: "search.missing-body", Book: string(entry.ID),
 			Message: fmt.Sprintf("block %s has no body", id),
@@ -532,19 +562,27 @@ func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry,
 	if filterErr != nil {
 		return filterErr
 	}
-	selected := selectCandidates(candidateSets(derived, options.Queries), join)
+	selected := selectCandidates(candidateSets(postings, options.Queries), join)
 	if selected == nil {
 		return nil
+	}
+	positions := make([]int, 0, len(selected))
+	for position := range selected {
+		positions = append(positions, position)
+	}
+	texts, textErr := service.Index.ReadTexts(entry.ID, postings, positions)
+	if textErr != nil {
+		return fail("index.read-failed", "%v", textErr)
 	}
 	var bodies map[model.ID]string
 	if options.Verify {
 		blocks := make([]model.ID, 0)
 		seen := map[model.ID]struct{}{}
 		for position := range selected {
-			if position >= len(derived.Entries) {
+			if position >= len(postings.Entries) {
 				continue
 			}
-			value := derived.Entries[position]
+			value := postings.Entries[position]
 			if value.Field != "body" || value.Block == "" {
 				continue
 			}
@@ -569,11 +607,11 @@ func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry,
 	lineJoin := options.Result == "" || options.Result == "matches" ||
 		options.Result == "count" || options.GroupBy != ""
 	joinAnd := join == "and" && len(matchers) > 1
-	for position := 0; position < len(derived.Entries); position++ {
+	for position := 0; position < len(postings.Entries); position++ {
 		if _, exists := selected[position]; !exists {
 			continue
 		}
-		value := derived.Entries[position]
+		value := postings.Entries[position]
 		if !fields.has(value.Field) {
 			continue
 		}
@@ -598,7 +636,10 @@ func (service *Service) searchIndexed(result *Result, entry store.RegistryEntry,
 		} else if !set.blockAllowed(info, owner, blockID, nil) {
 			continue
 		}
-		text := value.Text
+		text, exists := texts[position]
+		if !exists {
+			continue
+		}
 		if bodies != nil && value.Field == "body" {
 			if body, exists := bodies[blockID]; exists {
 				lines := splitLines(body)
@@ -809,15 +850,16 @@ func (service *Service) resolveOwners(entries []store.RegistryEntry, options Opt
 	}
 	owners := make([]store.RegistryEntry, 0, 1)
 	warnings := make([]Warning, 0, 1)
+	useIndex := options.IndexMode != "off"
 	for _, entry := range entries {
-		book, err := service.Sources.LoadManifest(entry.ID)
-		if err != nil {
+		owns, ownErr := service.ownsBook(entry, target, useIndex)
+		if ownErr != nil {
 			warnings = append(warnings, Warning{
-				Code: "search.read-failed", Book: string(entry.ID), Message: err.Error(),
+				Code: "search.read-failed", Book: string(entry.ID), Message: ownErr.Error(),
 			})
 			continue
 		}
-		if !ownsID(book, target) {
+		if !owns {
 			continue
 		}
 		owners = append(owners, entry)
@@ -837,6 +879,28 @@ func (service *Service) resolveOwners(entries []store.RegistryEntry, options Opt
 		Message: fmt.Sprintf("%s is owned by %s", target, strings.Join(names, ", ")),
 	})
 	return owners, warnings, nil
+}
+
+// ownsBook reports whether a book owns an ID, using a fresh index when allowed and the manifest
+// otherwise.
+func (service *Service) ownsBook(entry store.RegistryEntry, target model.ID, useIndex bool) (bool, error) {
+	if useIndex {
+		if status, err := service.Index.Status(entry.ID); err == nil && status.State == "fresh" {
+			if postings, loadErr := service.Index.LoadPostings(entry.ID); loadErr == nil {
+				for _, owned := range postings.Owned {
+					if owned == target.String() {
+						return true, nil
+					}
+				}
+				return false, nil
+			}
+		}
+	}
+	book, err := service.Sources.LoadManifest(entry.ID)
+	if err != nil {
+		return false, err
+	}
+	return ownsID(book, target), nil
 }
 
 func ownsID(book *source.Book, id model.ID) bool {

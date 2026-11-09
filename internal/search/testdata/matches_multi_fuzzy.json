@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 2,
+  "book": "fixture",
+  "query": "Hello",
+  "queries": [
+    {
+      "index": 0,
+      "text": "Hello",
+      "mode": "literal",
+      "fuzzy": 0
+    },
+    {
+      "index": 1,
+      "text": "wrold",
+      "mode": "fuzzy",
+      "fuzzy": 1
+    }
+  ],
+  "join": "or",
+  "fuzzy": 1,
+  "groupBy": "",
+  "ref": null,
+  "index": {
+    "mode": "off",
+    "used": false,
+    "fresh": false
+  },
+  "mode": "literal",
+  "scope": {
+    "mode": "book",
+    "books": [
+      "fixture"
+    ],
+    "fields": [
+      "title",
+      "body"
+    ],
+    "node": "",
+    "block": "",
+    "kinds": [],
+    "types": [],
+    "statuses": [],
+    "part": "",
+    "locked": null
+  },
+  "count": 3,
+  "occurrences": 4,
+  "returned": 3,
+  "truncated": false,
+  "warnings": [
+    {
+      "code": "search.missing-body",
+      "book": "fixture",
+      "message": "block 23 has no body"
+    }
+  ],
+  "matches": [
+    {
+      "kind": "block",
+      "book": "fixture",
+      "bookPath": "Docs/fixture",
+      "node": "10",
+      "nodeKind": "chapter",
+      "nodeTitle": "One",
+      "nodePath": "Fixture/One",
+      "block": "11",
+      "blockType": "table",
+      "blockStatus": "wip",
+      "blockLocked": false,
+      "field": "body",
+      "line": 1,
+      "column": 1,
+      "offset": 0,
+      "length": 5,
+      "text": "Hello world",
+      "spans": [
+        {
+          "column": 1,
+          "offset": 0,
+          "length": 5,
+          "text": "Hello",
+          "query": 0,
+          "distance": 0
+        },
+        {
+          "column": 7,
+          "offset": 6,
+          "length": 5,
+          "text": "world",
+          "query": 1,
+          "distance": 1
+        }
+      ],
+      "occurrences": 2
+    },
+    {
+      "kind": "block",
+      "book": "fixture",
+      "bookPath": "Docs/fixture",
+      "node": "10",
+      "nodeKind": "chapter",
+      "nodeTitle": "One",
+      "nodePath": "Fixture/One",
+      "block": "11",
+      "blockType": "table",
+      "blockStatus": "wip",
+      "blockLocked": false,
+      "field": "body",
+      "line": 2,
+      "column": 1,
+      "offset": 0,
+      "length": 5,
+      "text": "Hello again",
+      "spans": [
+        {
+          "column": 1,
+          "offset": 0,
+          "length": 5,
+          "text": "Hello",
+          "query": 0,
+          "distance": 0
+        }
+      ],
+      "occurrences": 1
+    },
+    {
+      "kind": "block",
+      "book": "fixture",
+      "bookPath": "Docs/fixture",
+      "node": "20",
+      "nodeKind": "subchapter",
+      "nodeTitle": "Two",
+      "nodePath": "Fixture/One/Two",
+      "block": "21",
+      "blockStatus": "final",
+      "blockLocked": false,
+      "field": "body",
+      "line": 1,
+      "column": 1,
+      "offset": 0,
+      "length": 5,
+      "text": "Hello there",
+      "spans": [
+        {
+          "column": 1,
+          "offset": 0,
+          "length": 5,
+          "text": "Hello",
+          "query": 0,
+          "distance": 0
+        }
+      ],
+      "occurrences": 1
+    }
+  ]
+}
