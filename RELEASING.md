@@ -25,6 +25,10 @@ a version that does not match `internal/buildinfo.Version` (`0.5.1` or `0.5.1-de
 unformatted Go files or failing vet/test/build. It then creates `v0.5.1` and pushes it. Use `-DryRun`
 (PowerShell) or `--dry-run` (shell) to run every check without creating or pushing the tag.
 
+If the local execution policy blocks PowerShell scripts, run
+`powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1 0.5.1` or use
+`scripts/release.sh`.
+
 Do not re-tag a published version: the Go module proxy keeps the first source for a version. Publish
 the next patch instead.
 
