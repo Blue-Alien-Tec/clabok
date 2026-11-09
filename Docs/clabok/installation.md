@@ -11,25 +11,25 @@
 
 CLABOK is the project; `pecia` is the command-line tool. It builds as a single Go binary with no third-party dependencies. Go 1.27.3 or newer is required; the directive in `go.mod` is the reference, and older Go releases are not supported.
 
-Install the released command with `go install`, or build the working tree from the repository root:
+Install the latest release with `go install`. The command writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that directory to `PATH`. Pin a release with an explicit version:
 
 ```text
 go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
-go build -o pecia ./cmd/pecia
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.0
 ```
 
-On Windows the build produces `pecia.exe`. Put the binary on `PATH`; every example then calls `pecia` from the project root.
+Without Go installed, download a prebuilt archive for Windows, Linux or macOS from the [releases](https://github.com/Blue-Alien-Tec/clabok/releases) page. Each archive contains the binary, the README and the license; `SHA256SUMS` verifies the download. To build from a checkout, run `go build -o pecia ./cmd/pecia`.
 
-Verify the build with the version and the command list:
+Verify the installation with the version and the command list:
 
 ```text
 pecia version
 pecia help
 ```
 
-The grammar check additionally talks to a LanguageTool server over HTTP. That server is optional: without a reachable server or a local Java runtime the check degrades to a reported skip, and installation does not need Java.
+Package managers: `scoop bucket add clabok https://github.com/Blue-Alien-Tec/clabok` then `scoop install clabok`; or `brew tap Blue-Alien-Tec/clabok https://github.com/Blue-Alien-Tec/clabok` then `brew install clabok`. The installation scripts `scripts/install.ps1` and `scripts/install.sh` download a release, verify its checksum and install to a user-local directory.
 
-The CLI is discovery-first: `pecia help` lists the commands, `pecia help <command>` prints one command's usage, and `pecia <command> --help` returns the same information as a JSON payload.
+The grammar check additionally talks to a LanguageTool server over HTTP. That server is optional: without a reachable server or a local Java runtime the check degrades to a reported skip, and installation does not need Java. The CLI is discovery-first: `pecia help` lists the commands, `pecia help <command>` prints one command's usage, and `pecia <command> --help` returns the same information as a JSON payload. Go package documentation is at [pkg.go.dev](https://pkg.go.dev/github.com/Blue-Alien-Tec/clabok).
 
 
 ---

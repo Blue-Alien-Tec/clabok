@@ -1,7 +1,8 @@
 // Package buildinfo carries the product identity and the development version.
 //
-// Version is the single source of truth and is not stamped with -ldflags. A change to this file is
-// the only CI trigger.
+// Version is the development version and the single source of truth in the tree. Release builds
+// override it with -ldflags "-X github.com/Blue-Alien-Tec/clabok/internal/buildinfo.Version=<tag>".
+// A change to this file is the only verify-CI trigger.
 package buildinfo
 
 const (
@@ -12,4 +13,4 @@ const (
 )
 
 // Version is the development version; the milestone close bumps it.
-var Version = "1.6.0-dev"
+var Version = "0.5.0-dev"
