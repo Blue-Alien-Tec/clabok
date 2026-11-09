@@ -48,6 +48,8 @@ test the matrix without a tag.
 - The downloaded binary reports the tag: `pecia version`.
 - `go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1` works; `@latest` resolves to the
   release.
+- If the default proxy still reports the previous version for `@latest`, verify with the pinned
+  `@vX.Y.Z`; the proxy's `@latest` cache refreshes after a short delay.
 
 ## Package manifests
 

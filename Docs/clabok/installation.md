@@ -11,11 +11,11 @@
 
 CLABOK is the project; `pecia` is the command-line tool. It builds as a single Go binary with no third-party dependencies. Go 1.27.3 or newer is required; the directive in `go.mod` is the reference, and older Go releases are not supported.
 
-Install the latest release with `go install`. The command writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that directory to `PATH`. Pin a release with an explicit version:
+Install the current release with `go install`. The command writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that directory to `PATH`. `@latest` tracks the newest release:
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
 go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
 ```
 
 Without Go installed, download a prebuilt archive for Windows, Linux or macOS from the [releases](https://github.com/Blue-Alien-Tec/clabok/releases) page. Each archive contains the binary, the README and the license; `SHA256SUMS` verifies the download. To build from a checkout, run `go build -o pecia ./cmd/pecia`.

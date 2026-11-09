@@ -18,14 +18,15 @@ Go 1.27.3 or newer. The module has no third-party dependencies. A LanguageTool s
 **Install**
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1
 ```
 
 That writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that
-directory to `PATH`. Verify the installation with `pecia version`. Pin a release with:
+directory to `PATH`. Verify the installation with `pecia version`. `@latest` tracks the newest
+release:
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.1
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
 ```
 
 Prebuilt binaries for Windows, Linux and macOS are attached to each
