@@ -31,6 +31,7 @@ internal/       The Go packages, one directory per concern.
   editorial/    Editorial commands for prose, regions, layouts, status and badges.
   grammar/      Grammar client, policy gate, apply and server lifecycle.
   idspace/
+  index/
   jsonstrict/
   library/
   lifecycle/    Open, close, snapshots, rollback and locks.
