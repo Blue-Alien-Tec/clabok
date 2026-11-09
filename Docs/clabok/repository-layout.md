@@ -15,6 +15,9 @@ This appendix shows the tracked directory structure of the repository. It is gen
 ```text
 .github/        CI workflow.
   workflows/
+_CLABOK/
+  clabok/
+  library/
 cmd/
   pecia/        CLI entry point and command wiring.
 Docs/
