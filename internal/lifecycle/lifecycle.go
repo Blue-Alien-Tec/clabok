@@ -392,9 +392,12 @@ func (life *Lifecycle) buildContainer(paths store.BookPaths) (*store.Container, 
 	if validation := book.Validate(); validation != nil {
 		return nil, validation
 	}
-	encoded, err := manifest.Encode()
-	if err != nil {
-		return nil, fail("lifecycle.encode-failed", "%v", err)
+	encoded := manifestData
+	if version, peekErr := model.PeekVersion(manifestData); peekErr != nil || version >= model.Version {
+		encoded, err = manifest.Encode()
+		if err != nil {
+			return nil, fail("lifecycle.encode-failed", "%v", err)
+		}
 	}
 	container := store.New()
 	if err := container.Write(ManifestMember, encoded); err != nil {
@@ -417,6 +420,32 @@ func (life *Lifecycle) buildContainer(paths store.BookPaths) (*store.Container, 
 	return container, nil
 }
 
+// RequireWritableVersion refuses a manifest or body mutation on an older manifest schema. The hint
+// names the migration command; read-only commands and open/close do not call it.
+func (life *Lifecycle) RequireWritableVersion(id model.BookID) error {
+	paths, err := life.layout.Book(id)
+	if err != nil {
+		return err
+	}
+	data, readErr := os.ReadFile(filepath.Join(paths.Dir, ManifestMember))
+	if errors.Is(readErr, os.ErrNotExist) {
+		return nil
+	}
+	if readErr != nil {
+		return fail("lifecycle.read-failed", "%v", readErr)
+	}
+	version, peekErr := model.PeekVersion(data)
+	if peekErr != nil {
+		return nil
+	}
+	if version < model.Version {
+		return fail("migrate.required",
+			"book %q uses manifest version %d; run `pecia migrate apply --book %s --write`",
+			id, version, id)
+	}
+	return nil
+}
+
 // Snapshot records an undo package of the extracted state. The caller must hold the book lock.
 func (life *Lifecycle) Snapshot(id model.BookID, reason string) (rollback.Package, error) {
 	paths, err := life.layout.Book(id)
@@ -425,6 +454,9 @@ func (life *Lifecycle) Snapshot(id model.BookID, reason string) (rollback.Packag
 	}
 	if !extracted(paths) {
 		return rollback.Package{}, fail("lifecycle.not-open", "book %q is not open", id)
+	}
+	if versionErr := life.RequireWritableVersion(id); versionErr != nil {
+		return rollback.Package{}, versionErr
 	}
 	members, err := CollectMembers(paths)
 	if err != nil {
@@ -446,6 +478,9 @@ func (life *Lifecycle) SnapshotBody(id model.BookID, block model.ID, reason stri
 	}
 	if !extracted(paths) {
 		return rollback.Package{}, fail("lifecycle.not-open", "book %q is not open", id)
+	}
+	if versionErr := life.RequireWritableVersion(id); versionErr != nil {
+		return rollback.Package{}, versionErr
 	}
 	var data []byte
 	fileData, readErr := os.ReadFile(filepath.Join(paths.BlocksDir, block.String()+".md"))

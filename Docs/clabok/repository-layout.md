@@ -42,6 +42,7 @@ internal/       The Go packages, one directory per concern.
   repolayout/   Tracked directory tree for the layout block.
   rollback/
   search/
+    testdata/
   source/
   store/        Container, store layout and atomic writes.
     testdata/

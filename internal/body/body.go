@@ -424,6 +424,9 @@ func (service *Service) lock(book model.BookID, block model.ID) (store.BookPaths
 	if _, err := service.Lifecycle.RequireOpen(book); err != nil {
 		return store.BookPaths{}, nil, nil, err
 	}
+	if err := service.Lifecycle.RequireWritableVersion(book); err != nil {
+		return store.BookPaths{}, nil, nil, err
+	}
 	releaseBook, err := service.Lifecycle.LockBookShared(book)
 	if err != nil {
 		return store.BookPaths{}, nil, nil, err

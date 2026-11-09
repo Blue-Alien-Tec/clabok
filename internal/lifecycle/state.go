@@ -9,7 +9,8 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
-const stateVersion = 1
+// StateVersion is the supported open-state schema version.
+const StateVersion = 1
 
 type openFile struct {
 	Version int     `json:"version"`
@@ -49,7 +50,7 @@ func (life *Lifecycle) readOpenFile() (*openFile, error) {
 	path := life.layout.OpenState()
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return &openFile{Version: stateVersion}, nil
+		return &openFile{Version: StateVersion}, nil
 	}
 	if err != nil {
 		return nil, fail("lifecycle.read-failed", "%v", err)
@@ -58,16 +59,16 @@ func (life *Lifecycle) readOpenFile() (*openFile, error) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, fail("lifecycle.state-corrupt", "%s: %v", path, err)
 	}
-	if file.Version != stateVersion {
+	if file.Version != StateVersion {
 		return nil, fail("lifecycle.state-version",
-			"unsupported open state version %d (expected %d)", file.Version, stateVersion)
+			"unsupported open state version %d (expected %d)", file.Version, StateVersion)
 	}
 	return &file, nil
 }
 
 func (life *Lifecycle) writeOpenFile(file *openFile) error {
 	path := life.layout.OpenState()
-	file.Version = stateVersion
+	file.Version = StateVersion
 	if len(file.Books) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fail("lifecycle.write-failed", "%v", err)
@@ -82,4 +83,22 @@ func (life *Lifecycle) writeOpenFile(file *openFile) error {
 		return err
 	}
 	return nil
+}
+
+// PeekStateVersion reads the raw open-state version. A missing file is version 0.
+func PeekStateVersion(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fail("lifecycle.read-failed", "%v", err)
+	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	if decodeErr := json.Unmarshal(data, &header); decodeErr != nil {
+		return 0, fail("lifecycle.state-corrupt", "%v", decodeErr)
+	}
+	return header.Version, nil
 }

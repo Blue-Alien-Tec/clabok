@@ -250,3 +250,21 @@ func orderedEntries(entries []RegistryEntry) []RegistryEntry {
 	}
 	return ordered
 }
+
+// PeekRegistryVersion reads the raw registry version without upgrading it.
+func PeekRegistryVersion(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, fail("store.registry-missing", "%s does not exist", path)
+	}
+	if err != nil {
+		return 0, fail("store.read-failed", "%v", err)
+	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	if decodeErr := json.Unmarshal(data, &header); decodeErr != nil {
+		return 0, fail("store.registry-invalid", "%v", decodeErr)
+	}
+	return header.Version, nil
+}

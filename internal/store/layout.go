@@ -99,7 +99,7 @@ func ReservedBookID(id model.BookID) bool {
 	name := strings.TrimRight(string(id), ". ")
 	switch strings.ToLower(name) {
 	case "rollback", ".coordinator", "library.json", "ids.json", "terms.txt",
-		"pending-terms.json", "open.json", "index":
+		"pending-terms.json", "open.json", "index", "store.json", "migrations":
 		return true
 	}
 	return false

@@ -148,3 +148,21 @@ func highestID(manifest *model.Manifest) model.ID {
 	}
 	return ids[len(ids)-1]
 }
+
+// PeekLedgerVersion reads the raw ledger version without validating or rebuilding it.
+func PeekLedgerVersion(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, fail("idspace.ledger-missing", "%s does not exist", path)
+	}
+	if err != nil {
+		return 0, fail("idspace.read-failed", "%v", err)
+	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	if decodeErr := json.Unmarshal(data, &header); decodeErr != nil {
+		return 0, fail("idspace.ledger-invalid", "%v", decodeErr)
+	}
+	return header.Version, nil
+}
