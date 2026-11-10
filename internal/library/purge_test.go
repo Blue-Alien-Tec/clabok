@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/model"
+	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
 func TestPurgeRemovesTracesAndKeepsOutput(t *testing.T) {
@@ -199,4 +201,96 @@ func TestPurgeRefusesWithoutLibraryRegistry(t *testing.T) {
 	if _, err := os.Stat(ghost); err != nil {
 		t.Fatal("purge removed store data without a library registry")
 	}
+}
+
+func TestUnregisterPurge(t *testing.T) {
+	directory := t.TempDir()
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	paths, err := layoutOf(t, directory).Book("guide")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(directory, "Docs", "guide", "README.md")
+
+	preview := dataOf(t, runOK(t, directory, "book", "unregister", "guide", "--purge", "--dry-run"))
+	if preview["deleted"] != true {
+		t.Fatalf("dry-run payload %v", preview)
+	}
+	if _, statErr := os.Stat(paths.Dir); statErr != nil {
+		t.Fatal("the dry run removed the store directory")
+	}
+	if !registered(t, directory, "guide") {
+		t.Fatal("the dry run removed the registry entry")
+	}
+
+	receipt := dataOf(t, runOK(t, directory, "book", "unregister", "guide", "--purge"))
+	if receipt["deleted"] != true {
+		t.Fatalf("unregister payload %v", receipt)
+	}
+	purge, ok := receipt["purge"].(map[string]any)
+	if !ok || purge["removed"] != true {
+		t.Fatalf("purge payload %v", receipt["purge"])
+	}
+	if registered(t, directory, "guide") {
+		t.Fatal("the book is still registered")
+	}
+	if _, statErr := os.Stat(paths.Dir); !os.IsNotExist(statErr) {
+		t.Fatalf("the store directory survived the purge: %v", statErr)
+	}
+	if _, statErr := os.Stat(output); statErr != nil {
+		t.Fatal("unregister --purge deleted the rendered output")
+	}
+	runOK(t, directory, "sync", "--check")
+}
+
+func TestUnregisterKeepsTracesByDefault(t *testing.T) {
+	directory := t.TempDir()
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	paths, err := layoutOf(t, directory).Book("guide")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := dataOf(t, runOK(t, directory, "book", "unregister", "guide"))
+	if receipt["deleted"] != false {
+		t.Fatalf("unregister payload %v", receipt)
+	}
+	if _, statErr := os.Stat(paths.Dir); statErr != nil {
+		t.Fatal("unregister deleted the store directory without --purge")
+	}
+}
+
+func TestUnregisterPurgeRefusesOpenAndLibrary(t *testing.T) {
+	directory := t.TempDir()
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	paths, err := layoutOf(t, directory).Book("guide")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, directory, "book", "open", "guide")
+	exit, _, stderr := run(t, directory, "book", "unregister", "guide", "--purge")
+	if exit != cli.ExitReject || !strings.Contains(stderr, "library.book-open") {
+		t.Fatalf("exit %d\n%s", exit, stderr)
+	}
+	if _, statErr := os.Stat(paths.Dir); statErr != nil {
+		t.Fatal("the refused unregister removed the store directory")
+	}
+	runOK(t, directory, "book", "close", "guide")
+	exit, _, stderr = run(t, directory, "book", "unregister", "library", "--purge")
+	if exit != cli.ExitReject || !strings.Contains(stderr, "library.immovable") {
+		t.Fatalf("exit %d\n%s", exit, stderr)
+	}
+}
+
+// registered reports whether the library registry still contains the book.
+func registered(t *testing.T, directory string, id model.BookID) bool {
+	t.Helper()
+	registry, err := store.LoadRegistry(layoutOf(t, directory).Registry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exists := registry.Find(id)
+	return exists
 }

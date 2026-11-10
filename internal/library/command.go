@@ -142,11 +142,18 @@ func renameBookCommand() *cli.Command {
 }
 
 func unregisterBookCommand() *cli.Command {
+	var purge bool
 	return &cli.Command{
 		Name:     "book unregister",
-		Summary:  "remove a book from the registry without deleting anything",
-		Usage:    "pecia book unregister <book-id>",
+		Summary:  "remove a book from the registry; --purge also deletes its working data",
+		Usage:    "pecia book unregister <book-id> [--purge]",
 		Mutating: true,
+		Flags: func(env *cli.Env) *flag.FlagSet {
+			set := env.NewFlagSet("book unregister")
+			set.BoolVar(&purge, "purge", false,
+				"also delete the working data (store, rollback pool, temp inputs, lock files)")
+			return set
+		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			id, idErr := bookIDArg(args, "book unregister")
 			if idErr != nil {
@@ -156,7 +163,7 @@ func unregisterBookCommand() *cli.Command {
 			if serviceErr != nil {
 				return nil, serviceErr
 			}
-			result, unregisterErr := service.Unregister(id, env.Globals.DryRun)
+			result, unregisterErr := service.Unregister(id, purge, env.Globals.DryRun)
 			if unregisterErr != nil {
 				return nil, unregisterErr
 			}

@@ -377,25 +377,36 @@ func (service *Service) Rename(options RenameOptions, dryRun bool) (RenameResult
 
 // UnregisterResult is the receipt of `book unregister`.
 type UnregisterResult struct {
-	DryRun  bool   `json:"dryRun"`
-	ID      string `json:"id"`
-	Path    string `json:"path"`
-	Changed bool   `json:"changed"`
-	Deleted bool   `json:"deleted"`
+	DryRun  bool         `json:"dryRun"`
+	ID      string       `json:"id"`
+	Path    string       `json:"path"`
+	Changed bool         `json:"changed"`
+	Deleted bool         `json:"deleted"`
+	Purge   *PurgeResult `json:"purge,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
 func (result UnregisterResult) DryRunResult() bool { return result.DryRun }
 
 func (result UnregisterResult) Text() string {
-	if result.DryRun {
-		return fmt.Sprintf("dry run: unregister %s (output stays at %s)", result.ID, result.Path)
+	if result.Purge == nil {
+		if result.DryRun {
+			return fmt.Sprintf("dry run: unregister %s (output stays at %s)", result.ID, result.Path)
+		}
+		return fmt.Sprintf("%s: unregistered; nothing deleted, output stays at %s", result.ID, result.Path)
 	}
-	return fmt.Sprintf("%s: unregistered; nothing deleted, output stays at %s", result.ID, result.Path)
+	summary := traceSummary(*result.Purge)
+	if result.DryRun {
+		return fmt.Sprintf("dry run: unregister %s and purge %s (output stays at %s)",
+			result.ID, summary, result.Path)
+	}
+	return fmt.Sprintf("%s: unregistered; purged %s; the rendered output stays at %s",
+		result.ID, summary, result.Path)
 }
 
-// Unregister removes the registry entry and deletes nothing.
-func (service *Service) Unregister(id model.BookID, dryRun bool) (UnregisterResult, *cli.Error) {
+// Unregister removes the registry entry and deletes nothing. With purge it also deletes the working
+// data in the same invocation; the rendered output is never touched.
+func (service *Service) Unregister(id model.BookID, purge bool, dryRun bool) (UnregisterResult, *cli.Error) {
 	storeRelease, lockErr := service.Life.LockStore()
 	if lockErr != nil {
 		return UnregisterResult{}, cli.AsError(lockErr)
@@ -423,6 +434,17 @@ func (service *Service) Unregister(id model.BookID, dryRun bool) (UnregisterResu
 	}
 	result := UnregisterResult{DryRun: dryRun, ID: string(id), Path: entry.Path, Changed: true, Deleted: false}
 	if dryRun {
+		// purgeLocked takes the book lock itself, so release ours before previewing. A preview
+		// writes nothing, so the early release changes no state.
+		_ = bookRelease()
+		if purge {
+			preview, previewErr := service.purgeLocked(id, true, true)
+			if previewErr != nil {
+				return UnregisterResult{}, previewErr
+			}
+			result.Deleted = preview.Removed
+			result.Purge = &preview
+		}
 		return result, nil
 	}
 	registry.Remove(id)
@@ -431,6 +453,18 @@ func (service *Service) Unregister(id model.BookID, dryRun bool) (UnregisterResu
 	}
 	if refreshErr := service.refreshLibrary(registry, false); refreshErr != nil {
 		return result, refreshErr
+	}
+	if purge {
+		// The entry is gone, so purgeLocked passes its registered-book check. It re-takes the
+		// book lock that this function still holds, hence the release first.
+		_ = bookRelease()
+		purged, purgeErr := service.purgeLocked(id, false, false)
+		if purgeErr != nil {
+			return result, purgeErr.WithHint(
+				"the entry is removed; run `pecia book purge " + string(id) + "` to finish the cleanup")
+		}
+		result.Deleted = purged.Removed
+		result.Purge = &purged
 	}
 	return result, nil
 }
@@ -457,6 +491,16 @@ func (result PurgeResult) Text() string {
 		}
 		return fmt.Sprintf("%s: nothing to purge", result.ID)
 	}
+	if result.DryRun {
+		return fmt.Sprintf("dry run: purge %s (%s); the rendered output is untouched",
+			result.ID, traceSummary(result))
+	}
+	return fmt.Sprintf("%s: purged %s; the rendered output is untouched",
+		result.ID, traceSummary(result))
+}
+
+// traceSummary names what a purge removed or would remove.
+func traceSummary(result PurgeResult) string {
 	parts := make([]string, 0, 4)
 	if result.Store {
 		parts = append(parts, "store")
@@ -470,12 +514,10 @@ func (result PurgeResult) Text() string {
 	if result.Locks > 0 {
 		parts = append(parts, fmt.Sprintf("%d lock file(s)", result.Locks))
 	}
-	if result.DryRun {
-		return fmt.Sprintf("dry run: purge %s (%s); the rendered output is untouched",
-			result.ID, strings.Join(parts, ", "))
+	if len(parts) == 0 {
+		return "nothing"
 	}
-	return fmt.Sprintf("%s: purged %s; the rendered output is untouched",
-		result.ID, strings.Join(parts, ", "))
+	return strings.Join(parts, ", ")
 }
 
 // Purge deletes the working data of an unregistered book: its store directory, rollback pool,
@@ -500,6 +542,13 @@ func (service *Service) Purge(id model.BookID, dryRun bool) (PurgeResult, *cli.E
 		return result, cli.AsError(lockErr)
 	}
 	defer func() { _ = storeRelease() }()
+	return service.purgeLocked(id, dryRun, false)
+}
+
+// purgeLocked is the body of Purge with the store lock already held. allowRegistered previews a purge
+// for a book whose entry is about to be removed by the same invocation.
+func (service *Service) purgeLocked(id model.BookID, dryRun bool, allowRegistered bool) (PurgeResult, *cli.Error) {
+	result := PurgeResult{DryRun: dryRun, ID: string(id)}
 
 	registry, registryErr := service.loadRegistry()
 	if registryErr != nil {
@@ -521,6 +570,9 @@ func (service *Service) Purge(id model.BookID, dryRun bool) (PurgeResult, *cli.E
 		}
 		if entry.Kind == store.KindLibrary {
 			return result, cli.Reject("library.immovable", "the library book %q cannot be purged", entry.ID)
+		}
+		if allowRegistered {
+			break
 		}
 		return result, cli.Reject("library.book-registered", "book %q is still registered", entry.ID).
 			WithHint("run `pecia book unregister " + string(entry.ID) + "` first")
