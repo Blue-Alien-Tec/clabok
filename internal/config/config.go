@@ -31,6 +31,7 @@ type rollbackSection struct {
 type grammarSection struct {
 	Endpoint *string `json:"endpoint,omitempty"`
 	Policy   *string `json:"policy,omitempty"`
+	Timeout  *string `json:"timeout,omitempty"`
 }
 
 type daemonSection struct {
@@ -67,6 +68,7 @@ type builtinDefaults struct {
 	BookPointLimit  int
 	GrammarEndpoint string
 	GrammarPolicy   string
+	GrammarTimeout  string
 	ConcurrencyMode string
 	DaemonSocket    string
 }
@@ -79,6 +81,7 @@ var builtin = builtinDefaults{
 	BookPointLimit:  3,
 	GrammarEndpoint: "",
 	GrammarPolicy:   "block",
+	GrammarTimeout:  "5s",
 	ConcurrencyMode: "file",
 	DaemonSocket:    "",
 }
@@ -132,6 +135,13 @@ func (f *file) grammarPolicy() string {
 	return ""
 }
 
+func (f *file) grammarTimeout() string {
+	if f.Grammar != nil && f.Grammar.Timeout != nil {
+		return *f.Grammar.Timeout
+	}
+	return ""
+}
+
 func (f *file) concurrencyMode() string {
 	if f.Concurrency != nil && f.Concurrency.Mode != nil {
 		return *f.Concurrency.Mode
@@ -166,7 +176,8 @@ func (f *file) prune() {
 	if f.Rollback != nil && f.Rollback.UndoLimit == nil && f.Rollback.BookPointLimit == nil {
 		f.Rollback = nil
 	}
-	if f.Grammar != nil && f.Grammar.Endpoint == nil && f.Grammar.Policy == nil {
+	if f.Grammar != nil && f.Grammar.Endpoint == nil && f.Grammar.Policy == nil &&
+		f.Grammar.Timeout == nil {
 		f.Grammar = nil
 	}
 	if f.Concurrency != nil {

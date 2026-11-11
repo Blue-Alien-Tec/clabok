@@ -295,8 +295,9 @@ func applyCommand() *cli.Command {
 			if configErr != nil {
 				return nil, configErr
 			}
-			gate := grammar.NewGate(values.GrammarEndpoint,
-				grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()))
+			gate := grammar.NewGateTimeout(values.GrammarEndpoint,
+				grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()),
+				values.GrammarTimeout)
 			if proseErr := checkPlanProse(gate, steps); proseErr != nil {
 				return nil, proseErr
 			}

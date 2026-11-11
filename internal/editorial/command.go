@@ -28,15 +28,16 @@ func Register(registry *cli.Registry) {
 }
 
 type payload struct {
-	DryRun  bool            `json:"dryRun"`
-	Book    string          `json:"book"`
-	Kind    string          `json:"kind"`
-	Target  string          `json:"target,omitempty"`
-	Block   string          `json:"block,omitempty"`
-	Parent  string          `json:"parent,omitempty"`
-	Order   []string        `json:"order,omitempty"`
-	Changed bool            `json:"changed"`
-	Grammar *grammar.Report `json:"grammar,omitempty"`
+	DryRun   bool              `json:"dryRun"`
+	Book     string            `json:"book"`
+	Kind     string            `json:"kind"`
+	Target   string            `json:"target,omitempty"`
+	Block    string            `json:"block,omitempty"`
+	Parent   string            `json:"parent,omitempty"`
+	Order    []string          `json:"order,omitempty"`
+	Changed  bool              `json:"changed"`
+	Grammar  *grammar.Report   `json:"grammar,omitempty"`
+	Warnings []grammar.Warning `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -71,8 +72,9 @@ func evaluateProse(env *cli.Env, text string) (grammar.Report, *cli.Error) {
 	if lifeErr != nil {
 		return grammar.Report{}, lifeErr
 	}
-	gate := grammar.NewGate(values.GrammarEndpoint,
-		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()))
+	gate := grammar.NewGateTimeout(values.GrammarEndpoint,
+		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()),
+		values.GrammarTimeout)
 	return gate.Evaluate(context.Background(), 0, text), nil
 }
 
@@ -168,6 +170,7 @@ func proseCommand() *cli.Command {
 			}
 			result := payloadOf(receipt, env.Globals.DryRun)
 			result.Grammar = grammarPtr(report)
+			result.Warnings = report.Warnings()
 			return &cli.Result{Data: result}, nil
 		},
 	}
@@ -239,6 +242,7 @@ func regionCommand() *cli.Command {
 				}
 				result := payloadOf(receipt, env.Globals.DryRun)
 				result.Grammar = grammarPtr(report)
+				result.Warnings = report.Warnings()
 				return &cli.Result{Data: result}, nil
 			case "notes", "remove":
 				targetKind, kindErr := parseTargetKind(target)
@@ -276,6 +280,7 @@ func regionCommand() *cli.Command {
 				}
 				result := payloadOf(receipt, env.Globals.DryRun)
 				result.Grammar = grammarPtr(report)
+				result.Warnings = report.Warnings()
 				return &cli.Result{Data: result}, nil
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",

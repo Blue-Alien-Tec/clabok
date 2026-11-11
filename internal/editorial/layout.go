@@ -14,14 +14,15 @@ import (
 )
 
 type repoLayoutPayload struct {
-	DryRun  bool            `json:"dryRun"`
-	Book    string          `json:"book"`
-	Action  string          `json:"action"`
-	Anchor  string          `json:"anchor,omitempty"`
-	Path    string          `json:"path,omitempty"`
-	Depth   int             `json:"depth,omitempty"`
-	Changed bool            `json:"changed"`
-	Grammar *grammar.Report `json:"grammar,omitempty"`
+	DryRun   bool              `json:"dryRun"`
+	Book     string            `json:"book"`
+	Action   string            `json:"action"`
+	Anchor   string            `json:"anchor,omitempty"`
+	Path     string            `json:"path,omitempty"`
+	Depth    int               `json:"depth,omitempty"`
+	Changed  bool              `json:"changed"`
+	Grammar  *grammar.Report   `json:"grammar,omitempty"`
+	Warnings []grammar.Warning `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -201,6 +202,7 @@ func layoutCommand() *cli.Command {
 					Path: target, Changed: receipt.Changed,
 				}
 				result.Grammar = grammarPtr(report)
+				result.Warnings = report.Warnings()
 				return &cli.Result{Data: result}, nil
 			case "show":
 				layoutConfig, anchor, readErr := service.RepoLayout(bookID)

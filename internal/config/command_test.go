@@ -440,3 +440,32 @@ func TestModeUnsetBlockedByOpenBook(t *testing.T) {
 		t.Fatalf("unexpected reject %s", stderr)
 	}
 }
+
+func TestGrammarTimeoutKey(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+
+	code, _, stderr := runCommand(t, "config", "set", "grammar.timeout", "2s")
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	code, stdout, stderr := runCommand(t, "config", "get", "grammar.timeout")
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var got struct {
+		Value  any    `json:"value"`
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal(parseEnvelope(t, stdout).Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Value != "2s" || got.Source != "file" {
+		t.Fatalf("timeout %+v", got)
+	}
+
+	code, _, stderr = runCommand(t, "config", "set", "grammar.timeout", "0s")
+	if code == cli.ExitOK || !strings.Contains(stderr, "grammar.timeout") {
+		t.Fatalf("a zero timeout must be rejected: %s", stderr)
+	}
+}

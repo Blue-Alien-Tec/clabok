@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,8 +27,69 @@ const DefaultEndpoint = "http://127.0.0.1:8081/v2/check"
 // Language is the fixed check language. The endpoint is the only grammar config key.
 const Language = "en-US"
 
-// ErrUnavailable reports a server that did not answer with a usable check result.
+// DefaultTimeout is the default watchdog interval. The check cap is WatchdogIntervals times the
+// interval; a check that outlives the cap is reported as grammar.timeout.
+const DefaultTimeout = 5 * time.Second
+
+// WatchdogIntervals is the number of consecutive alive intervals a request may run before the
+// watchdog cancels it. The cap is fixed so the timeout stays a single configuration key.
+const WatchdogIntervals = 3
+
+// Stable reasons carried by a skipped check.
+const (
+	ReasonTimeout     = "grammar.timeout"
+	ReasonUnreachable = "grammar.unreachable"
+	ReasonResponse    = "grammar.response"
+	ReasonStartFailed = "grammar.start-failed"
+)
+
+// ErrUnavailable is the compatibility sentinel for every transport failure. New code discriminates
+// with ErrTimeout, ErrUnreachable and ErrResponse; the gate never uses the sentinel itself.
 var ErrUnavailable = errors.New("grammar server unavailable")
+
+type sentinelError struct{ message string }
+
+func (sentinel *sentinelError) Error() string { return sentinel.message }
+
+func (sentinel *sentinelError) Unwrap() error { return ErrUnavailable }
+
+// ErrTimeout reports that the watchdog cap was reached while the server stayed alive on every probe.
+var ErrTimeout error = &sentinelError{message: "grammar check timed out"}
+
+// ErrUnreachable reports that no connection could be established.
+var ErrUnreachable error = &sentinelError{message: "grammar server unreachable"}
+
+// ErrResponse reports a server that answered without a usable check result.
+type ErrResponse struct {
+	Status int
+	Detail string
+}
+
+func (response *ErrResponse) Error() string {
+	if response.Detail != "" {
+		return fmt.Sprintf("grammar server error (HTTP %d): %s", response.Status, response.Detail)
+	}
+	return fmt.Sprintf("grammar server error (HTTP %d)", response.Status)
+}
+
+func (response *ErrResponse) Unwrap() error { return ErrUnavailable }
+
+// ReasonFor maps a transport failure to its stable grammar.* reason.
+func ReasonFor(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrTimeout):
+		return ReasonTimeout
+	case errors.Is(err, ErrUnreachable):
+		return ReasonUnreachable
+	}
+	var response *ErrResponse
+	if errors.As(err, &response) {
+		return ReasonResponse
+	}
+	return ReasonUnreachable
+}
 
 // Policy is the gate decision for a finding.
 type Policy string
@@ -66,13 +128,33 @@ type Finding struct {
 type Report struct {
 	Policy   string    `json:"policy,omitempty"`
 	Checked  bool      `json:"checked"`
+	Reason   string    `json:"reason,omitempty"`
 	Degraded string    `json:"degraded,omitempty"`
 	Findings []Finding `json:"findings,omitempty"`
 }
 
-// Blocked reports whether the policy refuses the write.
+// Blocked reports whether the policy refuses the write. Only findings block a write; an unchecked
+// check is a skip, never a refusal.
 func (report Report) Blocked() bool {
 	return report.Policy == string(PolicyBlock) && len(report.Findings) > 0
+}
+
+// Unchecked reports whether the check did not produce a complete result. A skipped check always
+// carries a Reason.
+func (report Report) Unchecked() bool { return !report.Checked }
+
+// Warning is one non-blocking condition of a command payload.
+type Warning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// Warnings returns the single warning of an unchecked check, or nothing for a complete check.
+func (report Report) Warnings() []Warning {
+	if report.Checked || report.Reason == "" {
+		return nil
+	}
+	return []Warning{{Code: report.Reason, Message: report.Degraded}}
 }
 
 // Client talks to one LanguageTool endpoint.
@@ -80,18 +162,52 @@ type Client struct {
 	Endpoint string
 	HTTP     *http.Client
 	Terms    []string
+	// Timeout is the watchdog interval. A non-positive value uses DefaultTimeout.
+	Timeout time.Duration
 }
 
-// NewClient returns a client with the default timeout. An empty endpoint uses the local default.
+// NewClient returns a client with the default watchdog interval. An empty endpoint uses the local
+// default. The request carries no hard deadline: the watchdog decides when a check is given up.
 func NewClient(endpoint string, terms []string) *Client {
+	return NewClientTimeout(endpoint, terms, 0)
+}
+
+// NewClientTimeout returns a client with an explicit watchdog interval. A non-positive timeout uses
+// DefaultTimeout.
+func NewClientTimeout(endpoint string, terms []string, timeout time.Duration) *Client {
 	if strings.TrimSpace(endpoint) == "" {
 		endpoint = DefaultEndpoint
 	}
-	return &Client{
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	client := &Client{
 		Endpoint: strings.TrimSpace(endpoint),
-		HTTP:     &http.Client{Timeout: 5 * time.Second},
-		Terms:    terms,
+		HTTP: &http.Client{Transport: &http.Transport{
+			Proxy:       http.ProxyFromEnvironment,
+			DialContext: dialer.DialContext,
+		}},
+		Terms:   terms,
+		Timeout: timeout,
 	}
+	return client
+}
+
+// Interval returns the effective watchdog interval.
+func (client *Client) Interval() time.Duration {
+	if client.Timeout > 0 {
+		return client.Timeout
+	}
+	return DefaultTimeout
+}
+
+// Cap returns the effective watchdog cap of one request.
+func (client *Client) Cap() time.Duration { return WatchdogIntervals * client.Interval() }
+
+// Watchdog describes the effective interval and its cap for a configured timeout.
+func Watchdog(timeout time.Duration) (time.Duration, time.Duration) {
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	return timeout, WatchdogIntervals * timeout
 }
 
 type matchesPayload struct {
@@ -108,56 +224,173 @@ type matchesPayload struct {
 	} `json:"matches"`
 }
 
-// Check sends the text and returns the unsuppressed findings in server order.
+// wireMatch is one LanguageTool match before the offset mapping.
+type wireMatch struct {
+	Message string
+	Offset  int
+	Length  int
+	RuleID  string
+	Values  []string
+}
+
+// Check sends the text and returns the unsuppressed findings in body order. Large bodies are
+// checked in paragraph chunks; a failure of any chunk leaves the whole check unchecked, so a
+// half-checked body is never reported as checked.
 func (client *Client) Check(ctx context.Context, text string) ([]Finding, error) {
-	form := url.Values{}
 	prepared := prepareText(text)
-	form.Set("text", prepared.text)
-	form.Set("language", Language)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.Endpoint,
-		strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, ErrUnavailable
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := client.httpClient().Do(request)
-	if err != nil {
-		return nil, ErrUnavailable
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, ErrUnavailable
-	}
-	var payload matchesPayload
-	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&payload); err != nil {
-		return nil, ErrUnavailable
-	}
-	findings := make([]Finding, 0, len(payload.Matches))
-	for _, match := range payload.Matches {
-		start := prepared.original(match.Offset)
-		end := prepared.original(match.Offset + match.Length)
-		if start < 0 || end <= start || prepared.inCode(start) {
-			continue
+	findings := make([]Finding, 0)
+	for _, span := range chunkPrepared(prepared.text, chunkBytes) {
+		matches, err := client.fetch(ctx, prepared.text[span.start:span.end])
+		if err != nil {
+			return nil, err
 		}
-		offending := segment(text, start, end-start)
-		replacements := make([]string, 0, len(match.Replacements))
-		for _, replacement := range match.Replacements {
-			replacements = append(replacements, replacement.Value)
+		for _, match := range matches {
+			match.Offset += span.start
+			if finding, ok := client.finding(text, prepared, match); ok {
+				findings = append(findings, finding)
+			}
 		}
-		if client.suppressed(offending, replacements) {
-			continue
-		}
-		line, column := position(text, start)
-		findings = append(findings, Finding{
-			Line: line, Column: column, Offset: start, Length: end - start,
-			Rule: match.Rule.ID, Message: match.Message, Offending: offending,
-			Replacements: replacements,
-		})
 	}
+	findings = mergeFindings(findings)
 	for index := range findings {
 		findings[index].Index = index + 1
 	}
 	return findings, nil
+}
+
+// finding maps one match from prepared space back to the body.
+func (client *Client) finding(text string, prepared preparedText, match wireMatch) (Finding, bool) {
+	start := prepared.original(match.Offset)
+	end := prepared.original(match.Offset + match.Length)
+	if start < 0 || end <= start || prepared.inCode(start) {
+		return Finding{}, false
+	}
+	offending := segment(text, start, end-start)
+	if client.suppressed(offending, match.Values) {
+		return Finding{}, false
+	}
+	line, column := position(text, start)
+	return Finding{
+		Line: line, Column: column, Offset: start, Length: end - start,
+		Rule: match.RuleID, Message: match.Message, Offending: offending,
+		Replacements: match.Values,
+	}, true
+}
+
+// fetch runs one request under the watchdog. The request stays alive across alive intervals; only a
+// dead probe starts a new attempt, and only the cap cancels a request against a live server.
+func (client *Client) fetch(ctx context.Context, text string) ([]wireMatch, error) {
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type outcome struct {
+		matches []wireMatch
+		err     error
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		matches, err := client.post(requestCtx, text)
+		result <- outcome{matches: matches, err: err}
+	}()
+	base := baseURL(client.Endpoint)
+	interval := client.Interval()
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	alive, failed := 0, 0
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ErrTimeout
+		case received := <-result:
+			return received.matches, received.err
+		case <-timer.C:
+			select {
+			case received := <-result:
+				return received.matches, received.err
+			default:
+			}
+			if reachable(base) {
+				alive++
+				failed = 0
+				if alive >= WatchdogIntervals {
+					cancel()
+					return nil, ErrTimeout
+				}
+			} else {
+				failed++
+				alive = 0
+				if failed >= 2 {
+					cancel()
+					return nil, ErrUnreachable
+				}
+			}
+			timer.Reset(interval)
+		}
+	}
+}
+
+// post sends one form request and classifies the failure.
+func (client *Client) post(ctx context.Context, text string) ([]wireMatch, error) {
+	form := url.Values{}
+	form.Set("text", text)
+	form.Set("language", Language)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.Endpoint,
+		strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := client.httpClient().Do(request)
+	if err != nil {
+		return nil, classifyTransport(ctx, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, &ErrResponse{Status: response.StatusCode}
+	}
+	var payload matchesPayload
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&payload); err != nil {
+		return nil, &ErrResponse{Status: response.StatusCode, Detail: err.Error()}
+	}
+	matches := make([]wireMatch, 0, len(payload.Matches))
+	for _, match := range payload.Matches {
+		values := make([]string, 0, len(match.Replacements))
+		for _, replacement := range match.Replacements {
+			values = append(values, replacement.Value)
+		}
+		matches = append(matches, wireMatch{
+			Message: match.Message, Offset: match.Offset, Length: match.Length,
+			RuleID: match.Rule.ID, Values: values,
+		})
+	}
+	return matches, nil
+}
+
+// classifyTransport separates a canceled watchdog from a dial failure. A dial timeout is an
+// unreachable server, not a slow check.
+func classifyTransport(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ErrTimeout
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Op == "dial" {
+			return fmt.Errorf("%w: %v", ErrUnreachable, err)
+		}
+		return ErrTimeout
+	}
+	return fmt.Errorf("%w: %v", ErrUnreachable, err)
+}
+
+// baseURL derives the liveness endpoint of a check URL.
+func baseURL(endpoint string) string {
+	if base, _, err := parseEndpoint(endpoint); err == nil {
+		return base
+	}
+	if trimmed, ok := strings.CutSuffix(endpoint, "/v2/check"); ok {
+		return trimmed
+	}
+	return strings.TrimRight(endpoint, "/")
 }
 
 func (client *Client) httpClient() *http.Client {
@@ -196,12 +429,17 @@ type Gate struct {
 
 // NewGate returns a gate for the configured endpoint and policy.
 func NewGate(endpoint string, policy Policy, terms []string) *Gate {
-	return &Gate{Client: NewClient(endpoint, terms), Policy: policy}
+	return NewGateTimeout(endpoint, policy, terms, 0)
 }
 
-// Evaluate runs the check. When the endpoint is unreachable the gate starts the shared server and
-// checks once more; a server that cannot be started degrades to a one-line skip report. There is no
-// silent skip: every prose write passes through this gate.
+// NewGateTimeout returns a gate with an explicit watchdog interval.
+func NewGateTimeout(endpoint string, policy Policy, terms []string, timeout time.Duration) *Gate {
+	return &Gate{Client: NewClientTimeout(endpoint, terms, timeout), Policy: policy}
+}
+
+// Evaluate runs the check. A request that outlived the watchdog cap is a skip with a truthful
+// reason; only an unreachable server triggers the shared start attempt, and a server that cannot be
+// started degrades to a reported skip. There is no silent skip: every prose write passes this gate.
 func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text string) Report {
 	report := Report{Policy: string(PolicyBlock)}
 	if gate == nil || gate.Client == nil {
@@ -210,15 +448,16 @@ func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text string) Rep
 	report.Policy = string(gate.Policy)
 	findings, err := gate.Client.Check(ctx, text)
 	if err != nil {
+		if ReasonFor(err) != ReasonUnreachable {
+			return gate.skipped(ReasonFor(err), err)
+		}
 		if startErr := gate.start(); startErr != nil {
-			report.Degraded = fmt.Sprintf("grammar check skipped: %v", startErr)
-			return report
+			return gate.skipped(ReasonStartFailed, startErr)
 		}
 		findings, err = gate.Client.Check(ctx, text)
-	}
-	if err != nil {
-		report.Degraded = fmt.Sprintf("grammar check skipped: %v", err)
-		return report
+		if err != nil {
+			return gate.skipped(ReasonFor(err), err)
+		}
 	}
 	for index := range findings {
 		findings[index].Block = block
@@ -226,6 +465,15 @@ func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text string) Rep
 	report.Checked = true
 	report.Findings = findings
 	return report
+}
+
+// skipped builds an unchecked report. The reason is a stable code; Degraded is the human line.
+func (gate *Gate) skipped(reason string, detail error) Report {
+	return Report{
+		Policy:   string(gate.Policy),
+		Reason:   reason,
+		Degraded: fmt.Sprintf("grammar check skipped: %v", detail),
+	}
 }
 
 func (gate *Gate) start() error {

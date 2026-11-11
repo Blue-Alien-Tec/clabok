@@ -13,11 +13,13 @@ The grammar gate is part of the core, not an editor hook. Every prose write is c
 
 `grammar.policy` is `block` or `warn`. `block` refuses a change with findings; `warn` stores the change and reports the findings. There is deliberately no off switch.
 
-The check talks to a LanguageTool server over HTTP with a five-second timeout. Fenced code blocks and inline code are masked before the request, so command examples and identifiers do not produce prose findings. A missing server is started on demand; only a server that cannot be started degrades to a single reported skip.
+The check talks to a LanguageTool server over HTTP. Fenced code blocks and inline code are masked before the request, so command examples and identifiers do not produce prose findings. A large body is split into paragraphs and packed into chunks of about 4 000 bytes; every finding is mapped back to the line, column and offset of the body, so the check has no size ceiling. A finding that spans a chunk boundary can be missed or reported twice; the merge keeps the first report.
+
+`grammar.timeout` is the watchdog interval and defaults to five seconds; the cap is three intervals. The request has no hard deadline. While it runs, the gate probes the server once per interval and keeps waiting for the same request, so a slow but healthy server is not abandoned, and no check is sent twice. A server that stays silent for the whole cap is reported as `grammar.timeout`; only a server that stops answering the probe triggers the start attempt.
 
 The gate covers every prose path: body set, append and prepend, body replace, index prose, the footer, note blocks and layout notes. A dry run performs the same check.
 
-`grammar check` checks a block, a file or raw text. Findings carry a line, a column, a rule, a message and the available replacements; the output is JSON or a short text summary.
+`grammar check` checks a block, a file or raw text. Findings carry a line, a column, a rule, a message and the available replacements; the output is JSON or a short text summary. An incomplete check reports `checked: false` with a stable `reason` and one warning, so it never looks like a clean result. `--require-check` turns that skip into a failure for CI and release gates.
 
 `grammar apply` re-checks the body, applies server-provided replacements from right to left, guards the count with `--expect`, writes once and reports the remaining findings. Only findings with one replacement are applied by `--all-safe`.
 
@@ -25,7 +27,7 @@ The server lifecycle is shared and explicit. `grammar serve` starts or attaches 
 
 Terms suppress findings case-insensitively. A request never writes the list: `terms set` and `terms delete` create a pending entry with a reason, `terms commit --confirm` is the only writer and `terms discard` removes a request.
 
-A practical loop is check, fix the blocking findings, apply the safe single-replacement findings, re-check and then sync. A server that cannot start is visible in the report, not silent.
+A practical loop is check, fix the blocking findings, apply the safe single-replacement findings, re-check and then sync. A server that cannot answer is visible as an unchecked result with a `grammar.*` reason and one warning, never as a success with zero findings; `block` still refuses only on findings, so a missing server never blocks prose writes. An unchecked check before or after `grammar apply` leaves the body unchanged.
 
 
 ---

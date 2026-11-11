@@ -27,9 +27,11 @@ type checkPayload struct {
 	Book     string    `json:"book,omitempty"`
 	Block    string    `json:"block,omitempty"`
 	Checked  bool      `json:"checked"`
+	Reason   string    `json:"reason,omitempty"`
 	Degraded string    `json:"degraded,omitempty"`
 	Count    int       `json:"count"`
 	Findings []Finding `json:"findings,omitempty"`
+	Warnings []Warning `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt; a check writes nothing.
@@ -48,13 +50,20 @@ func (payload checkPayload) Text() string {
 		}
 		builder.WriteByte('\n')
 	}
+	if !payload.Checked {
+		fmt.Fprintf(&builder, "not checked")
+		if payload.Reason != "" {
+			fmt.Fprintf(&builder, " (%s)", payload.Reason)
+		}
+		return builder.String() + "\n"
+	}
 	fmt.Fprintf(&builder, "%d finding(s)\n", payload.Count)
 	return builder.String()
 }
 
 func grammarCommand() *cli.Command {
 	var book, block, file, raw, jar, finding string
-	var allSafe bool
+	var allSafe, requireCheck bool
 	var expect int
 	return &cli.Command{
 		Name:     "grammar",
@@ -69,6 +78,7 @@ func grammarCommand() *cli.Command {
 			set.StringVar(&raw, "raw", "", "raw text to check")
 			set.StringVar(&jar, "jar", "", "LanguageTool server jar")
 			set.BoolVar(&allSafe, "all-safe", false, "apply all findings with one replacement")
+			set.BoolVar(&requireCheck, "require-check", false, "fail when the check cannot complete")
 			set.StringVar(&finding, "finding", "", "1-based finding indices")
 			set.IntVar(&expect, "expect", -1, "expected number of replacements")
 			return set
@@ -113,6 +123,9 @@ func grammarCommand() *cli.Command {
 					if infoErr != nil {
 						return nil, cli.AsError(infoErr)
 					}
+					interval, cap := Watchdog(values.GrammarTimeout)
+					info.Timeout = interval.String()
+					info.Cap = cap.String()
 					info.DryRun = env.Globals.DryRun
 					return &cli.Result{Data: info}, nil
 				}
@@ -169,29 +182,28 @@ func grammarCommand() *cli.Command {
 				}
 				content = read
 			}
-			client := NewClient(values.GrammarEndpoint, ReadTerms(layout.Terms()))
-			findings, checkErr := client.Check(context.Background(), content)
-			if errors.Is(checkErr, ErrUnavailable) {
-				if _, startErr := Serve(values.GrammarEndpoint, jar); startErr == nil {
-					findings, checkErr = client.Check(context.Background(), content)
-				} else {
-					payload.Degraded = fmt.Sprintf("grammar check skipped: %v", startErr)
-					return &cli.Result{Data: payload}, nil
-				}
-			}
-			if checkErr != nil {
-				payload.Degraded = fmt.Sprintf("grammar check skipped: %v", checkErr)
-				return &cli.Result{Data: payload}, nil
-			}
+			blockID := model.ZeroID
 			if block != "" {
-				blockID, _ := model.ParseID(block)
-				for index := range findings {
-					findings[index].Block = blockID
-				}
+				blockID, _ = model.ParseID(block)
 			}
-			payload.Checked = true
-			payload.Count = len(findings)
-			payload.Findings = findings
+			gate := NewGateTimeout(values.GrammarEndpoint, ParsePolicy(values.GrammarPolicy),
+				ReadTerms(layout.Terms()), values.GrammarTimeout)
+			gate.Start = func(endpoint string) error {
+				_, startErr := Serve(endpoint, jar)
+				return startErr
+			}
+			report := gate.Evaluate(context.Background(), blockID, content)
+			payload.Checked = report.Checked
+			payload.Reason = report.Reason
+			payload.Degraded = report.Degraded
+			payload.Warnings = report.Warnings()
+			payload.Count = len(report.Findings)
+			payload.Findings = report.Findings
+			if report.Unchecked() && requireCheck {
+				return nil, cli.Fail("grammar.check-skipped", "%s", report.Degraded).
+					WithHint("--require-check makes an incomplete check a failure").
+					WithDetails(report)
+			}
 			return &cli.Result{Data: payload}, nil
 		},
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/body"
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
@@ -172,6 +173,122 @@ func TestGrammarApplyEndToEnd(t *testing.T) {
 		"--block", block, "--all-safe", "--expect", "1")
 	if code == cli.ExitOK || !strings.Contains(stderr, "grammar.expectation-failed") {
 		t.Fatalf("expectation guard: %s", stderr)
+	}
+}
+
+func TestGrammarCheckSkip(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+
+	payload := dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "teh cat"))
+	if checked, _ := payload["checked"].(bool); checked {
+		t.Fatalf("an unusable response must not look checked: %v", payload)
+	}
+	if reason, _ := payload["reason"].(string); reason != "grammar.response" {
+		t.Fatalf("reason %v", payload["reason"])
+	}
+	warnings, _ := payload["warnings"].([]any)
+	if len(warnings) != 1 {
+		t.Fatalf("exactly one warning expected: %v", payload)
+	}
+	warning, _ := warnings[0].(map[string]any)
+	if code, _ := warning["code"].(string); code != "grammar.response" {
+		t.Fatalf("warning %v", warning)
+	}
+
+	code, _, stderr := run(t, directory, "grammar", "check", "--require-check", "--raw", "teh cat")
+	if code != cli.ExitFailure || !strings.Contains(stderr, "grammar.check-skipped") {
+		t.Fatalf("--require-check must fail: exit %d %s", code, stderr)
+	}
+}
+
+func TestGrammarWriteSkipWarning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	runOK(t, directory, "book", "open", "guide")
+	chapter := dataOf(t, runOK(t, directory, "add", "--book", "guide", "--title", "Chapter"))["target"].(string)
+
+	written := dataOf(t, runOK(t, directory, "body", "set", "--book", "guide", "0",
+		"--parent", chapter, "--body", "teh cat"))
+	report, _ := written["grammar"].(map[string]any)
+	if report == nil {
+		t.Fatalf("the skip report is missing: %v", written)
+	}
+	if checked, _ := report["checked"].(bool); checked {
+		t.Fatalf("the write must carry an unchecked report: %v", report)
+	}
+	if reason, _ := report["reason"].(string); reason != "grammar.response" {
+		t.Fatalf("reason %v", report["reason"])
+	}
+	warnings, _ := written["warnings"].([]any)
+	if len(warnings) != 1 {
+		t.Fatalf("exactly one warning expected: %v", written)
+	}
+	warning, _ := warnings[0].(map[string]any)
+	if code, _ := warning["code"].(string); code != "grammar.response" {
+		t.Fatalf("warning %v", warning)
+	}
+}
+
+func TestGrammarServerInfoWatchdog(t *testing.T) {
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.timeout", "2s")
+	info := dataOf(t, runOK(t, directory, "grammar", "server-info"))
+	if timeout, _ := info["timeout"].(string); timeout != "2s" {
+		t.Fatalf("timeout %v", info["timeout"])
+	}
+	if cap, _ := info["cap"].(string); cap != "6s" {
+		t.Fatalf("cap %v", info["cap"])
+	}
+
+	runOK(t, directory, "config", "set", "grammar.timeout", "1s")
+	info = dataOf(t, runOK(t, directory, "grammar", "server-info"))
+	if cap, _ := info["cap"].(string); cap != "3s" {
+		t.Fatalf("cap after the interval change %v", info["cap"])
+	}
+}
+
+func TestGrammarConfiguredTimeoutIsUsed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/languages" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		time.Sleep(600 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"matches":[]}`)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	runOK(t, directory, "config", "set", "grammar.timeout", "50ms")
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	runOK(t, directory, "book", "open", "guide")
+	chapter := dataOf(t, runOK(t, directory, "add", "--book", "guide", "--title", "Chapter"))["target"].(string)
+
+	written := dataOf(t, runOK(t, directory, "body", "set", "--book", "guide", "0",
+		"--parent", chapter, "--body", "teh cat"))
+	report, _ := written["grammar"].(map[string]any)
+	if reason, _ := report["reason"].(string); reason != "grammar.timeout" {
+		t.Fatalf("the configured interval must bound the check: %v", report)
+	}
+	warnings, _ := written["warnings"].([]any)
+	if len(warnings) != 1 {
+		t.Fatalf("warnings %v", written["warnings"])
 	}
 }
 

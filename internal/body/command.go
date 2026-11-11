@@ -32,13 +32,14 @@ func (payload getPayload) Text() string {
 }
 
 type writePayload struct {
-	DryRun  bool            `json:"dryRun"`
-	Block   string          `json:"block"`
-	Created bool            `json:"created,omitempty"`
-	Changed bool            `json:"changed"`
-	Lines   int             `json:"lines"`
-	Bytes   int             `json:"bytes"`
-	Grammar *grammar.Report `json:"grammar,omitempty"`
+	DryRun   bool              `json:"dryRun"`
+	Block    string            `json:"block"`
+	Created  bool              `json:"created,omitempty"`
+	Changed  bool              `json:"changed"`
+	Lines    int               `json:"lines"`
+	Bytes    int               `json:"bytes"`
+	Grammar  *grammar.Report   `json:"grammar,omitempty"`
+	Warnings []grammar.Warning `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -84,12 +85,13 @@ func reportPtr(report grammar.Report) *grammar.Report {
 }
 
 type replacePayload struct {
-	DryRun       bool            `json:"dryRun"`
-	Block        string          `json:"block"`
-	Replacements int             `json:"replacements"`
-	Lines        int             `json:"lines"`
-	Bytes        int             `json:"bytes"`
-	Grammar      *grammar.Report `json:"grammar,omitempty"`
+	DryRun       bool              `json:"dryRun"`
+	Block        string            `json:"block"`
+	Replacements int               `json:"replacements"`
+	Lines        int               `json:"lines"`
+	Bytes        int               `json:"bytes"`
+	Grammar      *grammar.Report   `json:"grammar,omitempty"`
+	Warnings     []grammar.Warning `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -247,7 +249,7 @@ func setCommand(name, summary string, op mode) *cli.Command {
 			return &cli.Result{Data: writePayload{
 				DryRun: env.Globals.DryRun, Block: result.Block.String(), Created: result.Created,
 				Changed: result.Changed, Lines: result.Lines, Bytes: result.Bytes,
-				Grammar: reportPtr(result.Grammar),
+				Grammar: reportPtr(result.Grammar), Warnings: result.Grammar.Warnings(),
 			}}, nil
 		},
 	}
@@ -303,7 +305,7 @@ func replaceCommand() *cli.Command {
 			return &cli.Result{Data: replacePayload{
 				DryRun: env.Globals.DryRun, Block: result.Block.String(),
 				Replacements: result.Replacements, Lines: result.Lines, Bytes: result.Bytes,
-				Grammar: reportPtr(result.Grammar),
+				Grammar: reportPtr(result.Grammar), Warnings: result.Grammar.Warnings(),
 			}}, nil
 		},
 	}
@@ -358,8 +360,9 @@ func newService(env *cli.Env) (*Service, *cli.Error) {
 		return nil, err
 	}
 	service := NewWithAllocator(life, idspace.New(life, layout))
-	service.Grammar = grammar.NewGate(values.GrammarEndpoint,
-		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()))
+	service.Grammar = grammar.NewGateTimeout(values.GrammarEndpoint,
+		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()),
+		values.GrammarTimeout)
 	return service, nil
 }
 

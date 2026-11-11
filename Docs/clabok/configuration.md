@@ -17,7 +17,7 @@ Storage keys: `store.root` for the store (default `_CLABOK`), `docs.root` for re
 
 Safety keys: `undo.limit` (default 10) and `book.pointLimit` (default 3) bound the rollback history, and `concurrency.mode` (default `file`) selects the file or daemon backend.
 
-Grammar keys: `grammar.endpoint` is the full check URL and `grammar.policy` is `block` or `warn`. The endpoint defaults to the local server and the policy defaults to `block`.
+Grammar keys: `grammar.endpoint` is the full check URL, `grammar.policy` is `block` or `warn`, and `grammar.timeout` is the watchdog interval as a duration such as `5s`. The endpoint defaults to the local server, the policy defaults to `block` and the timeout defaults to five seconds; the cap is three intervals.
 
 The `asciiui.types` map names the project widget type for a generic kind. The configured type wins over an explicit generic label; a non-generic explicit label remains a one-node override.
 
@@ -28,6 +28,7 @@ Configuration errors are blocking: an unknown key, a wrong type or an invalid va
 ```text
 pecia config show
 pecia config set grammar.policy warn
+pecia config set grammar.timeout 10s
 pecia config validate
 ```
 

@@ -44,6 +44,8 @@ type ServerInfo struct {
 	Started string `json:"started,omitempty"`
 	Shared  bool   `json:"shared,omitempty"`
 	Log     string `json:"log,omitempty"`
+	Timeout string `json:"timeout,omitempty"`
+	Cap     string `json:"cap,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -67,6 +69,9 @@ func (info ServerInfo) Text() string {
 	}
 	if info.Log != "" {
 		line += "\nlog: " + info.Log
+	}
+	if info.Timeout != "" {
+		line += fmt.Sprintf("\nwatchdog: interval %s, cap %s", info.Timeout, info.Cap)
 	}
 	return line + "\n"
 }

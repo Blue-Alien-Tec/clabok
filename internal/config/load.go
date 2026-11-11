@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 )
@@ -28,6 +30,7 @@ type Values struct {
 	BookPointLimit  int
 	GrammarEndpoint string
 	GrammarPolicy   string
+	GrammarTimeout  time.Duration
 	ConcurrencyMode string
 	DaemonSocket    string
 	AsciiUITypes    map[string]string
@@ -137,6 +140,7 @@ func resolve(document *file, location Location, globals cli.Globals) *Values {
 		BookPointLimit:  builtin.BookPointLimit,
 		GrammarEndpoint: builtin.GrammarEndpoint,
 		GrammarPolicy:   builtin.GrammarPolicy,
+		GrammarTimeout:  parseDuration(builtin.GrammarTimeout, 5*time.Second),
 		ConcurrencyMode: builtin.ConcurrencyMode,
 		DaemonSocket:    builtin.DaemonSocket,
 		AsciiUITypes:    map[string]string{},
@@ -155,6 +159,9 @@ func resolve(document *file, location Location, globals cli.Globals) *Values {
 	}
 	if policy := document.grammarPolicy(); policy != "" {
 		values.GrammarPolicy = policy
+	}
+	if timeout := document.grammarTimeout(); timeout != "" {
+		values.GrammarTimeout = parseDuration(timeout, values.GrammarTimeout)
 	}
 	if mode := document.concurrencyMode(); mode != "" {
 		values.ConcurrencyMode = mode
@@ -187,4 +194,14 @@ func resolvePath(base, raw string) string {
 		return filepath.Clean(raw)
 	}
 	return filepath.Join(base, raw)
+}
+
+// parseDuration reads a positive duration and falls back to the built-in default when the stored
+// value is unusable; validation reports the stored value before a command runs.
+func parseDuration(raw string, fallback time.Duration) time.Duration {
+	parsed, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }

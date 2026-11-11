@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Issue is one configuration problem.
@@ -83,6 +84,16 @@ func validate(document *file) []Issue {
 				Code:    "config.invalid-policy",
 				Key:     "grammar.policy",
 				Message: "expected block or warn, got " + policy,
+			})
+		}
+	}
+	if document.Grammar != nil && document.Grammar.Timeout != nil {
+		timeout := *document.Grammar.Timeout
+		if duration, err := time.ParseDuration(strings.TrimSpace(timeout)); err != nil || duration <= 0 {
+			issues = append(issues, Issue{
+				Code:    "config.invalid-timeout",
+				Key:     "grammar.timeout",
+				Message: "expected a positive duration such as 5s, got " + timeout,
 			})
 		}
 	}

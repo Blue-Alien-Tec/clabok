@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 )
@@ -146,6 +147,24 @@ var keyBindings = map[string]binding{
 			}
 		},
 	},
+	"grammar.timeout": {
+		name:         "grammar.timeout",
+		defaultValue: builtin.GrammarTimeout,
+		get: func(document *file) (any, bool) {
+			if document.Grammar != nil && document.Grammar.Timeout != nil {
+				return *document.Grammar.Timeout, true
+			}
+			return nil, false
+		},
+		set: func(document *file, raw string) *cli.Error {
+			return setTimeout(&document.Grammar, raw)
+		},
+		unset: func(document *file) {
+			if document.Grammar != nil {
+				document.Grammar.Timeout = nil
+			}
+		},
+	},
 	"concurrency.mode": {
 		name:         "concurrency.mode",
 		defaultValue: builtin.ConcurrencyMode,
@@ -274,6 +293,21 @@ func setPolicy(section **grammarSection, raw string) *cli.Error {
 		*section = &grammarSection{}
 	}
 	(*section).Policy = &value
+	return nil
+}
+
+func setTimeout(section **grammarSection, raw string) *cli.Error {
+	value := strings.TrimSpace(unquote(raw))
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return cli.Usage("usage.invalid-value",
+			"grammar.timeout: expected a positive duration such as 5s, got %q", raw).
+			WithDetails(map[string]any{"key": "grammar.timeout"})
+	}
+	if *section == nil {
+		*section = &grammarSection{}
+	}
+	(*section).Timeout = &value
 	return nil
 }
 

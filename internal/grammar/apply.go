@@ -22,10 +22,12 @@ type applyPayload struct {
 	Book      string    `json:"book"`
 	Block     string    `json:"block"`
 	Checked   bool      `json:"checked"`
+	Reason    string    `json:"reason,omitempty"`
 	Degraded  string    `json:"degraded,omitempty"`
 	Applied   int       `json:"applied"`
 	Changed   bool      `json:"changed"`
 	Remaining []Finding `json:"remaining,omitempty"`
+	Warnings  []Warning `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -33,7 +35,11 @@ func (payload applyPayload) DryRunResult() bool { return payload.DryRun }
 
 func (payload applyPayload) Text() string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "block %s: %d finding(s) applied", payload.Block, payload.Applied)
+	if payload.Checked {
+		fmt.Fprintf(&builder, "block %s: %d finding(s) applied", payload.Block, payload.Applied)
+	} else {
+		fmt.Fprintf(&builder, "block %s: not checked", payload.Block)
+	}
 	if payload.Degraded != "" {
 		fmt.Fprintf(&builder, "\ngrammar: %s", payload.Degraded)
 	}
@@ -144,27 +150,26 @@ func runApply(env *cli.Env, bookRaw, blockRaw, indices string, allSafe bool, exp
 		return nil, cli.AsError(readErr)
 	}
 	terms := ReadTerms(layout.Terms())
-	client := NewClient(values.GrammarEndpoint, terms)
-	findings, checkErr := client.Check(context.Background(), text)
-	if checkErr != nil {
-		if _, startErr := Serve(values.GrammarEndpoint, jar); startErr == nil {
-			findings, checkErr = client.Check(context.Background(), text)
-		} else {
-			return nil, cli.Fail("grammar.check-unavailable",
-				"the check is unavailable, so no finding can be applied: %v", startErr)
-		}
+	gate := NewGateTimeout(values.GrammarEndpoint, PolicyWarn, terms, values.GrammarTimeout)
+	gate.Start = func(endpoint string) error {
+		_, startErr := Serve(endpoint, jar)
+		return startErr
 	}
-	if checkErr != nil {
-		return nil, cli.Fail("grammar.check-unavailable",
-			"the check is unavailable, so no finding can be applied: %v", checkErr)
+	payload := applyPayload{
+		DryRun: env.Globals.DryRun, Book: string(bookID), Block: blockID.String(),
 	}
-	selected, selectErr := selectFindings(findings, allSafe, indices)
+	report := gate.Evaluate(context.Background(), blockID, text)
+	if report.Unchecked() {
+		payload.Reason = report.Reason
+		payload.Degraded = report.Degraded
+		payload.Warnings = report.Warnings()
+		return &cli.Result{Data: payload}, nil
+	}
+	selected, selectErr := selectFindings(report.Findings, allSafe, indices)
 	if selectErr != nil {
 		return nil, cli.AsError(selectErr)
 	}
-	payload := applyPayload{
-		DryRun: env.Globals.DryRun, Book: string(bookID), Block: blockID.String(), Checked: true,
-	}
+	payload.Checked = true
 	if len(selected) == 0 {
 		return &cli.Result{Data: payload}, nil
 	}
@@ -178,13 +183,19 @@ func runApply(env *cli.Env, bookRaw, blockRaw, indices string, allSafe bool, exp
 			WithHint("the replacement would create a structural heading")
 	}
 	// Re-check the result so remaining findings are reported; apply itself is the repair path and
-	// must not block a partial fix. The replacement text is server-driven.
-	gate := NewGate(values.GrammarEndpoint, PolicyWarn, terms)
-	report := gate.Evaluate(context.Background(), blockID, next)
+	// must not block a partial fix. The replacement text is server-driven. An unchecked re-check
+	// leaves the body unchanged: a repair that cannot be verified is not written.
+	recheck := gate.Evaluate(context.Background(), blockID, next)
+	if recheck.Unchecked() {
+		payload.Checked = false
+		payload.Reason = recheck.Reason
+		payload.Degraded = recheck.Degraded
+		payload.Warnings = recheck.Warnings()
+		return &cli.Result{Data: payload}, nil
+	}
 	payload.Applied = applied
 	payload.Changed = applied > 0
-	payload.Degraded = report.Degraded
-	payload.Remaining = report.Findings
+	payload.Remaining = recheck.Findings
 	if env.Globals.DryRun {
 		return &cli.Result{Data: payload}, nil
 	}
