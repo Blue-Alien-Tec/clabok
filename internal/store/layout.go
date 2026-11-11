@@ -53,6 +53,9 @@ func (layout Layout) Terms() string { return filepath.Join(layout.Root, termsFil
 // TermsDir is the directory of the per-language term layers.
 func (layout Layout) TermsDir() string { return filepath.Join(layout.Root, termsDirName) }
 
+// ImportsRoot holds the import and restore receipts.
+func (layout Layout) ImportsRoot() string { return filepath.Join(layout.Root, "imports") }
+
 // TermsFor is the term file of one language. The file name is the lowercased language id, so
 // de-DE and pt-BR stay distinct layers.
 func (layout Layout) TermsFor(language string) string {
@@ -109,7 +112,7 @@ func ReservedBookID(id model.BookID) bool {
 	name := strings.TrimRight(string(id), ". ")
 	switch strings.ToLower(name) {
 	case "rollback", ".coordinator", "library.json", "ids.json", "terms.txt", "terms",
-		"pending-terms.json", "open.json", "index", "store.json", "migrations":
+		"pending-terms.json", "open.json", "index", "store.json", "migrations", "imports":
 		return true
 	}
 	return false

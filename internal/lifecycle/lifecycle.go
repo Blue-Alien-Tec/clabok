@@ -593,6 +593,31 @@ func (life *Lifecycle) rollbackStore(paths store.BookPaths) (*rollback.Store, er
 	return rollback.New(paths.RollbackDir, life.options.UndoLimit, life.options.BookPointLimit)
 }
 
+// SnapshotContainer records a book-level point of the closed container. It is the restore path: a
+// forced replacement can be undone with `rollback restore`.
+func (life *Lifecycle) SnapshotContainer(id model.BookID, reason string) (rollback.Package, error) {
+	paths, err := life.layout.Book(id)
+	if err != nil {
+		return rollback.Package{}, err
+	}
+	data, readErr := os.ReadFile(paths.Container)
+	if errors.Is(readErr, os.ErrNotExist) {
+		return rollback.Package{}, nil
+	}
+	if readErr != nil {
+		return rollback.Package{}, fail("lifecycle.read-failed", "%v", readErr)
+	}
+	container, parseErr := store.Parse(data)
+	if parseErr != nil {
+		return rollback.Package{}, parseErr
+	}
+	rollbacks, rollbackErr := life.rollbackStore(paths)
+	if rollbackErr != nil {
+		return rollback.Package{}, rollbackErr
+	}
+	return rollbacks.Snapshot(rollback.KindBook, membersOf(container), reason)
+}
+
 func (life *Lifecycle) recordBookPoint(paths store.BookPaths, newData []byte) (bool, error) {
 	oldData, err := os.ReadFile(paths.Container)
 	if errors.Is(err, os.ErrNotExist) {

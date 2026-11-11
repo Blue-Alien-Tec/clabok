@@ -18,6 +18,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/search"
 	"github.com/Blue-Alien-Tec/clabok/internal/structure"
 	"github.com/Blue-Alien-Tec/clabok/internal/temp"
+	"github.com/Blue-Alien-Tec/clabok/internal/transfer"
 	"github.com/Blue-Alien-Tec/clabok/internal/tui"
 )
 
@@ -34,6 +35,7 @@ func main() {
 	search.Register(registry)
 	index.Register(registry)
 	migrate.Register(registry)
+	transfer.Register(registry)
 	tui.Register(registry)
 	temp.Register(registry)
 	render.Register(registry, library.IndexEntries)
