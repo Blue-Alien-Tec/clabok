@@ -63,10 +63,21 @@ The [CLABOK](Docs/clabok/README.md) book is the full guide: book model, authorin
 MIT. See [LICENSE](LICENSE).
 
 
+## Index
+
+- [AI Transparency](#ai-transparency)
+
 ## Document Index
 
 | Book |
 | --- |
 | [CLABOK](Docs/clabok/README.md) |
+
+<a id="ai-transparency"></a>
+
+## AI Transparency
+
+This project was built almost entirely by an AI coding agent under continuous human direction, including its test suite. The maintainer is a C# developer, does not read Go and has not reviewed the source line by line; verification was limited to the rendered Markdown output. Treat the code as not independently audited. See [AI_TRANSPARENCY.md](AI_TRANSPARENCY.md) for what was and was not verified.
+
 
 [CLABOK](Docs/clabok/README.md) · [Document Index](#document-index)
