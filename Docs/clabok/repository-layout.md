@@ -54,6 +54,7 @@ internal/       The Go packages, one directory per concern.
     testdata/
   structure/    The single structure mutation path.
   temp/
+  transfer/
   tui/
 scripts/        Check, release and install scripts.
 ```
