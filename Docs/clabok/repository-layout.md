@@ -54,6 +54,7 @@ internal/       The Go packages, one directory per concern.
     testdata/
   structure/    The single structure mutation path.
   temp/
+  textinput/
   transfer/     Container and text-form transfer.
   tui/
 scripts/        Check, release and install scripts.

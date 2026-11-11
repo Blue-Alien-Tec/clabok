@@ -18,7 +18,7 @@ Go 1.27.3 or newer. The module has two pinned third-party parsers (`gopkg.in/yam
 **Install**
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v1.0.0
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v1.0.1
 ```
 
 That writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that
