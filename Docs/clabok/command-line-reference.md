@@ -25,7 +25,7 @@ Render and inspect: `sync` renders, `check` reports findings and `verify` runs t
 
 Read-only helpers: `find` searches titles, bodies, layouts and regions across one book or the whole library with modes, fields, metadata filters, grouping and four result shapes; `index` builds, inspects or clears the derived search index; `migrate status` and `migrate plan` report and plan schema migrations; `flush` lists or removes stale transient inputs; `rollback list` and `rollback restore` manage the undo packages.
 
-Project helpers: `config`, `library defaults`, `version` and `help`. Transfer commands: `dump` and `restore` move a container byte for byte, while `export` and `import` move the reviewable text form with fresh IDs. `serve` starts the optional coordinator daemon used by the daemon concurrency mode.
+Project helpers: `config`, `library defaults`, `version` and `help`. The `badge` group declares and checks badges, and its detectors live in `clabok.json`. `dump` and `restore` move a container, while `export` and `import` move the text form. `serve` starts the optional coordinator daemon used by the daemon concurrency mode.
 
 Exit codes: 0 success, 1 failure, 2 usage and 3 rejected. The JSON envelope carries `schema`, `ok`, `command` and either `data` or `error` with a stable code, a message and an optional hint and details.
 

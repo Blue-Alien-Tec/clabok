@@ -13,12 +13,12 @@ It keeps a book's structure, bodies, navigation and generated content in one det
 
 **Requirements**
 
-Go 1.27.3 or newer. The module has no third-party dependencies. A LanguageTool server and a local Java runtime are optional; the tool builds and runs without them.
+Go 1.27.3 or newer. The module has two pinned third-party parsers (`gopkg.in/yaml.v3` and `github.com/BurntSushi/toml`) behind the badge detector layer; the rest is the standard library. A LanguageTool server and a local Java runtime are optional; the tool builds and runs without them.
 
 **Install**
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.2
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v1.0.0
 ```
 
 That writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that

@@ -19,7 +19,7 @@ A book migration requires a closed book. It takes the store and the book lock, c
 
 An authoring write on an older manifest is refused with `migrate.required` and names the migration command. Read-only commands and `book open`/`book close` keep working; close preserves an old manifest byte for byte when nothing was written. Older books therefore stay readable, and a migration is always an explicit decision.
 
-`migrate cleanup` keeps the newest history entries, ten by default, and removes older `migrations/<timestamp>/` directories only with `--write`. The rollback pool is separate and keeps its own limits. A new format adds a step; current books are a no-op; the release version moves only when the whole migration plan is green.
+`migrate cleanup` keeps the newest history entries, ten by default, and removes older `migrations/<timestamp>/` directories only with `--write`. The rollback pool is separate and keeps its own limits. A new format adds a step; current books are a no-op. The version moves with the scope that adds the format, and the release tag follows once the whole plan is green.
 
 
 ---

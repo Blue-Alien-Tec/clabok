@@ -27,21 +27,21 @@ Formula/        Homebrew formula.
 internal/       The Go packages, one directory per concern.
   apply/
   asciiui/
-  badge/        Repository-fact detectors for the library badges.
+  badge/        Badge detectors, presets and the external source cache.
   body/
   buildinfo/
   cli/          Command registry, envelopes and exit codes.
   config/
   coordinator/
   editorial/    Editorial commands for prose, regions, layouts, status and badges.
-  grammar/      Grammar client, policy gate, apply and server lifecycle.
+  grammar/      Grammar client, language list, policy gate, terms and the server lifecycle.
   idspace/
   index/
   jsonstrict/
   library/
   lifecycle/    Open, close, snapshots, rollback and locks.
   migrate/
-  model/        Manifest v3, validation and the status vocabulary.
+  model/        Manifest schemas, validation and the status vocabulary.
   prose/
   refs/
   render/       Pure renderers, navigation and sync.
@@ -54,7 +54,7 @@ internal/       The Go packages, one directory per concern.
     testdata/
   structure/    The single structure mutation path.
   temp/
-  transfer/
+  transfer/     Container and text-form transfer.
   tui/
 scripts/        Check, release and install scripts.
 ```

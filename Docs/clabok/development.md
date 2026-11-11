@@ -15,7 +15,7 @@ Run the test suite and the race detector through the scripts. The suite covers t
 
 CI runs three jobs on pushes to `main` that change the build-version file, and on manual dispatch: a verify job for the formatter, vet, build and tests, a race job and a Windows job.
 
-A `v*` tag runs the separate release workflow: it verifies the tree, builds the six platform archives, writes `SHA256SUMS` and publishes the GitHub Release. Use `scripts/release.ps1` (Windows) or `scripts/release.sh` (Unix) to validate and push the tag; CI never creates it. The build-version file only triggers the verify CI; it is still changed at milestone close.
+A `v*` tag runs the separate release workflow: it verifies the tree, builds the six platform archives, writes `SHA256SUMS` and publishes the GitHub Release. Use `scripts/release.ps1` (Windows) or `scripts/release.sh` (Unix) to validate and push the tag; CI never creates it. The build-version file only triggers the verify CI; it is still changed at each scope close.
 
 Layering: command packages carry the CLI surface, and pure packages never import it. The core services are plain Go and can be used in process, which is what the terminal UI does.
 

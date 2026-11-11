@@ -14,19 +14,20 @@ six archives, writes `SHA256SUMS` and publishes the GitHub Release.
 
 ```text
 # Windows
-.\scripts\release.ps1 0.5.2
+.\scripts\release.ps1 <version>
 
 # Unix
-./scripts/release.sh 0.5.2
+./scripts/release.sh <version>
 ```
 
 The script refuses a dirty tree, a branch other than `main`, a HEAD that differs from `origin/main`,
-a version that does not match `internal/buildinfo.Version` (`0.5.2` or `0.5.2-dev`), an existing tag,
-unformatted Go files or failing vet/test/build. It then creates `v0.5.2` and pushes it. Use `-DryRun`
-(PowerShell) or `--dry-run` (shell) to run every check without creating or pushing the tag.
+a version that does not match `internal/buildinfo.Version` (`<version>` or `<version>-dev`), an
+existing tag, unformatted Go files or failing vet/test/build. It then creates `v<version>` and pushes
+it. Use `-DryRun` (PowerShell) or `--dry-run` (shell) to run every check without creating or pushing
+the tag.
 
 If the local execution policy blocks PowerShell scripts, run
-`powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1 0.5.2` or use
+`powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1 <version>` or use
 `scripts/release.sh`.
 
 Do not re-tag a published version: the Go module proxy keeps the first source for a version. Publish
@@ -50,7 +51,7 @@ test the matrix without a tag.
 - The release has six archives and `SHA256SUMS`.
 - `sha256sum -c SHA256SUMS` passes.
 - The downloaded binary reports the tag: `pecia version`.
-- `go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v0.5.2` works; `@latest` resolves to the
+- `go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v<version>` works; `@latest` resolves to the
   release.
 - If the default proxy still reports the previous version for `@latest`, verify with the pinned
   `@vX.Y.Z`; the proxy's `@latest` cache refreshes after a short delay.
@@ -59,8 +60,11 @@ test the matrix without a tag.
 
 `bucket/clabok.json` and `Formula/clabok.rb` carry the archive URLs and SHA256 values for the
 current release. Scoop's `checkver`/`autoupdate` handles later versions; the Homebrew formula needs
-the new URLs and hashes after each release. A separate `homebrew-clabok` tap is the cleaner
-long-term layout; the formula in this repository is the first step.
+the new URLs and hashes after each release. Update both files from the published `SHA256SUMS`,
+commit them as `chore(release): update the package manifests to v<version>`, and regenerate the
+repository layout with `pecia sync --write` because the tracked file set changes. A separate
+`homebrew-clabok` tap is the cleaner long-term layout; the formula in this repository is the first
+step.
 
 ## Signing
 
