@@ -17,7 +17,7 @@ The vocabulary is fixed and ordered from most to least settled: `final`, `review
 
 Assign a state to a node or a block with `status set --target node|block --id <target> --state <state>`. `status clear` removes an assignment, and `status show` lists the vocabulary and every assignment.
 
-The renderer places the badge after the heading, in the status column of the book index and before a block body. The legend lists every state with its meaning and sits above the book index.
+The renderer places the badge after the heading, in the status column of the index when that column is selected and before a block body. The legend is the `status` slot, orderable with the other README slots.
 
 With status enabled the book index is a table even without index prose: `Document | Status`, or `Document | Status | Description` when prose exists. The per-file contents list stays a list and never carries status.
 

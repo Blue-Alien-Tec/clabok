@@ -1392,6 +1392,9 @@ func applySetting(manifest *model.Manifest, step Step) (mutation, error) {
 // ApplySettingValue parses one book setting key and writes it into settings. It is shared by the
 // per-book `book set` command and the library defaults.
 func ApplySettingValue(settings *model.Settings, key, value string) error {
+	if strings.HasPrefix(key, "library.") {
+		return applyLibrarySetting(settings, key, value)
+	}
 	switch key {
 	case "numbering":
 		enabled, err := parseOnOff(key, value)
@@ -1428,7 +1431,7 @@ func ApplySettingValue(settings *model.Settings, key, value string) error {
 		settings.Language = language
 	default:
 		return fail("structure.unknown-setting",
-			"unknown book setting %q; use numbering, toc, index-depth, output or language", key)
+			"unknown book setting %q; use numbering, toc, index-depth, output, language or a library key", key)
 	}
 	return nil
 }

@@ -644,10 +644,9 @@ func indexMarkdown(entries []entry) string {
 	return builder.String()
 }
 
-// bookIndexMarkdown picks the index shape from the data. A table is used when the book enables
-// status or an entry carries prose; a plain index stays a list. A column exists only when it has a
-// source (status on, prose present). The per-file ToC always uses the list renderer.
-func bookIndexMarkdown(entries []entry, statusEnabled bool) string {
+// bookIndexMarkdown picks the index shape. Explicit columns force a table; otherwise a table is used
+// when the book enables status or an entry carries prose, and a plain index stays a list.
+func bookIndexMarkdown(entries []entry, statusEnabled bool, config *model.LibraryIndexConfig) string {
 	hasProse := false
 	for _, item := range entries {
 		if item.prose != "" {
@@ -655,10 +654,158 @@ func bookIndexMarkdown(entries []entry, statusEnabled bool) string {
 			break
 		}
 	}
+	if config != nil {
+		switch config.Shape {
+		case model.IndexShapeList:
+			return indexListMarkdown(entries, config.Columns, statusEnabled)
+		case model.IndexShapeTable:
+			return indexColumnsMarkdown(entries, config.Columns, statusEnabled, hasProse)
+		}
+		if len(config.Columns) > 0 {
+			return indexColumnsMarkdown(entries, config.Columns, statusEnabled, hasProse)
+		}
+	}
 	if statusEnabled || hasProse {
 		return indexTableMarkdown(entries, statusEnabled, hasProse)
 	}
 	return indexMarkdown(entries)
+}
+
+// indexRows renders one entry's cells for the requested columns.
+func indexRow(item entry, columns []string, statusEnabled, hasProse bool) string {
+	cells := make([]string, 0, len(columns))
+	for _, column := range columns {
+		switch column {
+		case "title":
+			indent := strings.Repeat("&emsp;", item.level-1)
+			if item.href == "" {
+				cells = append(cells, indent+cell(item.title))
+			} else {
+				cells = append(cells, indent+"["+cell(item.title)+"]("+item.href+")")
+			}
+		case "description":
+			cells = append(cells, cell(item.prose))
+		case "status":
+			cells = append(cells, cell(item.status))
+		case "path":
+			cells = append(cells, cell(item.href))
+		}
+	}
+	return "| " + strings.Join(cells, " | ") + " |\n"
+}
+
+func indexHeader(columns []string) string {
+	names := make([]string, 0, len(columns))
+	rules := make([]string, 0, len(columns))
+	for _, column := range columns {
+		switch column {
+		case "title":
+			names = append(names, "Document")
+		case "description":
+			names = append(names, "Description")
+		case "status":
+			names = append(names, "Status")
+		case "path":
+			names = append(names, "Path")
+		}
+		rules = append(rules, "---")
+	}
+	return "| " + strings.Join(names, " | ") + " |\n| " + strings.Join(rules, " | ") + " |\n"
+}
+
+// indexColumnsMarkdown renders the configured columns. Without a column list the shape follows the
+// data, keeping the derived output byte-identical.
+func indexColumnsMarkdown(entries []entry, columns []string, statusEnabled, hasProse bool) string {
+	if len(columns) == 0 {
+		columns = []string{"title"}
+		if statusEnabled {
+			columns = append(columns, "status")
+		}
+		if hasProse {
+			columns = append(columns, "description")
+		}
+	}
+	columns = orderIndexColumns(columns)
+	var builder strings.Builder
+	open := false
+	lastPart := ""
+	for _, item := range entries {
+		if item.level == 1 && item.part != lastPart {
+			if open {
+				builder.WriteString("\n")
+				open = false
+			}
+			if item.part != "" {
+				fmt.Fprintf(&builder, "**%s**\n\n", cell(plainTitle(item.part)))
+			}
+			lastPart = item.part
+		}
+		if !open {
+			builder.WriteString(indexHeader(columns))
+			open = true
+		}
+		builder.WriteString(indexRow(item, columns, statusEnabled, hasProse))
+	}
+	return builder.String()
+}
+
+// orderIndexColumns puts title first, because the linked title is the row identity.
+func orderIndexColumns(columns []string) []string {
+	result := make([]string, 0, len(columns))
+	for _, column := range columns {
+		if column == "title" {
+			result = append(result, column)
+		}
+	}
+	for _, column := range columns {
+		if column != "title" {
+			result = append(result, column)
+		}
+	}
+	return result
+}
+
+// indexListMarkdown renders the index as a flat list. Prose and the status badge are appended when
+// the columns ask for them.
+func indexListMarkdown(entries []entry, columns []string, statusEnabled bool) string {
+	withProse := false
+	withStatus := false
+	for _, column := range columns {
+		switch column {
+		case "description":
+			withProse = true
+		case "status":
+			withStatus = true
+		}
+	}
+	var builder strings.Builder
+	lastPart := ""
+	wroteRow := false
+	for _, item := range entries {
+		if item.level == 1 && item.part != "" && item.part != lastPart {
+			if wroteRow {
+				builder.WriteString("\n")
+			}
+			fmt.Fprintf(&builder, "**%s**\n\n", cell(plainTitle(item.part)))
+			lastPart = item.part
+		}
+		indent := strings.Repeat("  ", item.level-1)
+		line := indent + "- "
+		if item.href == "" {
+			line += cell(item.title)
+		} else {
+			line += "[" + cell(item.title) + "](" + item.href + ")"
+		}
+		if withProse && item.prose != "" {
+			line += " — " + cell(item.prose)
+		}
+		if withStatus && item.status != "" {
+			line += " " + item.status
+		}
+		builder.WriteString(line + "\n")
+		wroteRow = true
+	}
+	return builder.String()
 }
 
 // documentIndexMarkdown renders the library Document Index. It returns "" when no other book is
@@ -675,6 +822,90 @@ func documentIndexMarkdown(entries []IndexEntry) string {
 	return strings.TrimRight(builder.String(), "\n")
 }
 
+// readmeInput carries the mode-specific parts of a README. The slot order itself comes from the
+// manifest settings.
+type readmeInput struct {
+	manifest  *model.Manifest
+	bodies    map[model.ID]string
+	entries   []entry
+	documents []IndexEntry
+	topNav    string
+	bottomNav string
+	badges    string
+	chapters  []string
+	isLibrary bool
+}
+
+// readmeSections assembles the README from the configured slots. Structural positions are fixed:
+// navigation, badges, title, the orderable slots, footer, bottom navigation.
+func readmeSections(input readmeInput) []string {
+	layout := input.manifest.Settings.Library
+	sections := make([]string, 0, 10)
+	if layout.NavigationEnabled() && input.topNav != "" {
+		sections = append(sections, input.topNav)
+	}
+	if layout.BadgesEnabled() && input.badges != "" {
+		sections = append(sections, input.badges)
+	}
+	sections = append(sections, heading(1, "", input.manifest.Root.Title))
+	for _, slot := range layout.SlotsOrDefault() {
+		switch slot {
+		case model.SlotContent:
+			if text := joinBlocks(blockTexts(input.manifest, input.bodies,
+				input.manifest.Root.Blocks)); text != "" {
+				sections = append(sections, text)
+			}
+		case model.SlotNote:
+			body := notesFor(input.manifest, input.bodies, model.TargetNode,
+				input.manifest.Root.ID)
+			if strings.TrimSpace(body) == "" {
+				continue
+			}
+			if title := layout.SlotTitle(model.SlotNote, ""); title != "" {
+				sections = append(sections, heading(layout.SlotHeading(model.SlotNote),
+					"", title))
+			}
+			sections = append(sections, body)
+		case model.SlotStatus:
+			if legend := statusLegendMarkdown(input.manifest); legend != "" {
+				sections = append(sections, legend)
+			}
+		case model.SlotTOC:
+			if len(input.entries) == 0 {
+				continue
+			}
+			sections = append(sections,
+				heading(layout.SlotHeading(model.SlotTOC), "",
+					layout.SlotTitle(model.SlotTOC, "Index")),
+				strings.TrimRight(bookIndexMarkdown(input.entries,
+					input.manifest.StatusEnabled(), layout.IndexConfig()), "\n"))
+		case model.SlotDocumentIndex:
+			documentIndex := documentIndexMarkdown(input.documents)
+			if documentIndex == "" {
+				continue
+			}
+			sections = append(sections,
+				heading(layout.SlotHeading(model.SlotDocumentIndex), "",
+					layout.SlotTitle(model.SlotDocumentIndex, "Document Index")),
+				documentIndex)
+		case model.SlotChapters:
+			sections = append(sections, input.chapters...)
+		}
+	}
+	if layout.FooterEnabled() {
+		if footerText := footer(input.manifest, input.bodies); footerText != "" {
+			sections = append(sections, footerText)
+		}
+	}
+	if layout.NavigationEnabled() && input.bottomNav != "" {
+		if !input.isLibrary {
+			sections = append(sections, "---")
+		}
+		sections = append(sections, input.bottomNav)
+	}
+	return sections
+}
+
 func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index []IndexEntry, cross CrossLinkFunc, crossBook CrossBookFunc, nav Navigation, badges string) ([]File, error) {
 	layout := LayoutFor(manifest)
 	numbers := numberingMap(manifest)
@@ -689,41 +920,20 @@ func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index 
 		return "#" + target.Anchor
 	})
 	topNav, bottomNav := readmeNav(nav, index, "")
-	sections := make([]string, 0, 8)
-	if topNav != "" {
-		sections = append(sections, topNav)
-	}
-	if badges != "" {
-		sections = append(sections, badges)
-	}
-	sections = append(sections, heading(1, "", manifest.Root.Title))
-	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
-		sections = append(sections, rootBlocks)
-	}
-	if legend := statusLegendMarkdown(manifest); legend != "" {
-		sections = append(sections, legend)
-	}
-	if len(entries) > 0 {
-		sections = append(sections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
-	}
-	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
-		sections = append(sections, "## Document Index", documentIndex)
-	}
+	chapters := make([]string, 0, len(manifest.Root.Children))
 	for _, child := range manifest.Root.Children {
 		if child.Kind == model.KindLink {
 			continue
 		}
-		sections = append(sections, subtree(manifest, bodies, child, 2, layout, numbers))
-	}
-	if footerText := footer(manifest, bodies); footerText != "" {
-		sections = append(sections, footerText)
-	}
-	if bottomNav != "" {
-		if !nav.IsLibrary {
-			sections = append(sections, "---")
+		if section := subtree(manifest, bodies, child, 2, layout, numbers); section != "" {
+			chapters = append(chapters, section)
 		}
-		sections = append(sections, bottomNav)
 	}
+	sections := readmeSections(readmeInput{
+		manifest: manifest, bodies: bodies, entries: entries, documents: index,
+		topNav: topNav, bottomNav: bottomNav, badges: badges, chapters: chapters,
+		isLibrary: nav.IsLibrary,
+	})
 	content := marker(manifest.ID, model.OutputMonolith) + strings.Join(sections, "\n\n")
 	content = expandRefs(content, "README.md", manifest, layout, cross)
 	return []File{{Path: "README.md", Content: strings.TrimRight(content, "\n") + "\n"}}, nil
@@ -745,36 +955,11 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string, index 
 	})
 	first := firstDocument(manifest, layout, nil, nil)
 	topNav, bottomNav := readmeNav(nav, index, first)
-	indexSections := make([]string, 0, 8)
-	if topNav != "" {
-		indexSections = append(indexSections, topNav)
-	}
-	if badges != "" {
-		indexSections = append(indexSections, badges)
-	}
-	indexSections = append(indexSections, heading(1, "", manifest.Root.Title))
-	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
-		indexSections = append(indexSections, rootBlocks)
-	}
-	if legend := statusLegendMarkdown(manifest); legend != "" {
-		indexSections = append(indexSections, legend)
-	}
-	if len(entries) > 0 {
-		indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
-	}
-	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
-		indexSections = append(indexSections, "## Document Index", documentIndex)
-	}
-	if footerText := footer(manifest, bodies); footerText != "" {
-		indexSections = append(indexSections, footerText)
-	}
-	if bottomNav != "" {
-		if !nav.IsLibrary {
-			indexSections = append(indexSections, "---")
-		}
-		indexSections = append(indexSections, bottomNav)
-	}
-	indexContent := marker(manifest.ID, model.OutputChapter) + strings.Join(indexSections, "\n\n")
+	sections := readmeSections(readmeInput{
+		manifest: manifest, bodies: bodies, entries: entries, documents: index,
+		topNav: topNav, bottomNav: bottomNav, badges: badges, isLibrary: nav.IsLibrary,
+	})
+	indexContent := marker(manifest.ID, model.OutputChapter) + strings.Join(sections, "\n\n")
 	indexContent = expandRefs(indexContent, "README.md", manifest, layout, cross)
 	files = append(files, File{Path: "README.md", Content: strings.TrimRight(indexContent, "\n") + "\n"})
 
@@ -826,36 +1011,11 @@ func renderParts(manifest *model.Manifest, bodies map[model.ID]string, index []I
 	})
 	first := firstDocument(manifest, layout, parts, partFile)
 	topNav, bottomNav := readmeNav(nav, index, first)
-	indexSections := make([]string, 0, 8)
-	if topNav != "" {
-		indexSections = append(indexSections, topNav)
-	}
-	if badges != "" {
-		indexSections = append(indexSections, badges)
-	}
-	indexSections = append(indexSections, heading(1, "", manifest.Root.Title))
-	if rootBlocks := joinBlocks(blockTexts(manifest, bodies, manifest.Root.Blocks)); rootBlocks != "" {
-		indexSections = append(indexSections, rootBlocks)
-	}
-	if legend := statusLegendMarkdown(manifest); legend != "" {
-		indexSections = append(indexSections, legend)
-	}
-	if len(entries) > 0 {
-		indexSections = append(indexSections, "## Index", strings.TrimRight(bookIndexMarkdown(entries, manifest.StatusEnabled()), "\n"))
-	}
-	if documentIndex := documentIndexMarkdown(index); documentIndex != "" {
-		indexSections = append(indexSections, "## Document Index", documentIndex)
-	}
-	if footerText := footer(manifest, bodies); footerText != "" {
-		indexSections = append(indexSections, footerText)
-	}
-	if bottomNav != "" {
-		if !nav.IsLibrary {
-			indexSections = append(indexSections, "---")
-		}
-		indexSections = append(indexSections, bottomNav)
-	}
-	indexContent := marker(manifest.ID, model.OutputPart) + strings.Join(indexSections, "\n\n")
+	sections := readmeSections(readmeInput{
+		manifest: manifest, bodies: bodies, entries: entries, documents: index,
+		topNav: topNav, bottomNav: bottomNav, badges: badges, isLibrary: nav.IsLibrary,
+	})
+	indexContent := marker(manifest.ID, model.OutputPart) + strings.Join(sections, "\n\n")
 	indexContent = expandRefs(indexContent, "README.md", manifest, layout, cross)
 	files := []File{{Path: "README.md", Content: strings.TrimRight(indexContent, "\n") + "\n"}}
 

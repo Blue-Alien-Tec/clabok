@@ -17,11 +17,11 @@ Three output modes exist. Monolith writes one README, chapter writes one file pe
 
 Navigation is generated. A book README lists every registered book and the first document; split files carry previous, index and next links; the library README carries the document index.
 
-The book index is a list or a table derived from the data. Prose adds a description column, status adds a status column, and the per-file contents list never carries prose.
+The book index is a list or a table derived from the data. Prose adds a description column, status adds a status column, and the per-file contents list never carries prose. `library.index.columns` selects `title`, `description`, `status` and `path`, `library.index.shape` selects `auto`, `list` or `table`, and an explicit column list always renders a table.
 
 Headings come from node titles. Anchors are stable and number independent; `####` and deeper in prose are text. Numbering is opt-in and changes the heading text, not the anchors.
 
-The library README is the repository home: badges, title, the library content and the document index. The content blocks render first, then the document index closes the README.
+The library README is the repository home. It is assembled from slots: navigation, badges, the H1 title, the footer and the bottom navigation have fixed positions, while `content`, `note`, `status`, `toc`, `documentIndex` and `chapters` are ordered through `library.slots`; an unlisted slot is hidden. The first library key materializes the default order. A slot order never reorders the tree; changing the block order still requires `move`. `library.toc.heading` and `library.toc.title` rename the index heading.
 
 Render findings cover missing bodies, unknown status, unresolved badges, missing layouts, dangling references and structural problems. `check` reports the findings; `verify` runs the acceptance view of the same book.
 

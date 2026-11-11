@@ -464,6 +464,42 @@ func TestRenderAsciiUIAnchor(t *testing.T) {
 	if !strings.Contains(result.Files[0].Content, "Buy: UIButton") {
 		t.Fatalf("override missing\n%s", result.Files[0].Content)
 	}
+
+	// Moving a generated block changes only its position; the drawing bytes stay identical.
+	before := drawingSection(t, result.Files[0].Content, 50)
+	blocks := manifest.Root.Children[0].Blocks
+	remaining := make([]model.ID, 0, len(blocks))
+	for _, id := range blocks {
+		if id != 50 {
+			remaining = append(remaining, id)
+		}
+	}
+	manifest.Root.Children[0].Blocks = remaining
+	manifest.Root.Blocks = append(manifest.Root.Blocks, 50)
+	encoded, err = manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAtomic(manifestPath, encoded); err != nil {
+		t.Fatal(err)
+	}
+	result, err = s.service.Render("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after := drawingSection(t, result.Files[0].Content, 50); after != before {
+		t.Fatalf("the generated drawing changed after a move:\n%s\n%s", before, after)
+	}
+}
+
+func drawingSection(t *testing.T, content string, id model.ID) string {
+	t.Helper()
+	start := strings.Index(content, "<!-- asciiui:"+id.String()+" -->")
+	end := strings.Index(content, "<!-- /asciiui:"+id.String()+" -->")
+	if start < 0 || end < start {
+		t.Fatalf("drawing %s is missing\n%s", id, content)
+	}
+	return content[start : end+len("<!-- /asciiui:"+id.String()+" -->")]
 }
 
 func TestCheckMissingLayout(t *testing.T) {

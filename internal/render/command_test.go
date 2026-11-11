@@ -12,6 +12,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
+	"github.com/Blue-Alien-Tec/clabok/internal/structure"
 )
 
 func run(t *testing.T, directory string, args ...string) (int, string, string) {
@@ -21,6 +22,7 @@ func run(t *testing.T, directory string, args ...string) (int, string, string) {
 	config.Register(registry)
 	coordinator.Register(registry)
 	lifecycle.Register(registry)
+	structure.Register(registry)
 	Register(registry, nil)
 	var stdout, stderr strings.Builder
 	code := cli.Run(registry, args, &stdout, &stderr)
@@ -114,6 +116,109 @@ func TestCheckCommand(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "render.check-failed") || !strings.Contains(stderr, "body.forbidden-heading") {
 		t.Fatalf("unexpected failure %s", stderr)
+	}
+}
+
+func TestLibraryLayoutSlots(t *testing.T) {
+	directory := prepareProject(t)
+	out := filepath.Join(directory, "out")
+	readREADME := func() string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(out, "README.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	if code, _, stderr := run(t, directory, "sync", "--book", "fixture", "--write", "--out", out); code != cli.ExitOK {
+		t.Fatalf("write exit %d: %s", code, stderr)
+	}
+	readme := readREADME()
+	if !strings.Contains(readme, "## Index") || !strings.Contains(readme, "One") {
+		t.Fatalf("default README %s", readme)
+	}
+
+	for _, setting := range [][2]string{
+		{"library.navigation", "off"},
+		{"library.badges", "off"},
+		{"library.documentIndex", "off"},
+		{"library.slots", "content"},
+	} {
+		if code, _, stderr := run(t, directory, "book", "set", "fixture",
+			setting[0], setting[1]); code != cli.ExitOK {
+			t.Fatalf("%v exit %d: %s", setting, code, stderr)
+		}
+	}
+	if code, _, stderr := run(t, directory, "sync", "--book", "fixture", "--write", "--out", out); code != cli.ExitOK {
+		t.Fatalf("minimal write exit %d: %s", code, stderr)
+	}
+	readme = readREADME()
+	for _, absent := range []string{"## Index", "Document Index", "One"} {
+		if strings.Contains(readme, absent) {
+			t.Fatalf("minimal README still contains %q: %s", absent, readme)
+		}
+	}
+	if !strings.Contains(readme, "# Book") {
+		t.Fatalf("minimal README lost the title: %s", readme)
+	}
+
+	for _, setting := range [][2]string{
+		{"library.slots", "content,toc"},
+		{"library.toc.heading", "3"},
+		{"library.toc.title", "Contents"},
+		{"library.index.columns", "title,path"},
+		{"library.index.shape", "table"},
+	} {
+		if code, _, stderr := run(t, directory, "book", "set", "fixture",
+			setting[0], setting[1]); code != cli.ExitOK {
+			t.Fatalf("%v exit %d: %s", setting, code, stderr)
+		}
+	}
+	if code, _, stderr := run(t, directory, "sync", "--book", "fixture", "--write", "--out", out); code != cli.ExitOK {
+		t.Fatalf("heading write exit %d: %s", code, stderr)
+	}
+	readme = readREADME()
+	if !strings.Contains(readme, "### Contents") || !strings.Contains(readme, "| Document | Path |") {
+		t.Fatalf("heading projection %s", readme)
+	}
+
+	if code, _, stderr := run(t, directory, "book", "set", "fixture",
+		"library.slots", "chapters,toc"); code != cli.ExitOK {
+		t.Fatalf("order exit %d: %s", code, stderr)
+	}
+	if code, _, stderr := run(t, directory, "sync", "--book", "fixture", "--write", "--out", out); code != cli.ExitOK {
+		t.Fatalf("order write exit %d: %s", code, stderr)
+	}
+	readme = readREADME()
+	chapterAt := strings.Index(readme, "## One")
+	tocAt := strings.Index(readme, "### Contents")
+	if chapterAt < 0 || tocAt < 0 || chapterAt > tocAt {
+		t.Fatalf("chapter must precede the index: %s", readme)
+	}
+}
+
+func TestLibraryLayoutDriftAndRevert(t *testing.T) {
+	directory := prepareProject(t)
+	out := filepath.Join(directory, "out")
+	if code, _, stderr := run(t, directory, "sync", "--book", "fixture", "--write", "--out", out); code != cli.ExitOK {
+		t.Fatalf("write exit %d: %s", code, stderr)
+	}
+	if code, _, stderr := run(t, directory, "sync", "--book", "fixture", "--check", "--out", out); code != cli.ExitOK {
+		t.Fatalf("clean check exit %d: %s", code, stderr)
+	}
+	if code, _, stderr := run(t, directory, "book", "set", "fixture",
+		"library.toc.title", "Contents"); code != cli.ExitOK {
+		t.Fatalf("set exit %d: %s", code, stderr)
+	}
+	if code, _, _ := run(t, directory, "sync", "--book", "fixture", "--check", "--out", out); code == cli.ExitOK {
+		t.Fatal("a slot change must dirty the README")
+	}
+	if code, _, stderr := run(t, directory, "book", "set", "fixture",
+		"library.toc.title", "Index"); code != cli.ExitOK {
+		t.Fatalf("revert exit %d: %s", code, stderr)
+	}
+	if code, _, stderr := run(t, directory, "sync", "--book", "fixture", "--check", "--out", out); code != cli.ExitOK {
+		t.Fatalf("reverted check exit %d: %s", code, stderr)
 	}
 }
 

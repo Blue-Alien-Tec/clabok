@@ -561,4 +561,74 @@ func (validator *manifestValidator) validateSettings() {
 		validator.add("model.invalid-setting", "settings.language",
 			"expected a language id such as de, de-DE or pt-BR, got %q", language)
 	}
+	validator.validateLibraryLayout()
+}
+
+func (validator *manifestValidator) validateLibraryLayout() {
+	layout := validator.manifest.Settings.Library
+	if layout == nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, slot := range layout.Slots {
+		if StructuralSlot(slot) {
+			validator.add("model.invalid-setting", "settings.library.slots",
+				"the slot %q has a fixed position", slot)
+			continue
+		}
+		if !OrderableSlot(slot) {
+			validator.add("model.invalid-setting", "settings.library.slots",
+				"unknown orderable slot %q", slot)
+			continue
+		}
+		if seen[slot] {
+			validator.add("model.invalid-setting", "settings.library.slots",
+				"the slot %q is listed twice", slot)
+		}
+		seen[slot] = true
+	}
+	if index := layout.Index; index != nil {
+		if !ValidIndexShape(index.Shape) {
+			validator.add("model.invalid-setting", "settings.library.index.shape",
+				"unknown index shape %q", index.Shape)
+		}
+		columns := map[string]bool{}
+		hasTitle := false
+		for _, column := range index.Columns {
+			if !ValidIndexColumn(column) {
+				validator.add("model.invalid-setting", "settings.library.index.columns",
+					"unknown index column %q", column)
+				continue
+			}
+			if columns[column] {
+				validator.add("model.invalid-setting", "settings.library.index.columns",
+					"the column %q is listed twice", column)
+			}
+			columns[column] = true
+			if column == "title" {
+				hasTitle = true
+			}
+		}
+		if len(index.Columns) > 0 && !hasTitle {
+			validator.add("model.invalid-setting", "settings.library.index.columns",
+				"the index columns must include title")
+		}
+	}
+	for path, meta := range map[string]*SlotMeta{
+		"settings.library.toc":           layout.Toc,
+		"settings.library.documentIndex": layout.DocumentIndex,
+		"settings.library.note":          layout.Note,
+	} {
+		if meta == nil {
+			continue
+		}
+		if meta.Heading != 0 && (meta.Heading < 2 || meta.Heading > 6) {
+			validator.add("model.invalid-setting", path+".heading",
+				"the heading level must be between 2 and 6")
+		}
+		if meta.Title != "" && strings.TrimSpace(meta.Title) == "" {
+			validator.add("model.invalid-setting", path+".title",
+				"an empty title override is not allowed; hide the slot instead")
+		}
+	}
 }

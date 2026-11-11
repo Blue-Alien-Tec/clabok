@@ -183,6 +183,86 @@ func TestBookSetLanguage(t *testing.T) {
 	}
 }
 
+func TestBookSetLibraryLayout(t *testing.T) {
+	directory := prepareProject(t)
+	for _, args := range [][]string{
+		{"book", "set", "fixture", "library.navigation", "off"},
+		{"book", "set", "fixture", "library.documentIndex", "off"},
+		{"book", "set", "fixture", "library.slots", "content,toc,status"},
+		{"book", "set", "fixture", "library.toc.heading", "3"},
+		{"book", "set", "fixture", "library.toc.title", "Contents"},
+		{"book", "set", "fixture", "library.index.columns", "title,path"},
+		{"book", "set", "fixture", "library.index.shape", "table"},
+	} {
+		if code, _, stderr := run(t, directory, args...); code != cli.ExitOK {
+			t.Fatalf("%v exit %d: %s", args, code, stderr)
+		}
+	}
+	settings := manifestSettings(t, directory)
+	if settings.Library == nil {
+		t.Fatal("the library layout is missing")
+	}
+	layout := settings.Library
+	if layout.Navigation == nil || *layout.Navigation {
+		t.Fatalf("navigation %+v", layout.Navigation)
+	}
+	if len(layout.Slots) != 3 || layout.Slots[0] != "content" || layout.Slots[2] != "status" {
+		t.Fatalf("slots %+v", layout.Slots)
+	}
+	if layout.Toc == nil || layout.Toc.Heading != 3 || layout.Toc.Title != "Contents" {
+		t.Fatalf("toc %+v", layout.Toc)
+	}
+	if layout.Index == nil || layout.Index.Shape != "table" ||
+		len(layout.Index.Columns) != 2 || layout.Index.Columns[1] != "path" {
+		t.Fatalf("index %+v", layout.Index)
+	}
+
+	for _, args := range [][]string{
+		{"book", "set", "fixture", "library.slots", "nav"},
+		{"book", "set", "fixture", "library.slots", "content,content"},
+		{"book", "set", "fixture", "library.index.columns", "description"},
+		{"book", "set", "fixture", "library.index.shape", "grid"},
+		{"book", "set", "fixture", "library.toc.heading", "9"},
+	} {
+		if code, _, _ := run(t, directory, args...); code == cli.ExitOK {
+			t.Fatalf("%v must be refused", args)
+		}
+	}
+}
+
+func TestBookSetMaterializesTheDefaultSlots(t *testing.T) {
+	directory := prepareProject(t)
+	if code, _, stderr := run(t, directory, "book", "set", "fixture",
+		"library.navigation", "off"); code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	layout := manifestSettings(t, directory).Library
+	if layout == nil || len(layout.Slots) != 5 {
+		t.Fatalf("the default slots must be materialized: %+v", layout)
+	}
+}
+
+func manifestSettings(t *testing.T, directory string) model.Settings {
+	t.Helper()
+	layout, err := store.NewLayout(filepath.Join(directory, "_CLABOK"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := layout.Book("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(paths.Dir, lifecycle.ManifestMember))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest.Settings
+}
+
 func manifestLanguage(t *testing.T, directory string) string {
 	t.Helper()
 	layout, err := store.NewLayout(filepath.Join(directory, "_CLABOK"))

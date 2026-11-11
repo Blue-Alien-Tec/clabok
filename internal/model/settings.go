@@ -23,6 +23,9 @@ type Settings struct {
 	// Language is the declared check language of the book. Empty inherits grammar.language, then
 	// the built-in default; Normalize never fills it, so an unset language stays absent.
 	Language string `json:"language,omitempty"`
+	// Library orders the README slots of the book. Nil is the default output; Normalize never
+	// fills it, so an unconfigured book keeps its exact bytes.
+	Library *LibraryLayout `json:"library,omitempty"`
 }
 
 // DefaultSettings returns the settings of a new book.

@@ -129,8 +129,8 @@ func TestStatusReportsPendingSteps(t *testing.T) {
 	if book.State != "closed" || book.Manifest.From != 2 || !book.Manifest.Supported {
 		t.Fatalf("book %+v", book)
 	}
-	if len(book.Manifest.Steps) != 2 || book.Manifest.Steps[0] != "manifest-v2-v3" ||
-		book.Manifest.Steps[1] != "manifest-v3-v4" {
+	if len(book.Manifest.Steps) != 3 || book.Manifest.Steps[0] != "manifest-v2-v3" ||
+		book.Manifest.Steps[1] != "manifest-v3-v4" || book.Manifest.Steps[2] != "manifest-v4-v5" {
 		t.Fatalf("steps %+v", book.Manifest.Steps)
 	}
 	if report.Registry.From != 1 || len(report.Registry.Steps) != 1 {
