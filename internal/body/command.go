@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
+	"github.com/Blue-Alien-Tec/clabok/internal/textinput"
 )
 
 type getPayload struct {
@@ -400,20 +400,37 @@ func readBodyText(file, text string) (string, *cli.Error) {
 			WithHint("pass --file <path|-> or --body <value>")
 	}
 	if text != "" {
-		return text, nil
+		return decodeInput(text)
 	}
+	var data []byte
+	var err error
 	if file == "-" {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", cli.Fail("body.read-failed", "%v", err)
-		}
-		return string(data), nil
+		data, err = textinput.ReadStdin(os.Stdin)
+	} else {
+		data, err = textinput.ReadFile(file)
 	}
-	data, err := os.ReadFile(file)
 	if err != nil {
-		return "", cli.Fail("body.read-failed", "%v", err)
+		return "", inputError(err)
 	}
 	return string(data), nil
+}
+
+// decodeInput normalizes an inline value: a leading byte-order mark is stripped.
+func decodeInput(text string) (string, *cli.Error) {
+	decoded, err := textinput.Decode([]byte(text))
+	if err != nil {
+		return "", inputError(err)
+	}
+	return string(decoded), nil
+}
+
+// inputError maps a decode failure to its code and an I/O failure to the command's read code.
+func inputError(err error) *cli.Error {
+	var decodeErr *textinput.Error
+	if errors.As(err, &decodeErr) {
+		return cli.AsError(decodeErr)
+	}
+	return cli.Fail("body.read-failed", "%v", err)
 }
 
 type pairFile struct {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +14,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/config"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
+	"github.com/Blue-Alien-Tec/clabok/internal/textinput"
 )
 
 // Register adds the grammar command surface.
@@ -393,11 +393,15 @@ func readFile(path string) (string, *cli.Error) {
 	var data []byte
 	var err error
 	if path == "-" {
-		data, err = io.ReadAll(os.Stdin)
+		data, err = textinput.ReadStdin(os.Stdin)
 	} else {
-		data, err = os.ReadFile(path)
+		data, err = textinput.ReadFile(path)
 	}
 	if err != nil {
+		var decodeErr *textinput.Error
+		if errors.As(err, &decodeErr) {
+			return "", cli.AsError(decodeErr)
+		}
 		return "", cli.Fail("grammar.read-failed", "%v", err)
 	}
 	return string(data), nil

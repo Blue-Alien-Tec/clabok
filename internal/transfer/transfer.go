@@ -210,16 +210,17 @@ type idPair struct {
 }
 
 type importPayload struct {
-	DryRun  bool     `json:"dryRun"`
-	Action  string   `json:"action"`
-	Book    string   `json:"book"`
-	Source  string   `json:"source,omitempty"`
-	IDCount int      `json:"idCount"`
-	IDs     []idPair `json:"ids,omitempty"`
-	Members int      `json:"members"`
-	Renamed bool     `json:"renamed,omitempty"`
-	Receipt string   `json:"receipt,omitempty"`
-	Inbound string   `json:"inbound,omitempty"`
+	DryRun     bool     `json:"dryRun"`
+	Action     string   `json:"action"`
+	Book       string   `json:"book"`
+	Source     string   `json:"source,omitempty"`
+	IDCount    int      `json:"idCount"`
+	IDs        []idPair `json:"ids,omitempty"`
+	Members    int      `json:"members"`
+	Renamed    bool     `json:"renamed,omitempty"`
+	Normalized bool     `json:"normalized,omitempty"`
+	Receipt    string   `json:"receipt,omitempty"`
+	Inbound    string   `json:"inbound,omitempty"`
 }
 
 func (payload importPayload) DryRunResult() bool { return payload.DryRun }
@@ -229,6 +230,9 @@ func (payload importPayload) Text() string {
 		payload.Members, payload.IDCount)
 	if payload.Renamed {
 		line += fmt.Sprintf(" from %s", payload.Source)
+	}
+	if payload.Normalized {
+		line += " (text normalized)"
 	}
 	if payload.Inbound != "" {
 		line += " (inbound links unverified)"

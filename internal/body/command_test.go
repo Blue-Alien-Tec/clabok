@@ -110,6 +110,43 @@ func TestBodySetGetList(t *testing.T) {
 	}
 }
 
+func TestBodyFileEncoding(t *testing.T) {
+	directory := prepareProject(t)
+	bomFile := filepath.Join(directory, "bom.md")
+	if err := os.WriteFile(bomFile, []byte("\uFEFFHéllo\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := run(t, directory, "body", "set", "--book", "fixture", "11",
+		"--file", bomFile); code != cli.ExitOK {
+		t.Fatalf("a BOM body must be accepted: exit %d %s", code, stderr)
+	}
+	stored := filepath.Join(directory, "_CLABOK", "fixture", "blocks", "11.md")
+	data, err := os.ReadFile(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "Héllo\n" {
+		t.Fatalf("stored body %q", data)
+	}
+
+	utf16File := filepath.Join(directory, "utf16.md")
+	if err := os.WriteFile(utf16File, []byte{'a', 0x00, 'b', 0x00}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := run(t, directory, "body", "set", "--book", "fixture", "11",
+		"--file", utf16File)
+	if code == cli.ExitOK || !strings.Contains(stderr, "text.invalid-encoding") {
+		t.Fatalf("a BOM-less UTF-16 file must be refused: exit %d %s", code, stderr)
+	}
+	after, err := os.ReadFile(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != "Héllo\n" {
+		t.Fatalf("a failed set changed the body: %q", after)
+	}
+}
+
 func TestBodyHeadingReject(t *testing.T) {
 	directory := prepareProject(t)
 	code, _, stderr := run(t, directory, "body", "set", "--book", "fixture", "11", "--body", "## no\n")

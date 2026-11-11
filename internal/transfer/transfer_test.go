@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,18 @@ func prepareBook(t *testing.T) (string, string) {
 	runOK(t, directory, "body", "set", "--book", "guide", "0", "--parent", chapter,
 		"--body", "See [[id:"+block+"]].\n\nSecond paragraph.")
 	return directory, block
+}
+
+// dataOf decodes the data object of a command envelope.
+func dataOf(t *testing.T, payload string) map[string]any {
+	t.Helper()
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
+		t.Fatalf("payload %s: %v", payload, err)
+	}
+	return envelope.Data
 }
 
 func targetOf(t *testing.T, payload string) string {
@@ -191,6 +204,45 @@ func TestImportRefusesAnUnresolvedReference(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(directory, "_CLABOK", "copy")); !os.IsNotExist(err) {
 		t.Fatal("a failed import left a container behind")
+	}
+}
+
+func TestImportNormalizesEncoding(t *testing.T) {
+	directory, _ := prepareBook(t)
+	runOK(t, directory, "book", "close", "guide")
+	exported := filepath.Join(directory, "export")
+	runOK(t, directory, "export", "--book", "guide", "--out", exported)
+	blocks, err := filepath.Glob(filepath.Join(exported, "blocks", "*.md"))
+	if err != nil || len(blocks) == 0 {
+		t.Fatalf("exported bodies: %v", err)
+	}
+	oldID := strings.TrimSuffix(filepath.Base(blocks[0]), ".md")
+	original, err := os.ReadFile(blocks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blocks[0], append([]byte{0xEF, 0xBB, 0xBF}, original...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload := dataOf(t, runOK(t, directory, "import", "--from", exported, "--as", "copy"))
+	if normalized, _ := payload["normalized"].(bool); !normalized {
+		t.Fatalf("the import must report normalization: %v", payload)
+	}
+	newID := ""
+	pairs, _ := payload["ids"].([]any)
+	for _, item := range pairs {
+		pair, _ := item.(map[string]any)
+		if pair["from"] == oldID {
+			newID, _ = pair["to"].(string)
+		}
+	}
+	if newID == "" {
+		t.Fatalf("no ID pair for %s in %v", oldID, payload["ids"])
+	}
+	runOK(t, directory, "book", "open", "copy")
+	body := runOK(t, directory, "body", "get", "--book", "copy", newID, "--text")
+	if strings.HasPrefix(body, "\uFEFF") || !strings.Contains(body, strings.TrimSpace(string(original))) {
+		t.Fatalf("imported body %q", body)
 	}
 }
 

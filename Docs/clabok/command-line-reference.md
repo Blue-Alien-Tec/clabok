@@ -15,7 +15,7 @@ Global behavior: JSON output by default, `--text` for a human summary, `--dry-ru
 
 Structure: `add`, `move`, `remove`, `rename` and `block type`. Placement uses `--child-of`, `--index`, `--before` and `--after`.
 
-Bodies: `body set`, `body append`, `body prepend`, `body get`, `body list` and `body replace`. Block `0` creates a body under the parent.
+Bodies: `body set`, `body append`, `body prepend`, `body get`, `body list` and `body replace`. Block `0` creates a body under the parent. `--file` and stdin accept UTF-8 with or without a byte-order mark, and UTF-16 or UTF-32 with a byte-order mark; an input that cannot be decoded is refused with `text.invalid-encoding`.
 
 Editorial: `prose`, `region`, `status`, `badge`, `layout` and `asciiui`. All are open-only and dry-run aware.
 

@@ -13,6 +13,8 @@ A body is Markdown text in one block. The store keeps it byte for byte after nor
 
 `body set` replaces a body, `body append` and `body prepend` extend it, and block `0` creates a new block under the parent. `body get` reads it, optionally a line range, and `body list` lists the blocks of the book.
 
+Text is decoded at the command boundary. A leading UTF-8 byte-order mark is ignored, UTF-16 or UTF-32 with a byte-order mark is transcoded, and Windows line endings become LF in a body. A file without a byte-order mark that is not valid UTF-8, or that contains NUL bytes, is refused with `text.invalid-encoding` and the byte offset. The same rule applies to every `--file` and stdin input, including prose, regions, layout notes, AsciiUI specs, grammar checks and imports.
+
 ```text
 pecia body set --book guide 0 --parent <chapter> --file chapter.md
 pecia body append --book guide <block> --body "One more paragraph."

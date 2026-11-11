@@ -2,9 +2,9 @@ package editorial
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -15,6 +15,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/structure"
+	"github.com/Blue-Alien-Tec/clabok/internal/textinput"
 )
 
 // Register adds the editorial command surface.
@@ -344,20 +345,32 @@ func readText(text, file string) (string, *cli.Error) {
 			WithHint("pass the text with the command's text flag or --file <path|->")
 	}
 	if text != "" {
-		return text, nil
-	}
-	if file == "-" {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", cli.Fail("editorial.read-failed", "%v", err)
+		decoded, decodeErr := textinput.Decode([]byte(text))
+		if decodeErr != nil {
+			return "", inputError(decodeErr)
 		}
-		return string(data), nil
+		return string(decoded), nil
 	}
-	data, err := os.ReadFile(file)
+	var data []byte
+	var err error
+	if file == "-" {
+		data, err = textinput.ReadStdin(os.Stdin)
+	} else {
+		data, err = textinput.ReadFile(file)
+	}
 	if err != nil {
-		return "", cli.Fail("editorial.read-failed", "%v", err)
+		return "", inputError(err)
 	}
 	return string(data), nil
+}
+
+// inputError maps a decode failure to its code and an I/O failure to the command's read code.
+func inputError(err error) *cli.Error {
+	var decodeErr *textinput.Error
+	if errors.As(err, &decodeErr) {
+		return cli.AsError(decodeErr)
+	}
+	return cli.Fail("editorial.read-failed", "%v", err)
 }
 
 func payloadOf(receipt structure.Receipt, dryRun bool) payload {

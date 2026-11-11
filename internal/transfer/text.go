@@ -1,9 +1,11 @@
 package transfer
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/refs"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
+	"github.com/Blue-Alien-Tec/clabok/internal/textinput"
 )
 
 // descriptor is the export sidecar. Member hashes are informational: `export --check` uses them and
@@ -161,39 +164,48 @@ func readDescriptor(directory string) (descriptor, error) {
 	return sidecar, nil
 }
 
-// readExport reads the descriptor and every member of a text form.
-func readExport(directory string, verify bool) (descriptor, map[string][]byte, error) {
+// readExport reads the descriptor and every member of a text form. Members are decoded to UTF-8;
+// normalized reports whether any member changed in the process.
+func readExport(directory string, verify bool) (descriptor, map[string][]byte, bool, error) {
 	sidecar, err := readDescriptor(directory)
 	if err != nil {
-		return descriptor{}, nil, err
+		return descriptor{}, nil, false, err
 	}
 	members := make(map[string][]byte, len(sidecar.Members))
+	normalized := false
 	for name, expected := range sidecar.Members {
 		if err := validMemberName(name); err != nil {
-			return descriptor{}, nil, err
+			return descriptor{}, nil, false, err
 		}
 		data, readErr := os.ReadFile(filepath.Join(directory, filepath.FromSlash(name)))
 		if readErr != nil {
-			return descriptor{}, nil, fail("import.member-missing",
+			return descriptor{}, nil, false, fail("import.member-missing",
 				"the export names %s but the file is missing", name)
 		}
 		if verify && hashBytes(data) != expected {
-			return descriptor{}, nil, fail("import.member-changed",
+			return descriptor{}, nil, false, fail("import.member-changed",
 				"%s does not match the export hash; pass without --verify for a hand-edited export",
 				name)
 		}
-		members[name] = data
+		decoded, decodeErr := textinput.Decode(data)
+		if decodeErr != nil {
+			return descriptor{}, nil, false, fmt.Errorf("member %s: %w", name, decodeErr)
+		}
+		if !bytes.Equal(decoded, data) {
+			normalized = true
+		}
+		members[name] = decoded
 	}
 	if _, ok := members[manifestMember]; !ok {
-		return descriptor{}, nil, fail("import.missing-manifest",
+		return descriptor{}, nil, false, fail("import.missing-manifest",
 			"the export carries no %s", manifestMember)
 	}
-	return sidecar, members, nil
+	return sidecar, members, normalized, nil
 }
 
 // runImport creates a book from a text form with fresh IDs.
 func runImport(env *cli.Env, from, as, requestedPath string, library, verify bool) (importPayload, error) {
-	_, members, err := readExport(from, verify)
+	_, members, normalized, err := readExport(from, verify)
 	if err != nil {
 		return importPayload{}, err
 	}
@@ -235,7 +247,7 @@ func runImport(env *cli.Env, from, as, requestedPath string, library, verify boo
 	payload := importPayload{
 		DryRun: env.Globals.DryRun, Action: "import", Book: string(target), Source: string(source),
 		IDCount: len(ids), Members: len(members), Renamed: !sameBook(source, target),
-		Inbound: "unverified",
+		Normalized: normalized, Inbound: "unverified",
 	}
 	var ledgerSnapshot []byte
 	if !env.Globals.DryRun {
@@ -321,7 +333,7 @@ func runImport(env *cli.Env, from, as, requestedPath string, library, verify boo
 		return payload, marshalErr
 	}
 	receiptPath, receiptErr := context.commitImport(target, output, library, containerData,
-		len(members), source)
+		len(members), source, normalized)
 	if receiptErr != nil {
 		return payload, receiptErr
 	}
@@ -344,7 +356,7 @@ func (context *transferContext) allocate(dryRun bool, count int) (model.ID, erro
 // commitImport writes the container and registers the book, restoring the ledger and the registry
 // when a later step fails.
 func (context *transferContext) commitImport(target model.BookID, output string, library bool,
-	containerData []byte, members int, source model.BookID) (string, error) {
+	containerData []byte, members int, source model.BookID, normalized bool) (string, error) {
 	release, lockErr := context.Life.LockStore()
 	if lockErr != nil {
 		return "", lockErr
@@ -376,7 +388,7 @@ func (context *transferContext) commitImport(target model.BookID, output string,
 	}
 	return context.writeReceipt(map[string]any{
 		"format": exportFormat, "version": exportVersion, "sourceBook": string(source),
-		"targetBook": string(target), "members": members,
+		"targetBook": string(target), "members": members, "normalized": normalized,
 	})
 }
 

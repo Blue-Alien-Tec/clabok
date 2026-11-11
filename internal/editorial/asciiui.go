@@ -1,15 +1,16 @@
 package editorial
 
 import (
+	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/asciiui"
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/structure"
+	"github.com/Blue-Alien-Tec/clabok/internal/textinput"
 )
 
 type layoutPayload struct {
@@ -130,11 +131,15 @@ func readSpec(file string) (string, *cli.Error) {
 	var data []byte
 	var err error
 	if file == "-" {
-		data, err = io.ReadAll(os.Stdin)
+		data, err = textinput.ReadStdin(os.Stdin)
 	} else {
-		data, err = os.ReadFile(file)
+		data, err = textinput.ReadFile(file)
 	}
 	if err != nil {
+		var decodeErr *textinput.Error
+		if errors.As(err, &decodeErr) {
+			return "", cli.AsError(decodeErr)
+		}
 		return "", cli.Fail("asciiui.read-failed", "%v", err)
 	}
 	if parseErr := asciiui.Validate(string(data)); parseErr != nil {

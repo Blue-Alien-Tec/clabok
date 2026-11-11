@@ -186,6 +186,49 @@ func TestGrammarApplyEndToEnd(t *testing.T) {
 	}
 }
 
+func TestGrammarCheckFileEncoding(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v2/languages" {
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English"}]`)
+			return
+		}
+		_ = r.ParseForm()
+		text := r.Form.Get("text")
+		at := strings.Index(text, "teh")
+		if at < 0 {
+			fmt.Fprint(w, `{"matches":[]}`)
+			return
+		}
+		fmt.Fprintf(w, `{"matches":[{"message":"typo","offset":%d,"length":3,`+
+			`"rule":{"id":"TEST"},"replacements":[{"value":"the"}]}]}`, at)
+	}))
+	defer server.Close()
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	path := filepath.Join(directory, "bom.md")
+	if err := os.WriteFile(path, []byte("\uFEFFteh cat\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload := dataOf(t, runOK(t, directory, "grammar", "check", "--file", path))
+	findings, _ := payload["findings"].([]any)
+	if len(findings) != 1 {
+		t.Fatalf("findings %v", payload["findings"])
+	}
+	finding, _ := findings[0].(map[string]any)
+	if finding["offending"] != "teh" {
+		t.Fatalf("the BOM moved into the finding: %v", finding)
+	}
+
+	if err := os.WriteFile(path, []byte{'a', 0x00, 'b', 0x00}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := run(t, directory, "grammar", "check", "--file", path)
+	if code == cli.ExitOK || !strings.Contains(stderr, "text.invalid-encoding") {
+		t.Fatalf("a BOM-less UTF-16 file must be refused: exit %d %s", code, stderr)
+	}
+}
+
 func TestGrammarCheckSkip(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
