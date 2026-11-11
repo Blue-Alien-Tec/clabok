@@ -10,11 +10,14 @@ const (
 	RegionNotes RegionKind = "notes"
 	// RegionProse holds the block with the one-line index prose of a node.
 	RegionProse RegionKind = "prose"
+	// RegionStatus holds the legend meaning of one configured status level.
+	RegionStatus RegionKind = "status"
 )
 
 // Valid reports whether the region kind is known.
 func (kind RegionKind) Valid() bool {
-	return kind == RegionFooter || kind == RegionNotes || kind == RegionProse
+	return kind == RegionFooter || kind == RegionNotes || kind == RegionProse ||
+		kind == RegionStatus
 }
 
 // TargetKind names what a region collection or a reference points at.

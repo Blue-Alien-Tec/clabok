@@ -19,7 +19,7 @@ Every block has an identifier, an optional type, an optional lock and an optiona
 
 Regions hold content outside the node flow: the book footer, one notes region per target, and one index-prose block per node. A region has a target, an ordered block list and its own identifier.
 
-The manifest is version 6. It holds the tree, the regions, block metadata, the status configuration, the badge declarations (including their presentation, order and cache fields), the repository-layout configuration and the book settings, including the optional book language and the optional README layout. It never holds a body.
+The manifest is version 7. It holds the tree, the regions, block metadata, the status configuration and its levels, the badge declarations (including their presentation, order and cache fields), the repository-layout configuration and the book settings, including the optional book language and the optional README layout. It never holds a body.
 
 Identifiers are stable and never reused. Moving a node or a block keeps its identifier; a copy receives a new one. The library ledger hands out every identifier, so uniqueness is a constraint rather than a probability.
 

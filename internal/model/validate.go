@@ -319,6 +319,16 @@ func (validator *manifestValidator) validateRegions() {
 					"the footer holds at most one block")
 			}
 		}
+		if region.Kind == RegionStatus {
+			if region.Target.Kind != TargetBook {
+				validator.add("model.invalid-target", path+".target",
+					"a status region targets the book")
+			}
+			if len(region.Blocks) != 1 {
+				validator.add("model.status-block-missing", path+".blocks",
+					"a status region holds exactly one block")
+			}
+		}
 		if region.Kind == RegionNotes {
 			key := string(region.Target.Kind) + ":" + region.Target.ID.String()
 			if previous, exists := notesTargets[key]; exists {
@@ -395,6 +405,7 @@ func (validator *manifestValidator) validateProseRefs() {
 // ignores assignments, so switching it off stays reversible.
 func (validator *manifestValidator) validateStatus() {
 	manifest := validator.manifest
+	validator.validateStatusLevels()
 	if !manifest.StatusEnabled() {
 		return
 	}
@@ -402,7 +413,7 @@ func (validator *manifestValidator) validateStatus() {
 		if node.Status == "" {
 			return true
 		}
-		if _, exists := FindStatus(node.Status); !exists {
+		if _, exists := manifest.StatusLevel(node.Status); !exists {
 			validator.add("model.unknown-status", validator.nodes[node.ID]+".status",
 				"unknown status %q", node.Status)
 		}
@@ -418,11 +429,86 @@ func (validator *manifestValidator) validateStatus() {
 		if meta.Status == "" {
 			continue
 		}
-		if _, exists := FindStatus(meta.Status); !exists {
+		if _, exists := manifest.StatusLevel(meta.Status); !exists {
 			validator.add("model.unknown-status", "blockMeta["+id.String()+"].status",
 				"unknown status %q", meta.Status)
 		}
 	}
+}
+
+// validateStatusLevels checks the configured list and its description regions. The list is
+// authoritative when non-empty; the built-in set is only a fallback.
+func (validator *manifestValidator) validateStatusLevels() {
+	manifest := validator.manifest
+	if manifest.Status == nil || len(manifest.Status.Levels) == 0 {
+		return
+	}
+	levels := manifest.Status.Levels
+	if len(levels) > StatusLevelCap {
+		validator.add("model.status-level-cap", "status.levels",
+			"at most %d status levels are allowed", StatusLevelCap)
+	}
+	seen := map[string]int{}
+	described := map[ID]string{}
+	for index, level := range levels {
+		path := fmt.Sprintf("status.levels[%d]", index)
+		if level.ID == "" || ValidateTypeToken(level.ID) != "" {
+			validator.add("model.invalid-status-level", path+".id",
+				"a level id must be a single token")
+		}
+		if previous, exists := seen[level.ID]; exists {
+			validator.add("model.duplicate-status-level", path+".id",
+				"level %q is already declared at status.levels[%d]", level.ID, previous)
+		}
+		seen[level.ID] = index
+		if strings.TrimSpace(level.Label) == "" {
+			validator.add("model.invalid-status-level", path+".label",
+				"a level needs a label")
+		} else if len([]rune(level.Label)) > 40 {
+			validator.add("model.invalid-status-level", path+".label",
+				"a level label is at most 40 characters")
+		}
+		if !ValidBadgeColor(level.Color) {
+			validator.add("model.invalid-status-level", path+".color",
+				"expected a named color or a hex value, got %q", level.Color)
+		}
+		if level.DescriptionBlock.IsZero() {
+			continue
+		}
+		if previous, exists := described[level.DescriptionBlock]; exists {
+			validator.add("model.status-block-shared", path+".descriptionBlock",
+				"block %s already describes the level %q", level.DescriptionBlock, previous)
+		}
+		described[level.DescriptionBlock] = level.ID
+		if !validator.statusBlockExists(level.DescriptionBlock) {
+			validator.add("model.status-block-missing", path+".descriptionBlock",
+				"block %s is not placed in a status region", level.DescriptionBlock)
+		}
+	}
+	for _, region := range manifest.Regions {
+		if region == nil || region.Kind != RegionStatus {
+			continue
+		}
+		for _, id := range region.Blocks {
+			if _, ok := described[id]; !ok {
+				validator.add("model.status-block-orphan", "regions",
+					"status block %s is not referenced by a level", id)
+			}
+		}
+	}
+}
+
+// statusBlockExists reports whether a block sits in a status region with exactly one block.
+func (validator *manifestValidator) statusBlockExists(id ID) bool {
+	for _, region := range validator.manifest.Regions {
+		if region == nil || region.Kind != RegionStatus || len(region.Blocks) != 1 {
+			continue
+		}
+		if region.Blocks[0] == id {
+			return true
+		}
+	}
+	return false
 }
 
 // validateBadges checks the declared badge list. The detector value is a repository fact and is

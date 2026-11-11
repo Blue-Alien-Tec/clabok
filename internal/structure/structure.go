@@ -65,18 +65,23 @@ type Receipt struct {
 
 // Step is one declarative mutation.
 type Step struct {
-	Op         string
-	Title      string
-	Type       string
-	TargetKind model.TargetKind
-	Target     model.ID
-	Placement  Placement
-	Recursive  bool
-	Key        string
-	Value      string
-	Ref        *model.Ref
-	Badge      *model.Badge
-	Layout     *model.LayoutConfig
+	Op               string
+	Title            string
+	Type             string
+	TargetKind       model.TargetKind
+	Target           model.ID
+	Placement        Placement
+	Recursive        bool
+	Key              string
+	Value            string
+	Ref              *model.Ref
+	Badge            *model.Badge
+	Layout           *model.LayoutConfig
+	Level            *model.StatusLevel
+	Position         string
+	Anchor           string
+	Description      *string
+	ClearDescription bool
 }
 
 // mutation is the pure result of one step: the receipt plus the file effects the commit applies.
@@ -270,16 +275,46 @@ type StatusAssignment struct {
 // StatusSummary is the read-only view of the status system.
 type StatusSummary struct {
 	Enabled     bool
+	Fallback    bool
+	Levels      []StatusLevelView
 	Assignments []StatusAssignment
+}
+
+// StatusLevelView is one effective level with its resolved legend text.
+type StatusLevelView struct {
+	ID               string
+	Label            string
+	Color            string
+	Description      string
+	DescriptionBlock model.ID
 }
 
 // StatusSummary reads the current status configuration. The book must be open.
 func (service *Service) StatusSummary(book model.BookID) (StatusSummary, error) {
-	_, manifest, err := service.load(book)
+	paths, manifest, err := service.load(book)
 	if err != nil {
 		return StatusSummary{}, err
 	}
-	summary := StatusSummary{Enabled: manifest.StatusEnabled()}
+	summary := StatusSummary{
+		Enabled:  manifest.StatusEnabled(),
+		Fallback: manifest.StatusFallback(),
+	}
+	for _, level := range manifest.StatusLevels() {
+		description := ""
+		if !level.DescriptionBlock.IsZero() {
+			data, readErr := os.ReadFile(filepath.Join(paths.BlocksDir,
+				level.DescriptionBlock.String()+".md"))
+			if readErr == nil {
+				description = strings.Join(strings.Fields(string(data)), " ")
+			}
+		} else if summary.Fallback {
+			description = model.BuiltinDescription(level.ID)
+		}
+		summary.Levels = append(summary.Levels, StatusLevelView{
+			ID: level.ID, Label: level.Label, Color: level.Color,
+			Description: description, DescriptionBlock: level.DescriptionBlock,
+		})
+	}
 	manifest.Walk(func(node *model.Node, depth int, parent *model.Node) bool {
 		if node.Status != "" {
 			summary.Assignments = append(summary.Assignments, StatusAssignment{
@@ -566,6 +601,14 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 		return applyRemoveLayout(manifest, step)
 	case "status":
 		return applyStatus(manifest, step)
+	case "status-level-add":
+		return applyStatusLevelAdd(manifest, ids, step)
+	case "status-level-set":
+		return applyStatusLevelSet(manifest, ids, step)
+	case "status-level-move":
+		return applyStatusLevelMove(manifest, step)
+	case "status-level-remove":
+		return applyStatusLevelRemove(manifest, step)
 	case "status-config":
 		return applyStatusConfig(manifest, step)
 	case "badge":
@@ -949,7 +992,7 @@ func applyStatus(manifest *model.Manifest, step Step) (mutation, error) {
 			return mutation{}, fail("structure.status-disabled",
 				"the book does not enable status")
 		}
-		if _, ok := model.FindStatus(value); !ok {
+		if _, ok := manifest.StatusLevel(value); !ok {
 			return mutation{}, fail("structure.unknown-status", "unknown status %q", value)
 		}
 	}

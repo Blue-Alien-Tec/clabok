@@ -41,13 +41,64 @@ func FindStatus(id string) (Status, bool) {
 	return Status{}, false
 }
 
-// StatusConfig is the per-book switch for the status system.
+// BuiltinDescription returns the fallback legend text of a built-in level.
+func BuiltinDescription(id string) string {
+	if status, ok := FindStatus(id); ok {
+		return status.Description
+	}
+	return ""
+}
+
+// StatusLevel is one configured level of a book. The ID is the stable assignment key; label and
+// color are presentation; the meaning is prose and lives in a block.
+type StatusLevel struct {
+	ID               string `json:"id"`
+	Label            string `json:"label"`
+	Color            string `json:"color,omitempty"`
+	DescriptionBlock ID     `json:"descriptionBlock,omitempty"`
+}
+
+// StatusLevelCap bounds the configured list. The legend is a readable table, and a book has no use
+// for more editorial states than eight.
+const StatusLevelCap = 8
+
+// StatusConfig is the per-book switch and level list of the status system. An empty Levels list
+// means the built-in fallback; a non-empty list is authoritative.
 type StatusConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled bool          `json:"enabled"`
+	Levels  []StatusLevel `json:"levels,omitempty"`
 }
 
 // StatusEnabled reports whether the book renders the status system. Assignments are ignored while
 // the system is switched off, so disabling it is never destructive.
 func (manifest *Manifest) StatusEnabled() bool {
 	return manifest != nil && manifest.Status != nil && manifest.Status.Enabled
+}
+
+// StatusFallback reports whether the built-in levels are in effect.
+func (manifest *Manifest) StatusFallback() bool {
+	return manifest == nil || manifest.Status == nil || len(manifest.Status.Levels) == 0
+}
+
+// StatusLevels returns the effective level list: the configured levels, or the built-in four mapped
+// into configured levels without description blocks.
+func (manifest *Manifest) StatusLevels() []StatusLevel {
+	if manifest != nil && manifest.Status != nil && len(manifest.Status.Levels) > 0 {
+		return append([]StatusLevel(nil), manifest.Status.Levels...)
+	}
+	levels := make([]StatusLevel, 0, len(Statuses))
+	for _, status := range Statuses {
+		levels = append(levels, StatusLevel{ID: status.ID, Label: status.Label, Color: status.Color})
+	}
+	return levels
+}
+
+// StatusLevel returns one effective level by id.
+func (manifest *Manifest) StatusLevel(id string) (StatusLevel, bool) {
+	for _, level := range manifest.StatusLevels() {
+		if level.ID == id {
+			return level, true
+		}
+	}
+	return StatusLevel{}, false
 }

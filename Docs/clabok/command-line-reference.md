@@ -17,7 +17,7 @@ Structure: `add`, `move`, `remove`, `rename` and `block type`. Placement uses `-
 
 Bodies: `body set`, `body append`, `body prepend`, `body get`, `body list` and `body replace`. Block `0` creates a body under the parent, and `--file -` reads standard input. `--file` and stdin accept UTF-8 with or without a byte-order mark, and UTF-16 or UTF-32 with a byte-order mark; an input that cannot be decoded is refused with `text.invalid-encoding`.
 
-Editorial: `prose`, `region`, `status`, `badge`, `layout` and `asciiui`. All are open-only and dry-run aware.
+Editorial: `prose`, `region`, `status` (including `status level add|set|move|remove`), `badge`, `layout` and `asciiui`. All are open-only and dry-run aware.
 
 Grammar: `grammar check` (with `--require-check` to fail on an incomplete check and `--language` for raw or file checks), `grammar apply`, `grammar languages` and the server lifecycle commands; `terms` manages the pending and confirmed term layers and `terms check` tests a candidate against the server. The grammar keys are `grammar.endpoint`, `grammar.policy`, `grammar.timeout` and `grammar.language`, and `grammar server-info` reports the effective interval, its cap and the supported set.
 

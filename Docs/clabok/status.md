@@ -9,19 +9,19 @@
 
 # Status
 
-Status is an opt-in, per-book system that records how settled a chapter or a block is. The tool owns the vocabulary; authors assign states.
+Status is an opt-in, per-book system that records how settled a chapter or a block is. The tool ships a default vocabulary, and a book may define its own levels; authors assign levels, never markup.
 
-The vocabulary is fixed and ordered from most to least settled: `final`, `review`, `wip` and `draft`. Each state has a display label and a badge color used by the renderer.
+The status system ships a fixed fallback vocabulary, ordered from most to least settled: `final`, `review`, `wip` and `draft`. Each has a tool-owned label, badge color and legend text. A book may replace the fallback with its own list of one to eight levels; a custom list is authoritative, and the fallback only applies while the list is empty.
 
 `status enable` switches the system on for one book; `status disable` switches it off. A disabled system renders nothing and keeps every assignment, so re-enabling it is lossless.
 
-Assign a state to a node or a block with `status set --target node|block --id <target> --state <state>`. `status clear` removes an assignment, and `status show` lists the vocabulary and every assignment.
+Assign a level to a node or a block with `status set --target node|block --id <target> --state <level>`. `status clear` removes an assignment, and `status list` reports the effective levels, their legend text and every assignment; `status show` remains an alias.
 
 The renderer places the badge after the heading, in the status column of the index when that column is selected and before a block body. The legend is the `status` slot, orderable with the other README slots.
 
 With status enabled the book index is a table even without index prose: `Document | Status`, or `Document | Status | Description` when prose exists. The per-file contents list stays a list and never carries status.
 
-The vocabulary is not editable and there is no inheritance: assign a subchapter separately if it should carry a marker. An unknown state is a blocking validation error while the system is enabled.
+Configure a custom list with `status level add --level-id <id> --label <label> --color <color> [--before <id>|--after <id>]`, edit it with `status level set`, reorder it with `status level move` and remove it with `status level remove`. Labels, colors and the legend text are editable at any time; the level ID is the identity and never changes. The legend text is prose and lives in a block: `--description` or `--description-file` writes it through the prose gate, `--description-block` attaches an existing status block, and `--clear-description` removes it. A level without a description renders an empty Meaning cell. An assigned level cannot be removed until its targets are reassigned. The first add starts a custom list without copying the built-in levels; up to eight levels are allowed.
 
 A practical flow is to enable the system, assign the chapters, sync, then review the legend and the column. `status show` is the quick audit before closing the book.
 

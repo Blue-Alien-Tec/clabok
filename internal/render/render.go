@@ -312,32 +312,61 @@ func statusBadge(manifest *model.Manifest, state string) string {
 	if !manifest.StatusEnabled() || state == "" {
 		return ""
 	}
-	status, exists := model.FindStatus(state)
+	level, exists := manifest.StatusLevel(state)
 	if !exists {
 		return ""
 	}
-	label := url.PathEscape(status.Label)
-	color := status.Color
+	label := url.PathEscape(level.Label)
+	color := level.Color
 	if color == "" {
 		color = "lightgrey"
 	}
 	return fmt.Sprintf("![status: %s](https://img.shields.io/badge/status-%s-%s?style=flat-square)",
-		status.Label, label, color)
+		level.Label, label, color)
 }
 
-// statusLegendMarkdown renders the tool-owned vocabulary as a two-column table.
-func statusLegendMarkdown(manifest *model.Manifest) string {
+// statusLegendMarkdown renders the effective levels as a two-column table. A custom level without a
+// description block shows an empty Meaning cell; the built-in fallback uses the tool-owned texts.
+func statusLegendMarkdown(manifest *model.Manifest, bodies map[model.ID]string) string {
 	if !manifest.StatusEnabled() {
 		return ""
 	}
 	var builder strings.Builder
 	builder.WriteString("**Status**\n\n")
 	builder.WriteString("| Status | Meaning |\n| --- | --- |\n")
-	for _, status := range model.Statuses {
-		fmt.Fprintf(&builder, "| %s | %s |\n",
-			statusBadge(manifest, status.ID), cell(status.Description))
+	for _, level := range statusEntries(manifest, bodies) {
+		fmt.Fprintf(&builder, "| %s | %s |\n", statusBadge(manifest, level.ID),
+			cell(level.Description))
 	}
 	return strings.TrimRight(builder.String(), "\n")
+}
+
+// statusEntry is one legend row after resolving the block-backed description.
+type statusEntry struct {
+	ID          string
+	Label       string
+	Color       string
+	Description string
+}
+
+// statusEntries resolves the effective levels and their description texts.
+func statusEntries(manifest *model.Manifest, bodies map[model.ID]string) []statusEntry {
+	fallback := manifest.StatusFallback()
+	levels := manifest.StatusLevels()
+	entries := make([]statusEntry, 0, len(levels))
+	for _, level := range levels {
+		description := ""
+		switch {
+		case !level.DescriptionBlock.IsZero():
+			description = strings.Join(strings.Fields(bodies[level.DescriptionBlock]), " ")
+		case fallback:
+			description = model.BuiltinDescription(level.ID)
+		}
+		entries = append(entries, statusEntry{
+			ID: level.ID, Label: level.Label, Color: level.Color, Description: description,
+		})
+	}
+	return entries
 }
 
 func blockTexts(manifest *model.Manifest, bodies map[model.ID]string, ids []model.ID) []string {
@@ -887,7 +916,7 @@ func readmeSections(input readmeInput) []string {
 			}
 			sections = append(sections, body)
 		case model.SlotStatus:
-			if legend := statusLegendMarkdown(input.manifest); legend != "" {
+			if legend := statusLegendMarkdown(input.manifest, input.bodies); legend != "" {
 				sections = append(sections, legend)
 			}
 		case model.SlotTOC:
