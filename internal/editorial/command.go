@@ -77,7 +77,8 @@ func evaluateProse(env *cli.Env, book model.BookID, text string) (grammar.Report
 		return grammar.Report{}, cli.AsError(settingsErr)
 	}
 	gate := grammar.NewGateTimeout(values.GrammarEndpoint,
-		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()),
+		grammar.ParsePolicy(values.GrammarPolicy),
+		grammar.TermSource{GlobalPath: layout.Terms(), Dir: layout.TermsDir()},
 		values.GrammarTimeout)
 	language := grammar.Resolve(settings, values.GrammarLanguage)
 	return gate.Evaluate(context.Background(), 0, text, language), nil

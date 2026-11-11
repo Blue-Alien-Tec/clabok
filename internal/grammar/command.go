@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
@@ -23,16 +24,17 @@ func Register(registry *cli.Registry) {
 }
 
 type checkPayload struct {
-	DryRun   bool      `json:"dryRun"`
-	Book     string    `json:"book,omitempty"`
-	Block    string    `json:"block,omitempty"`
-	Checked  bool      `json:"checked"`
-	Reason   string    `json:"reason,omitempty"`
-	Language string    `json:"language,omitempty"`
-	Degraded string    `json:"degraded,omitempty"`
-	Count    int       `json:"count"`
-	Findings []Finding `json:"findings,omitempty"`
-	Warnings []Warning `json:"warnings,omitempty"`
+	DryRun     bool          `json:"dryRun"`
+	Book       string        `json:"book,omitempty"`
+	Block      string        `json:"block,omitempty"`
+	Checked    bool          `json:"checked"`
+	Reason     string        `json:"reason,omitempty"`
+	Language   string        `json:"language,omitempty"`
+	Degraded   string        `json:"degraded,omitempty"`
+	Count      int           `json:"count"`
+	Findings   []Finding     `json:"findings,omitempty"`
+	Suppressed []Suppression `json:"suppressed,omitempty"`
+	Warnings   []Warning     `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt; a check writes nothing.
@@ -59,6 +61,23 @@ func (payload checkPayload) Text() string {
 		return builder.String() + "\n"
 	}
 	fmt.Fprintf(&builder, "%d finding(s)\n", payload.Count)
+	if len(payload.Suppressed) > 0 {
+		counts := map[string]int{}
+		scopes := make([]string, 0)
+		for _, entry := range payload.Suppressed {
+			if counts[entry.Layer] == 0 {
+				scopes = append(scopes, entry.Layer)
+			}
+			counts[entry.Layer]++
+		}
+		sort.Strings(scopes)
+		parts := make([]string, 0, len(scopes))
+		for _, scope := range scopes {
+			parts = append(parts, fmt.Sprintf("%s %d", scope, counts[scope]))
+		}
+		fmt.Fprintf(&builder, "%d suppressed by terms (%s)\n",
+			len(payload.Suppressed), strings.Join(parts, ", "))
+	}
 	return builder.String()
 }
 
@@ -121,7 +140,7 @@ func languagesCommand(env *cli.Env, bookRaw string, refresh bool) (*cli.Result, 
 	if lifeErr != nil {
 		return nil, lifeErr
 	}
-	client := NewClientTimeout(values.GrammarEndpoint, nil, values.GrammarTimeout)
+	client := NewClientTimeout(values.GrammarEndpoint, values.GrammarTimeout)
 	languages, cached, stale, fetched := languageSnapshot(client, refresh)
 	if len(languages) == 0 {
 		return nil, cli.Fail("grammar.unreachable",
@@ -218,7 +237,7 @@ func grammarCommand() *cli.Command {
 					info.Timeout = interval.String()
 					info.Cap = cap.String()
 					info.Language = values.GrammarLanguage
-					client := NewClientTimeout(values.GrammarEndpoint, nil, values.GrammarTimeout)
+					client := NewClientTimeout(values.GrammarEndpoint, values.GrammarTimeout)
 					info.Languages, info.LanguagesCached, info.LanguagesStale,
 						info.LanguagesFetched = languageSnapshot(client, false)
 					info.DryRun = env.Globals.DryRun
@@ -298,7 +317,8 @@ func grammarCommand() *cli.Command {
 				blockID, _ = model.ParseID(block)
 			}
 			gate := NewGateTimeout(values.GrammarEndpoint, ParsePolicy(values.GrammarPolicy),
-				ReadTerms(layout.Terms()), values.GrammarTimeout)
+				TermSource{GlobalPath: layout.Terms(), Dir: layout.TermsDir()},
+				values.GrammarTimeout)
 			gate.AdHoc = book == ""
 			gate.Start = func(endpoint string) error {
 				_, startErr := Serve(endpoint, jar)
@@ -312,6 +332,7 @@ func grammarCommand() *cli.Command {
 			payload.Warnings = report.Warnings()
 			payload.Count = len(report.Findings)
 			payload.Findings = report.Findings
+			payload.Suppressed = report.Suppressed
 			if report.Unchecked() && requireCheck {
 				return nil, cli.Fail("grammar.check-skipped", "%s", report.Degraded).
 					WithHint("--require-check makes an incomplete check a failure").

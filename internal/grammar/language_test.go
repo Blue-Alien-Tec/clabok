@@ -45,7 +45,7 @@ func TestSupportedUsesCacheAndRefreshesOnMiss(t *testing.T) {
 	var calls int32
 	server := languageListServer(t, &calls)
 	defer server.Close()
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 	seedLanguages(t, server.URL, "en-US", "de-DE")
 
 	language, ok, err := client.Supported(context.Background(), "de-de")
@@ -68,7 +68,7 @@ func TestSupportedUsesAStaleCacheWhenTheServerIsGone(t *testing.T) {
 	server := languageListServer(t, nil)
 	url := server.URL
 	server.Close()
-	client := NewClient(url, nil)
+	client := NewClient(url)
 	list := LanguageList{
 		Endpoint: url, Fetched: time.Now().Add(-2 * LanguageCacheTTL),
 		Languages: []Language{{Code: "en-US", Name: "English (US)"}},
@@ -99,7 +99,7 @@ func TestCheckSendsLanguageAndDetectsAuto(t *testing.T) {
 			`"detectedLanguage":{"code":"de-DE"}}}`)
 	}))
 	defer server.Close()
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 
 	result, err := client.Check(context.Background(), "text", "de-DE")
 	if err != nil || result.Language != "de-DE" || languageValue != "de-DE" {
@@ -115,7 +115,7 @@ func TestLanguageSnapshot(t *testing.T) {
 	var calls int32
 	server := languageListServer(t, &calls)
 	defer server.Close()
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 
 	languages, cached, stale, fetched := languageSnapshot(client, false)
 	if cached || stale || fetched == "" || len(languages) != 2 {

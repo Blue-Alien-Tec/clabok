@@ -30,7 +30,8 @@ func TestGrammarGateReplace(t *testing.T) {
 	server := grammarServer(t)
 	defer server.Close()
 	scene := newScene(t)
-	scene.service.Grammar = grammar.NewGate(server.URL, grammar.PolicyWarn, nil)
+	scene.service.Grammar = grammar.NewGate(server.URL, grammar.PolicyWarn,
+		grammar.TermSource{})
 
 	result, err := scene.service.Replace("fixture", 11,
 		[]Pair{{Find: "Body", Replace: "teh"}}, ReplaceOptions{Expect: -1}, false)
@@ -64,7 +65,8 @@ func TestGrammarGateMatrix(t *testing.T) {
 		return string(data)
 	}
 
-	scene.service.Grammar = grammar.NewGate(server.URL, grammar.PolicyBlock, nil)
+	scene.service.Grammar = grammar.NewGate(server.URL, grammar.PolicyBlock,
+		grammar.TermSource{})
 	if _, err := scene.service.Set("fixture", 11, 0, "teh cat", false); err == nil {
 		t.Fatal("expected body.grammar-blocked")
 	} else if coded, ok := err.(*Error); !ok || coded.Code != "body.grammar-blocked" ||
@@ -92,7 +94,8 @@ func TestGrammarGateMatrix(t *testing.T) {
 	}
 
 	server.Close()
-	scene.service.Grammar = grammar.NewGate(server.URL, grammar.PolicyBlock, nil)
+	scene.service.Grammar = grammar.NewGate(server.URL, grammar.PolicyBlock,
+		grammar.TermSource{})
 	scene.service.Grammar.Start = func(string) error {
 		return errors.New("no server")
 	}

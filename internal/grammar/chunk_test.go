@@ -93,7 +93,7 @@ func TestCheckChunkedOffsetsMatchTheBody(t *testing.T) {
 		t.Fatalf("the fixture must exceed one chunk: %d bytes", len(body))
 	}
 
-	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
+	findings, err := checkDefault(t, NewClient(server.URL), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestCheckOversizedParagraphIsOneRequest(t *testing.T) {
 	if len(body) <= chunkBytes {
 		t.Fatalf("fixture too small: %d", len(body))
 	}
-	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
+	findings, err := checkDefault(t, NewClient(server.URL), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestCheckChunkFailureDiscardsAllFindings(t *testing.T) {
 	defer server.Close()
 
 	body := "teh first\n\nsecond paragraph\n\nthird paragraph\n\n" + strings.Repeat("more prose\n\n", 500)
-	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
+	findings, err := checkDefault(t, NewClient(server.URL), body)
 	if err == nil {
 		t.Fatalf("a failed chunk must fail the whole check, findings %+v", findings)
 	}
@@ -169,7 +169,7 @@ func TestCheckEmptyBodySendsNoRequest(t *testing.T) {
 	var calls int32
 	server := typoServer(t, &calls)
 	defer server.Close()
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 	for _, body := range []string{"", "   ", "\n\n\n"} {
 		findings, err := checkDefault(t, client, body)
 		if err != nil || len(findings) != 0 {
@@ -200,7 +200,7 @@ func TestCheckChunkedCodeSpanIsFiltered(t *testing.T) {
 	defer server.Close()
 
 	body := strings.Repeat("plain paragraph text\n\n", 250) + "Inline `teh` code.\n"
-	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
+	findings, err := checkDefault(t, NewClient(server.URL), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestCheckFencedBlockAcrossParagraphs(t *testing.T) {
 
 	body := strings.Repeat("plain paragraph text\n\n", 250) +
 		"```text\nteh inside a fence\n```\n" + "tail paragraph\n"
-	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
+	findings, err := checkDefault(t, NewClient(server.URL), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestGrammarCliffFixtures(t *testing.T) {
 	var calls int32
 	server := typoServer(t, &calls)
 	defer server.Close()
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 
 	for _, size := range []struct {
 		name       string

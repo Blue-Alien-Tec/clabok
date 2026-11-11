@@ -449,6 +449,114 @@ func TestBookLanguageSelectsFindings(t *testing.T) {
 	}
 }
 
+func TestTermsScopedByBook(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v2/languages" {
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English"},`+
+				`{"code":"de-DE","longCode":"de-DE","name":"German"}]`)
+			return
+		}
+		_ = r.ParseForm()
+		text := r.Form.Get("text")
+		matches := make([]map[string]any, 0)
+		if at := strings.Index(text, "Simia"); at >= 0 {
+			matches = append(matches, map[string]any{
+				"message": "spelling", "offset": at, "length": 5,
+				"rule":         map[string]any{"id": "SPELL"},
+				"replacements": []map[string]any{{"value": "Simia"}},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"matches": matches,
+			"language": map[string]any{"code": "de-DE", "detectedLanguage": map[string]any{"code": "de-DE"}}})
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	runOK(t, directory, "book", "open", "guide")
+	runOK(t, directory, "book", "set", "guide", "language", "de-DE")
+
+	request := dataOf(t, runOK(t, directory, "terms", "set", "--term", "Simia",
+		"--reason", "ship name", "--book", "guide"))
+	if scope, _ := request["scope"].(string); scope != "de-DE" {
+		t.Fatalf("scope %v", request["scope"])
+	}
+	runOK(t, directory, "terms", "commit", "--id", request["id"].(string), "--confirm")
+
+	languagePath := filepath.Join(directory, "_CLABOK", "terms", "de-de.txt")
+	if data, err := os.ReadFile(languagePath); err != nil || string(data) != "Simia\n" {
+		t.Fatalf("language layer %q %v", data, err)
+	}
+
+	checked := dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "Simia flies.",
+		"--language", "de-DE"))
+	if count, _ := checked["count"].(float64); count != 0 {
+		t.Fatalf("a suppressed finding must not count: %v", checked)
+	}
+	suppressed, _ := checked["suppressed"].([]any)
+	if len(suppressed) != 1 {
+		t.Fatalf("suppression attribution %v", checked["suppressed"])
+	}
+	entry, _ := suppressed[0].(map[string]any)
+	if layer, _ := entry["suppressedBy"].(string); layer != "de-de" {
+		t.Fatalf("suppression layer %v", entry)
+	}
+
+	listed := dataOf(t, runOK(t, directory, "terms", "list", "--language", "de-DE"))
+	entries, _ := listed["entries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("list entries %v", listed["entries"])
+	}
+
+	code, _, stderr := run(t, directory, "terms", "set", "--term", "X",
+		"--reason", "no scope")
+	if code != cli.ExitUsage || !strings.Contains(stderr, "usage.missing-argument") {
+		t.Fatalf("a request without a scope must be refused: exit %d %s", code, stderr)
+	}
+}
+
+func TestTermsCheckCommand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v2/languages" {
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English"},`+
+				`{"code":"de-DE","longCode":"de-DE","name":"German"}]`)
+			return
+		}
+		_ = r.ParseForm()
+		if r.Form.Get("text") == "Rat" {
+			fmt.Fprint(w, `{"matches":[]}`)
+			return
+		}
+		fmt.Fprint(w, `{"matches":[{"message":"spelling","offset":0,"length":5,`+
+			`"rule":{"id":"MORFOLOGIK_RULE_EN_US"},"replacements":[]}]}`)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+
+	payload := dataOf(t, runOK(t, directory, "terms", "check", "--term", "Xyloq",
+		"--scope", "en-US"))
+	if tooBroad, _ := payload["tooBroad"].(bool); tooBroad {
+		t.Fatalf("a misspelled name must be suppressible: %v", payload)
+	}
+	results, _ := payload["results"].([]any)
+	if len(results) != 1 {
+		t.Fatalf("results %v", payload["results"])
+	}
+
+	payload = dataOf(t, runOK(t, directory, "terms", "check", "--term", "Rat",
+		"--scope", "global"))
+	if tooBroad, _ := payload["tooBroad"].(bool); !tooBroad {
+		t.Fatalf("a real word must be reported as too broad: %v", payload)
+	}
+}
+
 func TestTermsEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v2/languages" {
@@ -474,7 +582,7 @@ func TestTermsEndToEnd(t *testing.T) {
 	directory := t.TempDir()
 	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
 	request := dataOf(t, runOK(t, directory, "terms", "set", "--term", "Clabok",
-		"--reason", "the product name"))
+		"--reason", "the product name", "--scope", "global"))
 	id, _ := request["id"].(string)
 	if id == "" {
 		t.Fatalf("request payload %v", request)
@@ -504,7 +612,7 @@ func TestTermsEndToEnd(t *testing.T) {
 	}
 
 	removed := dataOf(t, runOK(t, directory, "terms", "delete", "--term", "Clabok",
-		"--reason", "no longer needed"))
+		"--reason", "no longer needed", "--scope", "global"))
 	runOK(t, directory, "terms", "commit", "--id", removed["id"].(string), "--confirm")
 	checked = dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "Clabok is the tool."))
 	if count, _ := checked["count"].(float64); count != 1 {
@@ -512,7 +620,7 @@ func TestTermsEndToEnd(t *testing.T) {
 	}
 
 	extra := dataOf(t, runOK(t, directory, "terms", "set", "--term", "Temporary",
-		"--reason", "test discard"))
+		"--reason", "test discard", "--scope", "global"))
 	runOK(t, directory, "terms", "discard", "--id", extra["id"].(string))
 	pending = dataOf(t, runOK(t, directory, "terms", "pending"))
 	if entries, _ := pending["pending"].([]any); len(entries) != 0 {

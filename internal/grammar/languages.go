@@ -119,7 +119,7 @@ const LanguageUnverified = "grammar.language-unverified"
 // (LanguageTool stays optional).
 func LanguageCheck(endpoint string, timeout time.Duration) func(code string) (string, string, error) {
 	return func(code string) (string, string, error) {
-		client := NewClientTimeout(endpoint, nil, timeout)
+		client := NewClientTimeout(endpoint, timeout)
 		language, ok, err := client.Supported(context.Background(), strings.TrimSpace(code))
 		if err == nil {
 			if !ok {

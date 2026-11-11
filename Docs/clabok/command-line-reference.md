@@ -19,7 +19,7 @@ Bodies: `body set`, `body append`, `body prepend`, `body get`, `body list` and `
 
 Editorial: `prose`, `region`, `status`, `badge`, `layout` and `asciiui`. All are open-only and dry-run aware.
 
-Grammar: `grammar check` (with `--require-check` to fail on an incomplete check and `--language` for raw or file checks), `grammar apply`, `grammar languages` and the server lifecycle commands; `terms` manages the pending and confirmed term list. The grammar keys are `grammar.endpoint`, `grammar.policy`, `grammar.timeout` and `grammar.language`, and `grammar server-info` reports the effective interval, its cap and the supported set.
+Grammar: `grammar check` (with `--require-check` to fail on an incomplete check and `--language` for raw or file checks), `grammar apply`, `grammar languages` and the server lifecycle commands; `terms` manages the pending and confirmed term layers and `terms check` tests a candidate against the server. The grammar keys are `grammar.endpoint`, `grammar.policy`, `grammar.timeout` and `grammar.language`, and `grammar server-info` reports the effective interval, its cap and the supported set.
 
 Render and inspect: `sync` renders, `check` reports findings and `verify` runs the acceptance view. `library sync` renders every registered book.
 

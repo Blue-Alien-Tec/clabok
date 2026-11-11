@@ -29,7 +29,7 @@ func TestWatchdogAcceptsLateAnswerFromOneRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 	client.Timeout = 40 * time.Millisecond
 	findings, err := checkDefault(t, client, "teh cat")
 	if err != nil {
@@ -63,7 +63,7 @@ func TestWatchdogRearmsAfterOneFailedProbe(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 	client.Timeout = 40 * time.Millisecond
 	seedLanguages(t, server.URL, DefaultLanguage)
 	gate := &Gate{Client: client, Policy: PolicyWarn}
@@ -93,7 +93,7 @@ func TestWatchdogTwoDeadProbesTakeTheUnreachablePath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 	client.Timeout = 20 * time.Millisecond
 	seedLanguages(t, server.URL, DefaultLanguage)
 	gate := &Gate{Client: client, Policy: PolicyBlock}
@@ -129,7 +129,7 @@ func TestWatchdogCapTimesOutAgainstLiveServer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, nil)
+	client := NewClient(server.URL)
 	client.Timeout = 20 * time.Millisecond
 	start := time.Now()
 	_, err := checkDefault(t, client, "teh cat")
@@ -151,7 +151,7 @@ func TestCheckTransportErrors(t *testing.T) {
 	unreachable := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := unreachable.URL
 	unreachable.Close()
-	_, err := checkDefault(t, NewClient(url, nil), "text")
+	_, err := checkDefault(t, NewClient(url), "text")
 	if !errors.Is(err, ErrUnreachable) || !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("connection refused: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestCheckTransportErrors(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer failing.Close()
-	_, err = checkDefault(t, NewClient(failing.URL, nil), "text")
+	_, err = checkDefault(t, NewClient(failing.URL), "text")
 	var response *ErrResponse
 	if !errors.As(err, &response) || response.Status != http.StatusInternalServerError {
 		t.Fatalf("expected ErrResponse, got %v", err)
@@ -177,14 +177,14 @@ func TestCheckTransportErrors(t *testing.T) {
 		fmt.Fprint(w, `{"matches":`)
 	}))
 	defer garbled.Close()
-	_, err = checkDefault(t, NewClient(garbled.URL, nil), "text")
+	_, err = checkDefault(t, NewClient(garbled.URL), "text")
 	if !errors.As(err, &response) || ReasonFor(err) != ReasonResponse {
 		t.Fatalf("expected ErrResponse for malformed JSON, got %v", err)
 	}
 }
 
 func TestGateSkipIsTruthful(t *testing.T) {
-	client := NewClient("http://127.0.0.1:1/v2/check", nil)
+	client := NewClient("http://127.0.0.1:1/v2/check")
 	client.Timeout = 20 * time.Millisecond
 	gate := &Gate{Client: client, Policy: PolicyBlock}
 	gate.Start = func(string) error { return errors.New("no server") }
@@ -205,7 +205,7 @@ func TestGateSkipIsTruthful(t *testing.T) {
 }
 
 func TestClientCapFollowsInterval(t *testing.T) {
-	client := NewClient("", nil)
+	client := NewClient("")
 	if client.Interval() != DefaultTimeout {
 		t.Fatalf("default interval %s", client.Interval())
 	}

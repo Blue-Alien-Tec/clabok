@@ -78,7 +78,7 @@ func TestClientCheck(t *testing.T) {
 	server := matchServer(t, nil)
 	defer server.Close()
 
-	findings, err := checkDefault(t, NewClient(server.URL, nil), "one\nteh cat")
+	findings, err := checkDefault(t, NewClient(server.URL), "one\nteh cat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,11 @@ func TestTermSuppression(t *testing.T) {
 	server := matchServer(t, nil)
 	defer server.Close()
 
-	findings, err := checkDefault(t, NewClient(server.URL, []string{"TEH"}), "one\nteh cat")
+	client := NewClient(server.URL)
+	client.Terms = TermSet{Layers: []TermLayer{
+		{Scope: ScopeGlobal, Terms: []string{"TEH"}},
+	}}
+	findings, err := checkDefault(t, client, "one\nteh cat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +117,7 @@ func TestUnavailable(t *testing.T) {
 	url := server.URL
 	server.Close()
 
-	_, err := checkDefault(t, NewClient(url, nil), "text")
+	_, err := checkDefault(t, NewClient(url), "text")
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
@@ -161,7 +165,7 @@ func TestLanguageToolLive(t *testing.T) {
 		t.Fatalf("server info %+v", info)
 	}
 
-	findings, err := checkDefault(t, NewClient(endpoint, nil), "This are a test.")
+	findings, err := checkDefault(t, NewClient(endpoint), "This are a test.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +191,7 @@ func freePort(t *testing.T) int {
 func TestGatePolicies(t *testing.T) {
 	server := matchServer(t, nil)
 	seedLanguages(t, server.URL, DefaultLanguage, "de-DE")
-	gate := NewGate(server.URL, PolicyWarn, nil)
+	gate := NewGate(server.URL, PolicyWarn, TermSource{})
 	report := gate.Evaluate(context.Background(), 10, "teh cat", DefaultLanguage)
 	if !report.Checked || len(report.Findings) != 1 || report.Blocked() {
 		t.Fatalf("warn report %+v", report)

@@ -154,7 +154,7 @@ func runApply(env *cli.Env, bookRaw, blockRaw, indices string, allSafe bool, exp
 	if readErr != nil {
 		return nil, cli.AsError(readErr)
 	}
-	terms := ReadTerms(layout.Terms())
+	terms := TermSource{GlobalPath: layout.Terms(), Dir: layout.TermsDir()}
 	gate := NewGateTimeout(values.GrammarEndpoint, PolicyWarn, terms, values.GrammarTimeout)
 	gate.Start = func(endpoint string) error {
 		_, startErr := Serve(endpoint, jar)

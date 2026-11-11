@@ -9,6 +9,7 @@ import (
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/config"
+	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
@@ -118,10 +119,17 @@ func (payload librarySyncPayload) Text() string {
 }
 
 type checkPayload struct {
-	Book     string    `json:"book"`
-	Findings []Finding `json:"findings"`
-	Blocking int       `json:"blocking"`
-	Clean    bool      `json:"clean"`
+	Book     string        `json:"book"`
+	Findings []Finding     `json:"findings"`
+	Blocking int           `json:"blocking"`
+	Clean    bool          `json:"clean"`
+	Terms    *termsSummary `json:"terms,omitempty"`
+}
+
+// termsSummary reports the languages the store uses and the term layers that exist.
+type termsSummary struct {
+	Languages []string                `json:"languages"`
+	Layers    []grammar.TermLayerInfo `json:"layers,omitempty"`
 }
 
 func (payload checkPayload) Text() string {
@@ -134,6 +142,16 @@ func (payload checkPayload) Text() string {
 		fmt.Fprintf(&builder, "%s %s: %s\n", level, finding.Code, finding.Message)
 	}
 	fmt.Fprintf(&builder, "%d finding(s), %d blocking\n", len(payload.Findings), payload.Blocking)
+	if payload.Terms != nil {
+		existing := 0
+		for _, layer := range payload.Terms.Layers {
+			if layer.Exists {
+				existing++
+			}
+		}
+		fmt.Fprintf(&builder, "terms: languages %s; %d layer(s), %d with a file\n",
+			strings.Join(payload.Terms.Languages, ", "), len(payload.Terms.Layers), existing)
+	}
 	return builder.String()
 }
 
@@ -438,6 +456,18 @@ func checkCommand(name string) *cli.Command {
 			}
 			payload := checkPayload{
 				Book: string(bookID), Findings: findings, Blocking: blocking, Clean: blocking == 0,
+			}
+			life, _, lifeErr := lifecycle.FromEnv(env)
+			if lifeErr != nil {
+				return nil, lifeErr
+			}
+			languages, languagesErr := grammar.StoreLanguages(life, layout, values.GrammarLanguage)
+			if languagesErr != nil {
+				return nil, cli.AsError(languagesErr)
+			}
+			payload.Terms = &termsSummary{
+				Languages: languages,
+				Layers:    grammar.LayerInfos(grammar.TermLayers(layout.Terms(), layout.TermsDir())),
 			}
 			if blocking > 0 {
 				return nil, cli.Fail("render.check-failed", "%d blocking finding(s)", blocking).

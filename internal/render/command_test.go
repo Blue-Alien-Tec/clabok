@@ -127,3 +127,24 @@ func TestVerifyAlias(t *testing.T) {
 		t.Fatalf("unexpected payload %s", stdout)
 	}
 }
+
+func TestCheckReportsTermLayers(t *testing.T) {
+	directory := prepareProject(t)
+	termsDir := filepath.Join(directory, "_CLABOK", "terms")
+	if err := os.MkdirAll(termsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(termsDir, "de-de.txt"), []byte("Simia\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := run(t, directory, "verify", "--book", "fixture", "--text")
+	if code != cli.ExitOK {
+		t.Fatalf("verify exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "languages en-US") {
+		t.Fatalf("missing language summary %s", stdout)
+	}
+	if !strings.Contains(stdout, "2 layer(s), 1 with a file") {
+		t.Fatalf("missing layer summary %s", stdout)
+	}
+}

@@ -11,6 +11,7 @@ const (
 	registryFile   = "library.json"
 	idsFile        = "ids.json"
 	termsFile      = "terms.txt"
+	termsDirName   = "terms"
 	pendingTerms   = "pending-terms.json"
 	rollbackDir    = "rollback"
 	containerExt   = ".book"
@@ -46,8 +47,17 @@ func (layout Layout) Registry() string { return filepath.Join(layout.Root, regis
 // namespace: every issued ID comes from here, so uniqueness is a constraint, not a probability.
 func (layout Layout) IDs() string { return filepath.Join(layout.Root, idsFile) }
 
-// Terms is the term list file.
+// Terms is the global term list file. Language layers live below TermsDir.
 func (layout Layout) Terms() string { return filepath.Join(layout.Root, termsFile) }
+
+// TermsDir is the directory of the per-language term layers.
+func (layout Layout) TermsDir() string { return filepath.Join(layout.Root, termsDirName) }
+
+// TermsFor is the term file of one language. The file name is the lowercased language id, so
+// de-DE and pt-BR stay distinct layers.
+func (layout Layout) TermsFor(language string) string {
+	return filepath.Join(layout.TermsDir(), strings.ToLower(strings.TrimSpace(language))+".txt")
+}
 
 // TermsPending is the pending term-request store.
 func (layout Layout) TermsPending() string { return filepath.Join(layout.Root, pendingTerms) }
@@ -98,7 +108,7 @@ func ValidateBookID(id model.BookID) error {
 func ReservedBookID(id model.BookID) bool {
 	name := strings.TrimRight(string(id), ". ")
 	switch strings.ToLower(name) {
-	case "rollback", ".coordinator", "library.json", "ids.json", "terms.txt",
+	case "rollback", ".coordinator", "library.json", "ids.json", "terms.txt", "terms",
 		"pending-terms.json", "open.json", "index", "store.json", "migrations":
 		return true
 	}

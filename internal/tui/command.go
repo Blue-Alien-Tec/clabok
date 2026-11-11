@@ -89,7 +89,9 @@ func servicesFor(env *cli.Env) (*Services, *cli.Error) {
 	allocator := idspace.New(life, layout)
 	bodyService := body.NewWithAllocator(life, allocator)
 	bodyService.Grammar = grammar.NewGate(values.GrammarEndpoint,
-		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()))
+		grammar.ParsePolicy(values.GrammarPolicy),
+		grammar.TermSource{GlobalPath: layout.Terms(), Dir: layout.TermsDir()})
+	bodyService.GrammarLanguage = values.GrammarLanguage
 	return &Services{
 		Life:      life,
 		Structure: structure.New(life, allocator),

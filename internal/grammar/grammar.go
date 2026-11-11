@@ -130,12 +130,24 @@ type Finding struct {
 
 // Report is the outcome of one check.
 type Report struct {
-	Policy   string    `json:"policy,omitempty"`
-	Checked  bool      `json:"checked"`
-	Reason   string    `json:"reason,omitempty"`
-	Language string    `json:"language,omitempty"`
-	Degraded string    `json:"degraded,omitempty"`
-	Findings []Finding `json:"findings,omitempty"`
+	Policy     string        `json:"policy,omitempty"`
+	Checked    bool          `json:"checked"`
+	Reason     string        `json:"reason,omitempty"`
+	Language   string        `json:"language,omitempty"`
+	Degraded   string        `json:"degraded,omitempty"`
+	Findings   []Finding     `json:"findings,omitempty"`
+	Suppressed []Suppression `json:"suppressed,omitempty"`
+}
+
+// Suppression records one finding a term layer removed, so suppression is never silent.
+type Suppression struct {
+	Term   string   `json:"term"`
+	Layer  string   `json:"suppressedBy"`
+	AlsoIn []string `json:"alsoIn,omitempty"`
+	Match  string   `json:"match"`
+	Field  string   `json:"field"`
+	Offset int      `json:"offset"`
+	Length int      `json:"length"`
 }
 
 // Blocked reports whether the policy refuses the write. Only findings block a write; an unchecked
@@ -166,20 +178,21 @@ func (report Report) Warnings() []Warning {
 type Client struct {
 	Endpoint string
 	HTTP     *http.Client
-	Terms    []string
+	// Terms is the effective term set of the last evaluation. A gate replaces it per check.
+	Terms TermSet
 	// Timeout is the watchdog interval. A non-positive value uses DefaultTimeout.
 	Timeout time.Duration
 }
 
 // NewClient returns a client with the default watchdog interval. An empty endpoint uses the local
 // default. The request carries no hard deadline: the watchdog decides when a check is given up.
-func NewClient(endpoint string, terms []string) *Client {
-	return NewClientTimeout(endpoint, terms, 0)
+func NewClient(endpoint string) *Client {
+	return NewClientTimeout(endpoint, 0)
 }
 
 // NewClientTimeout returns a client with an explicit watchdog interval. A non-positive timeout uses
 // DefaultTimeout.
-func NewClientTimeout(endpoint string, terms []string, timeout time.Duration) *Client {
+func NewClientTimeout(endpoint string, timeout time.Duration) *Client {
 	if strings.TrimSpace(endpoint) == "" {
 		endpoint = DefaultEndpoint
 	}
@@ -190,7 +203,6 @@ func NewClientTimeout(endpoint string, terms []string, timeout time.Duration) *C
 			Proxy:       http.ProxyFromEnvironment,
 			DialContext: dialer.DialContext,
 		}},
-		Terms:   terms,
 		Timeout: timeout,
 	}
 	return client
@@ -244,10 +256,12 @@ type wireMatch struct {
 	Values  []string
 }
 
-// CheckResult is one complete check: the findings and the language that produced them.
+// CheckResult is one complete check: the findings, the language that produced them and the findings
+// a term layer suppressed.
 type CheckResult struct {
-	Findings []Finding
-	Language string
+	Findings   []Finding
+	Language   string
+	Suppressed []Suppression
 }
 
 // Check sends the text in the given language and returns the unsuppressed findings in body order.
@@ -257,6 +271,7 @@ type CheckResult struct {
 func (client *Client) Check(ctx context.Context, text, language string) (CheckResult, error) {
 	prepared := prepareText(text)
 	findings := make([]Finding, 0)
+	suppressed := make([]Suppression, 0)
 	reported := ""
 	for _, span := range chunkPrepared(prepared.text, chunkBytes) {
 		matches, detected, err := client.fetch(ctx, prepared.text[span.start:span.end], language)
@@ -268,9 +283,19 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 		}
 		for _, match := range matches {
 			match.Offset += span.start
-			if finding, ok := client.finding(text, prepared, match); ok {
-				findings = append(findings, finding)
+			finding, ok := client.finding(text, prepared, match)
+			if !ok {
+				continue
 			}
+			if entries := client.Terms.Suppress(finding.Offending, finding.Replacements); len(entries) > 0 {
+				for index := range entries {
+					entries[index].Offset = finding.Offset
+					entries[index].Length = finding.Length
+				}
+				suppressed = append(suppressed, entries...)
+				continue
+			}
+			findings = append(findings, finding)
 		}
 	}
 	findings = mergeFindings(findings)
@@ -285,7 +310,7 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 	} else if effective == "" {
 		effective = reported
 	}
-	return CheckResult{Findings: findings, Language: effective}, nil
+	return CheckResult{Findings: findings, Language: effective, Suppressed: suppressed}, nil
 }
 
 // Resolve returns the effective check language: the book setting, then the project default, then
@@ -308,9 +333,6 @@ func (client *Client) finding(text string, prepared preparedText, match wireMatc
 		return Finding{}, false
 	}
 	offending := segment(text, start, end-start)
-	if client.suppressed(offending, match.Values) {
-		return Finding{}, false
-	}
 	line, column := position(text, start)
 	return Finding{
 		Line: line, Column: column, Offset: start, Length: end - start,
@@ -450,29 +472,23 @@ func (client *Client) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-func (client *Client) suppressed(offending string, replacements []string) bool {
-	lowered := strings.ToLower(offending)
-	for _, term := range client.Terms {
-		term = strings.ToLower(strings.TrimSpace(term))
-		if term == "" {
-			continue
-		}
-		if strings.Contains(lowered, term) {
-			return true
-		}
-		for _, replacement := range replacements {
-			if strings.Contains(strings.ToLower(replacement), term) {
-				return true
-			}
-		}
-	}
-	return false
+// Gate applies the policy to a check.
+// TermSource names the two paths a check derives its term layers from.
+type TermSource struct {
+	GlobalPath string
+	Dir        string
 }
 
-// Gate applies the policy to a check.
+// Load returns the effective set for a language.
+func (source TermSource) Load(language string) TermSet {
+	return LoadTermSet(source.GlobalPath, source.Dir, language)
+}
+
 type Gate struct {
 	Client *Client
 	Policy Policy
+	// Terms is the layered term source for every check.
+	Terms TermSource
 	// Start starts the shared server on demand. A nil Start uses Serve with the discovered jar.
 	Start func(endpoint string) error
 	// AdHoc allows language=auto for file and raw checks. Book writes leave it false, so the gate
@@ -480,14 +496,14 @@ type Gate struct {
 	AdHoc bool
 }
 
-// NewGate returns a gate for the configured endpoint and policy.
-func NewGate(endpoint string, policy Policy, terms []string) *Gate {
+// NewGate returns a gate for the configured endpoint, policy and term layers.
+func NewGate(endpoint string, policy Policy, terms TermSource) *Gate {
 	return NewGateTimeout(endpoint, policy, terms, 0)
 }
 
 // NewGateTimeout returns a gate with an explicit watchdog interval.
-func NewGateTimeout(endpoint string, policy Policy, terms []string, timeout time.Duration) *Gate {
-	return &Gate{Client: NewClientTimeout(endpoint, terms, timeout), Policy: policy}
+func NewGateTimeout(endpoint string, policy Policy, terms TermSource, timeout time.Duration) *Gate {
+	return &Gate{Client: NewClientTimeout(endpoint, timeout), Policy: policy, Terms: terms}
 }
 
 // Evaluate runs the check in the given language. A request that outlived the watchdog cap is a skip
@@ -530,6 +546,7 @@ func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text, language s
 		language = canonical.Code
 		report.Language = language
 	}
+	gate.Client.Terms = gate.Terms.Load(language)
 	findings, err := gate.Client.Check(ctx, text, language)
 	if err != nil {
 		if ReasonFor(err) != ReasonUnreachable {
@@ -549,6 +566,7 @@ func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text, language s
 	report.Checked = true
 	report.Language = findings.Language
 	report.Findings = findings.Findings
+	report.Suppressed = findings.Suppressed
 	return report
 }
 

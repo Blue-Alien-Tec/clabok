@@ -29,7 +29,7 @@ The gate covers every prose path: body set, append and prepend, body replace, in
 
 The server lifecycle is shared and explicit. `grammar serve` starts or attaches to one server, `server-info` probes it and `server-stop` stops the recorded process. State, lock and log live in the temporary directory, never in the store.
 
-Terms suppress findings case-insensitively. A request never writes the list: `terms set` and `terms delete` create a pending entry with a reason, `terms commit --confirm` is the only writer and `terms discard` removes a request.
+Terms suppress findings case-insensitively in two layers: `terms.txt` is global, and one file per language lives at `terms/<language>.txt`; the effective set is the union for the book's language. A term matches whole words by default; a leading `~` makes it a substring (`~ark` hides Arkansas too). Every suppression names its term, layer and match form, so nothing disappears silently. A request never writes a file: `terms set` and `terms delete` need `--scope global|<code>` or `--book <id>`, carry a reason, and `terms commit --confirm` is the only writer. `terms check --term <t> --scope global|<code> [--all]` asks the server whether a term is an ordinary word; a real word is reported because it would hide findings.
 
 A practical loop is check, fix the blocking findings, apply the safe single-replacement findings, re-check and then sync. A server that cannot answer is visible as an unchecked result with a `grammar.*` reason and one warning, never as a success with zero findings; `block` still refuses only on findings, so a missing server never blocks prose writes. An unchecked check before or after `grammar apply` leaves the body unchanged.
 
