@@ -15,6 +15,22 @@ A body is Markdown text in one block. The store keeps it byte for byte after nor
 
 Text is decoded at the command boundary. A leading UTF-8 byte-order mark is ignored, UTF-16 or UTF-32 with a byte-order mark is transcoded, and Windows line endings become LF in a body. A file without a byte-order mark that is not valid UTF-8, or that contains NUL bytes, is refused with `text.invalid-encoding` and the byte offset. The same rule applies to every `--file` and stdin input, including prose, regions, layout notes, AsciiUI specs, grammar checks and imports.
 
+Rich content comes straight from the shell: `--file -` reads standard input, so a here-string carries a table, a list and a fence without a temporary file.
+
+```text
+$body = @'
+| Column A | Column B |
+| --- | --- |
+| cell 1 | cell 2 |
+
+- first item
+- second item
+'@
+$body | pecia body set --book guide 0 --parent <chapter-id> --file -
+```
+
+In Windows PowerShell 5.1, `Set-Content -Encoding UTF8` writes a byte-order mark (accepted and stripped), and `Get-Content` without `-Encoding UTF8` displays UTF-8 text as `mojibake` even though the file is correct. If a pipe mangles non-ASCII characters, set `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` or pass the file directly.
+
 ```text
 pecia body set --book guide 0 --parent <chapter> --file chapter.md
 pecia body append --book guide <block> --body "One more paragraph."
