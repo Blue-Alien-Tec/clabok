@@ -60,7 +60,7 @@ func (result payload) Text() string {
 
 // evaluateProse runs the grammar gate for an authored prose body. Every prose write path calls it,
 // so there is no way around the check; a server that cannot be started degrades to a skip report.
-func evaluateProse(env *cli.Env, text string) (grammar.Report, *cli.Error) {
+func evaluateProse(env *cli.Env, book model.BookID, text string) (grammar.Report, *cli.Error) {
 	if strings.TrimSpace(text) == "" {
 		return grammar.Report{}, nil
 	}
@@ -68,14 +68,19 @@ func evaluateProse(env *cli.Env, text string) (grammar.Report, *cli.Error) {
 	if configErr != nil {
 		return grammar.Report{}, configErr
 	}
-	_, layout, lifeErr := lifecycle.FromEnv(env)
+	life, layout, lifeErr := lifecycle.FromEnv(env)
 	if lifeErr != nil {
 		return grammar.Report{}, lifeErr
+	}
+	settings, settingsErr := grammar.BookSettings(life, book)
+	if settingsErr != nil {
+		return grammar.Report{}, cli.AsError(settingsErr)
 	}
 	gate := grammar.NewGateTimeout(values.GrammarEndpoint,
 		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()),
 		values.GrammarTimeout)
-	return gate.Evaluate(context.Background(), 0, text), nil
+	language := grammar.Resolve(settings, values.GrammarLanguage)
+	return gate.Evaluate(context.Background(), 0, text, language), nil
 }
 
 func proseRejection(report grammar.Report) *cli.Error {
@@ -144,7 +149,7 @@ func proseCommand() *cli.Command {
 					return nil, textErr
 				}
 				prose = value
-				report, textErr = evaluateProse(env, prose)
+				report, textErr = evaluateProse(env, bookID, prose)
 				if textErr != nil {
 					return nil, textErr
 				}
@@ -229,7 +234,7 @@ func regionCommand() *cli.Command {
 				if bodyErr != nil {
 					return nil, bodyErr
 				}
-				report, gateErr := evaluateProse(env, body)
+				report, gateErr := evaluateProse(env, bookID, body)
 				if gateErr != nil {
 					return nil, gateErr
 				}
@@ -267,7 +272,7 @@ func regionCommand() *cli.Command {
 				if bodyErr != nil {
 					return nil, bodyErr
 				}
-				report, gateErr := evaluateProse(env, body)
+				report, gateErr := evaluateProse(env, bookID, body)
 				if gateErr != nil {
 					return nil, gateErr
 				}

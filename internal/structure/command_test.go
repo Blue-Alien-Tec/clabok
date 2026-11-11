@@ -2,6 +2,9 @@ package structure
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/config"
 	"github.com/Blue-Alien-Tec/clabok/internal/coordinator"
+	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
@@ -132,6 +136,72 @@ func TestBookSet(t *testing.T) {
 	if code, _, _ := run(t, directory, "book", "set", "fixture", "output", "stripe"); code == cli.ExitOK {
 		t.Fatal("an invalid output mode must fail")
 	}
+}
+
+func TestBookSetLanguage(t *testing.T) {
+	directory := prepareProject(t)
+	if code, _, stderr := run(t, directory, "config", "set", "grammar.endpoint",
+		"http://127.0.0.1:1/v2/check"); code != cli.ExitOK {
+		t.Fatalf("config exit %d: %s", code, stderr)
+	}
+
+	code, stdout, stderr := run(t, directory, "book", "set", "fixture", "language", "de-DE")
+	if code != cli.ExitOK {
+		t.Fatalf("unverified set exit %d: %s", code, stderr)
+	}
+	var result struct {
+		Data struct {
+			Warnings []grammar.Warning `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("payload %s: %v", stdout, err)
+	}
+	if len(result.Data.Warnings) != 1 ||
+		result.Data.Warnings[0].Code != grammar.LanguageUnverified {
+		t.Fatalf("unverified warning %+v", result.Data.Warnings)
+	}
+	if language := manifestLanguage(t, directory); language != "de-DE" {
+		t.Fatalf("unverified language %q", language)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"}]`)
+	}))
+	defer server.Close()
+	if code, _, stderr := run(t, directory, "config", "set", "grammar.endpoint",
+		server.URL); code != cli.ExitOK {
+		t.Fatalf("config exit %d: %s", code, stderr)
+	}
+	code, _, stderr = run(t, directory, "book", "set", "fixture", "language", "fr-FR")
+	if code == cli.ExitOK || !strings.Contains(stderr, "grammar.language-unsupported") {
+		t.Fatalf("unsupported language exit %d: %s", code, stderr)
+	}
+	if language := manifestLanguage(t, directory); language != "de-DE" {
+		t.Fatalf("a refused set changed the language to %q", language)
+	}
+}
+
+func manifestLanguage(t *testing.T, directory string) string {
+	t.Helper()
+	layout, err := store.NewLayout(filepath.Join(directory, "_CLABOK"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := layout.Book("fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(paths.Dir, lifecycle.ManifestMember))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := model.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manifest.Settings.Language
 }
 
 func TestAddDryRun(t *testing.T) {

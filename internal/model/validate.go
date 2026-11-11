@@ -556,4 +556,9 @@ func (validator *manifestValidator) validateSettings() {
 		validator.add("model.invalid-setting", "settings.indexDepth",
 			"the index depth must be at least 1")
 	}
+	if language := validator.manifest.Settings.Language; language != "" &&
+		!ValidateLanguageTag(language) {
+		validator.add("model.invalid-setting", "settings.language",
+			"expected a language id such as de, de-DE or pt-BR, got %q", language)
+	}
 }

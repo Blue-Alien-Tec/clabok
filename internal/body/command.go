@@ -363,6 +363,7 @@ func newService(env *cli.Env) (*Service, *cli.Error) {
 	service.Grammar = grammar.NewGateTimeout(values.GrammarEndpoint,
 		grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()),
 		values.GrammarTimeout)
+	service.GrammarLanguage = values.GrammarLanguage
 	return service, nil
 }
 

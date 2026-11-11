@@ -24,8 +24,9 @@ import (
 // DefaultEndpoint is used when the configuration leaves the endpoint empty.
 const DefaultEndpoint = "http://127.0.0.1:8081/v2/check"
 
-// Language is the fixed check language. The endpoint is the only grammar config key.
-const Language = "en-US"
+// DefaultLanguage is the built-in check language and the default of grammar.language. A book's
+// declared language, then grammar.language, override it.
+const DefaultLanguage = "en-US"
 
 // DefaultTimeout is the default watchdog interval. The check cap is WatchdogIntervals times the
 // interval; a check that outlives the cap is reported as grammar.timeout.
@@ -41,6 +42,9 @@ const (
 	ReasonUnreachable = "grammar.unreachable"
 	ReasonResponse    = "grammar.response"
 	ReasonStartFailed = "grammar.start-failed"
+	// ReasonLanguageUnsupported reports a declared language the server does not offer, or the
+	// ad-hoc-only auto value on a write path. The check is never sent in a fallback language.
+	ReasonLanguageUnsupported = "grammar.language-unsupported"
 )
 
 // ErrUnavailable is the compatibility sentinel for every transport failure. New code discriminates
@@ -129,6 +133,7 @@ type Report struct {
 	Policy   string    `json:"policy,omitempty"`
 	Checked  bool      `json:"checked"`
 	Reason   string    `json:"reason,omitempty"`
+	Language string    `json:"language,omitempty"`
 	Degraded string    `json:"degraded,omitempty"`
 	Findings []Finding `json:"findings,omitempty"`
 }
@@ -222,6 +227,12 @@ type matchesPayload struct {
 			Value string `json:"value"`
 		} `json:"replacements"`
 	} `json:"matches"`
+	Language struct {
+		Code             string `json:"code"`
+		DetectedLanguage struct {
+			Code string `json:"code"`
+		} `json:"detectedLanguage"`
+	} `json:"language"`
 }
 
 // wireMatch is one LanguageTool match before the offset mapping.
@@ -233,16 +244,27 @@ type wireMatch struct {
 	Values  []string
 }
 
-// Check sends the text and returns the unsuppressed findings in body order. Large bodies are
-// checked in paragraph chunks; a failure of any chunk leaves the whole check unchecked, so a
-// half-checked body is never reported as checked.
-func (client *Client) Check(ctx context.Context, text string) ([]Finding, error) {
+// CheckResult is one complete check: the findings and the language that produced them.
+type CheckResult struct {
+	Findings []Finding
+	Language string
+}
+
+// Check sends the text in the given language and returns the unsuppressed findings in body order.
+// Large bodies are checked in paragraph chunks; a failure of any chunk leaves the whole check
+// unchecked, so a half-checked body is never reported as checked. auto is accepted here for ad-hoc
+// checks and reports the detected language; the gate refuses it on write paths.
+func (client *Client) Check(ctx context.Context, text, language string) (CheckResult, error) {
 	prepared := prepareText(text)
 	findings := make([]Finding, 0)
+	reported := ""
 	for _, span := range chunkPrepared(prepared.text, chunkBytes) {
-		matches, err := client.fetch(ctx, prepared.text[span.start:span.end])
+		matches, detected, err := client.fetch(ctx, prepared.text[span.start:span.end], language)
 		if err != nil {
-			return nil, err
+			return CheckResult{}, err
+		}
+		if reported == "" {
+			reported = detected
 		}
 		for _, match := range matches {
 			match.Offset += span.start
@@ -255,7 +277,27 @@ func (client *Client) Check(ctx context.Context, text string) ([]Finding, error)
 	for index := range findings {
 		findings[index].Index = index + 1
 	}
-	return findings, nil
+	effective := language
+	if language == "auto" {
+		if reported != "" {
+			effective = reported
+		}
+	} else if effective == "" {
+		effective = reported
+	}
+	return CheckResult{Findings: findings, Language: effective}, nil
+}
+
+// Resolve returns the effective check language: the book setting, then the project default, then
+// the built-in default.
+func Resolve(settings model.Settings, fallback string) string {
+	if language := strings.TrimSpace(settings.Language); language != "" {
+		return language
+	}
+	if language := strings.TrimSpace(fallback); language != "" {
+		return language
+	}
+	return DefaultLanguage
 }
 
 // finding maps one match from prepared space back to the body.
@@ -279,17 +321,18 @@ func (client *Client) finding(text string, prepared preparedText, match wireMatc
 
 // fetch runs one request under the watchdog. The request stays alive across alive intervals; only a
 // dead probe starts a new attempt, and only the cap cancels a request against a live server.
-func (client *Client) fetch(ctx context.Context, text string) ([]wireMatch, error) {
+func (client *Client) fetch(ctx context.Context, text, language string) ([]wireMatch, string, error) {
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type outcome struct {
-		matches []wireMatch
-		err     error
+		matches  []wireMatch
+		detected string
+		err      error
 	}
 	result := make(chan outcome, 1)
 	go func() {
-		matches, err := client.post(requestCtx, text)
-		result <- outcome{matches: matches, err: err}
+		matches, detected, err := client.post(requestCtx, text, language)
+		result <- outcome{matches: matches, detected: detected, err: err}
 	}()
 	base := baseURL(client.Endpoint)
 	interval := client.Interval()
@@ -299,13 +342,13 @@ func (client *Client) fetch(ctx context.Context, text string) ([]wireMatch, erro
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ErrTimeout
+			return nil, "", ErrTimeout
 		case received := <-result:
-			return received.matches, received.err
+			return received.matches, received.detected, received.err
 		case <-timer.C:
 			select {
 			case received := <-result:
-				return received.matches, received.err
+				return received.matches, received.detected, received.err
 			default:
 			}
 			if reachable(base) {
@@ -313,14 +356,14 @@ func (client *Client) fetch(ctx context.Context, text string) ([]wireMatch, erro
 				failed = 0
 				if alive >= WatchdogIntervals {
 					cancel()
-					return nil, ErrTimeout
+					return nil, "", ErrTimeout
 				}
 			} else {
 				failed++
 				alive = 0
 				if failed >= 2 {
 					cancel()
-					return nil, ErrUnreachable
+					return nil, "", ErrUnreachable
 				}
 			}
 			timer.Reset(interval)
@@ -329,27 +372,30 @@ func (client *Client) fetch(ctx context.Context, text string) ([]wireMatch, erro
 }
 
 // post sends one form request and classifies the failure.
-func (client *Client) post(ctx context.Context, text string) ([]wireMatch, error) {
+func (client *Client) post(ctx context.Context, text, language string) ([]wireMatch, string, error) {
 	form := url.Values{}
 	form.Set("text", text)
-	form.Set("language", Language)
+	if strings.TrimSpace(language) == "" {
+		language = DefaultLanguage
+	}
+	form.Set("language", language)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.Endpoint,
 		strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return nil, "", fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response, err := client.httpClient().Do(request)
 	if err != nil {
-		return nil, classifyTransport(ctx, err)
+		return nil, "", classifyTransport(ctx, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, &ErrResponse{Status: response.StatusCode}
+		return nil, "", &ErrResponse{Status: response.StatusCode}
 	}
 	var payload matchesPayload
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&payload); err != nil {
-		return nil, &ErrResponse{Status: response.StatusCode, Detail: err.Error()}
+		return nil, "", &ErrResponse{Status: response.StatusCode, Detail: err.Error()}
 	}
 	matches := make([]wireMatch, 0, len(payload.Matches))
 	for _, match := range payload.Matches {
@@ -362,7 +408,11 @@ func (client *Client) post(ctx context.Context, text string) ([]wireMatch, error
 			RuleID: match.Rule.ID, Values: values,
 		})
 	}
-	return matches, nil
+	detected := strings.TrimSpace(payload.Language.Code)
+	if detected == "" || detected == "auto" {
+		detected = strings.TrimSpace(payload.Language.DetectedLanguage.Code)
+	}
+	return matches, detected, nil
 }
 
 // classifyTransport separates a canceled watchdog from a dial failure. A dial timeout is an
@@ -425,6 +475,9 @@ type Gate struct {
 	Policy Policy
 	// Start starts the shared server on demand. A nil Start uses Serve with the discovered jar.
 	Start func(endpoint string) error
+	// AdHoc allows language=auto for file and raw checks. Book writes leave it false, so the gate
+	// refuses auto before any request.
+	AdHoc bool
 }
 
 // NewGate returns a gate for the configured endpoint and policy.
@@ -437,42 +490,83 @@ func NewGateTimeout(endpoint string, policy Policy, terms []string, timeout time
 	return &Gate{Client: NewClientTimeout(endpoint, terms, timeout), Policy: policy}
 }
 
-// Evaluate runs the check. A request that outlived the watchdog cap is a skip with a truthful
-// reason; only an unreachable server triggers the shared start attempt, and a server that cannot be
-// started degrades to a reported skip. There is no silent skip: every prose write passes this gate.
-func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text string) Report {
+// Evaluate runs the check in the given language. A request that outlived the watchdog cap is a skip
+// with a truthful reason; only an unreachable server triggers the shared start attempt, and a server
+// that cannot be started degrades to a reported skip. There is no silent skip: every prose write
+// passes this gate. An unsupported language is skipped with grammar.language-unsupported and never
+// replaced by a fallback.
+func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text, language string) Report {
 	report := Report{Policy: string(PolicyBlock)}
 	if gate == nil || gate.Client == nil {
 		return report
 	}
 	report.Policy = string(gate.Policy)
-	findings, err := gate.Client.Check(ctx, text)
+	language = strings.TrimSpace(language)
+	if language == "" {
+		language = DefaultLanguage
+	}
+	if language == "auto" && !gate.AdHoc {
+		return gate.skippedReason(ReasonLanguageUnsupported, "auto is ad-hoc only")
+	}
+	report.Language = language
+	if language != "auto" {
+		canonical, ok, err := gate.Client.Supported(ctx, language)
+		if err != nil {
+			if ReasonFor(err) != ReasonUnreachable {
+				return gate.skippedReport(report, ReasonFor(err), err)
+			}
+			if startErr := gate.start(); startErr != nil {
+				return gate.skippedReport(report, ReasonStartFailed, startErr)
+			}
+			canonical, ok, err = gate.Client.Supported(ctx, language)
+			if err != nil {
+				return gate.skippedReport(report, ReasonFor(err), err)
+			}
+		}
+		if !ok {
+			return gate.skippedReason(ReasonLanguageUnsupported,
+				fmt.Sprintf("the server does not report the language %q", language))
+		}
+		language = canonical.Code
+		report.Language = language
+	}
+	findings, err := gate.Client.Check(ctx, text, language)
 	if err != nil {
 		if ReasonFor(err) != ReasonUnreachable {
-			return gate.skipped(ReasonFor(err), err)
+			return gate.skippedReport(report, ReasonFor(err), err)
 		}
 		if startErr := gate.start(); startErr != nil {
-			return gate.skipped(ReasonStartFailed, startErr)
+			return gate.skippedReport(report, ReasonStartFailed, startErr)
 		}
-		findings, err = gate.Client.Check(ctx, text)
+		findings, err = gate.Client.Check(ctx, text, language)
 		if err != nil {
-			return gate.skipped(ReasonFor(err), err)
+			return gate.skippedReport(report, ReasonFor(err), err)
 		}
 	}
-	for index := range findings {
-		findings[index].Block = block
+	for index := range findings.Findings {
+		findings.Findings[index].Block = block
 	}
 	report.Checked = true
-	report.Findings = findings
+	report.Language = findings.Language
+	report.Findings = findings.Findings
 	return report
 }
 
-// skipped builds an unchecked report. The reason is a stable code; Degraded is the human line.
-func (gate *Gate) skipped(reason string, detail error) Report {
+// skippedReport keeps the language of an already-started evaluation.
+func (gate *Gate) skippedReport(report Report, reason string, detail error) Report {
+	report.Checked = false
+	report.Reason = reason
+	report.Degraded = fmt.Sprintf("grammar check skipped: %v", detail)
+	report.Findings = nil
+	return report
+}
+
+// skippedReason reports a skip that never reached a request.
+func (gate *Gate) skippedReason(reason, message string) Report {
 	return Report{
 		Policy:   string(gate.Policy),
 		Reason:   reason,
-		Degraded: fmt.Sprintf("grammar check skipped: %v", detail),
+		Degraded: "grammar check skipped: " + message,
 	}
 }
 

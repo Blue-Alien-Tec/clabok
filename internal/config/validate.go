@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
 
 // Issue is one configuration problem.
@@ -94,6 +96,16 @@ func validate(document *file) []Issue {
 				Code:    "config.invalid-timeout",
 				Key:     "grammar.timeout",
 				Message: "expected a positive duration such as 5s, got " + timeout,
+			})
+		}
+	}
+	if document.Grammar != nil && document.Grammar.Language != nil {
+		language := *document.Grammar.Language
+		if !model.ValidateLanguageTag(language) {
+			issues = append(issues, Issue{
+				Code:    "config.invalid-language",
+				Key:     "grammar.language",
+				Message: "expected a language id such as de, de-DE or pt-BR, got " + language,
 			})
 		}
 	}

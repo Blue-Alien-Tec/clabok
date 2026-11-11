@@ -104,8 +104,10 @@ type Row struct {
 type Service struct {
 	Lifecycle *lifecycle.Lifecycle
 	Structure *structure.Service
-	// Grammar is the prose gate. A nil gate skips the check.
-	Grammar *grammar.Gate
+	// Grammar is the prose gate. A nil gate skips the check. GrammarLanguage is the project
+	// default that applies when a book declares no language.
+	Grammar         *grammar.Gate
+	GrammarLanguage string
 }
 
 // New returns a body service. It uses the cooperative random allocator; production commands wire
@@ -236,7 +238,7 @@ func (service *Service) Replace(book model.BookID, block model.ID, pairs []Pair,
 		if err != nil {
 			return ReplaceResult{}, err
 		}
-		report := service.evaluate(block, next)
+		report := service.evaluate(manifest.Settings, block, next)
 		if report.Blocked() {
 			return ReplaceResult{}, grammarBlocked(report)
 		}
@@ -265,7 +267,7 @@ func (service *Service) Replace(book model.BookID, block model.ID, pairs []Pair,
 	if err != nil {
 		return ReplaceResult{}, err
 	}
-	report := service.evaluate(block, next)
+	report := service.evaluate(manifest.Settings, block, next)
 	if report.Blocked() {
 		return ReplaceResult{}, grammarBlocked(report)
 	}
@@ -294,7 +296,11 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 		if issues := CheckProse(result); len(issues) > 0 {
 			return WriteResult{}, headingError(issues)
 		}
-		report := service.evaluate(0, result)
+		_, manifest, openErr := service.open(book)
+		if openErr != nil {
+			return WriteResult{}, openErr
+		}
+		report := service.evaluate(manifest.Settings, 0, result)
 		if report.Blocked() {
 			return WriteResult{}, grammarBlocked(report)
 		}
@@ -341,7 +347,7 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 		if issues := CheckProse(next); len(issues) > 0 {
 			return WriteResult{}, headingError(issues)
 		}
-		report := service.evaluate(block, next)
+		report := service.evaluate(manifest.Settings, block, next)
 		if report.Blocked() {
 			return WriteResult{}, grammarBlocked(report)
 		}
@@ -369,7 +375,7 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 	if issues := CheckProse(next); len(issues) > 0 {
 		return WriteResult{}, headingError(issues)
 	}
-	report := service.evaluate(block, next)
+	report := service.evaluate(manifest.Settings, block, next)
 	if report.Blocked() {
 		return WriteResult{}, grammarBlocked(report)
 	}
@@ -384,12 +390,13 @@ func (service *Service) write(book model.BookID, block, parent model.ID, text st
 	}, nil
 }
 
-// evaluate runs the grammar gate. A service without a gate skips the check.
-func (service *Service) evaluate(block model.ID, text string) grammar.Report {
+// evaluate runs the grammar gate in the book's language. A service without a gate skips the check.
+func (service *Service) evaluate(settings model.Settings, block model.ID, text string) grammar.Report {
 	if service.Grammar == nil {
 		return grammar.Report{}
 	}
-	return service.Grammar.Evaluate(context.Background(), block, text)
+	language := grammar.Resolve(settings, service.GrammarLanguage)
+	return service.Grammar.Evaluate(context.Background(), block, text, language)
 }
 
 func grammarBlocked(report grammar.Report) error {

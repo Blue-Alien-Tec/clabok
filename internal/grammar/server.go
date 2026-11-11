@@ -46,6 +46,13 @@ type ServerInfo struct {
 	Log     string `json:"log,omitempty"`
 	Timeout string `json:"timeout,omitempty"`
 	Cap     string `json:"cap,omitempty"`
+	// Language is the configured default for books without a declared language.
+	Language string `json:"language,omitempty"`
+	// Languages is the supported set, cached or live; the flags describe its provenance.
+	Languages        []Language `json:"languages,omitempty"`
+	LanguagesCached  bool       `json:"languagesCached,omitempty"`
+	LanguagesStale   bool       `json:"languagesStale,omitempty"`
+	LanguagesFetched string     `json:"languagesFetched,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -72,6 +79,19 @@ func (info ServerInfo) Text() string {
 	}
 	if info.Timeout != "" {
 		line += fmt.Sprintf("\nwatchdog: interval %s, cap %s", info.Timeout, info.Cap)
+	}
+	if info.Language != "" {
+		line += fmt.Sprintf("\ndefault language: %s", info.Language)
+	}
+	if len(info.Languages) > 0 {
+		state := "live"
+		if info.LanguagesCached {
+			state = "cached"
+		}
+		if info.LanguagesStale {
+			state += ", stale"
+		}
+		line += fmt.Sprintf("\n%d supported language(s), %s", len(info.Languages), state)
 	}
 	return line + "\n"
 }

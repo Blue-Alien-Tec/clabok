@@ -92,7 +92,15 @@ type mutation struct {
 type Service struct {
 	Lifecycle *lifecycle.Lifecycle
 	Allocator model.Allocator
+	// LanguageCheck validates a declared book language against the grammar server. It returns the
+	// canonical spelling and an optional non-blocking warning. A nil hook validates the syntax only.
+	LanguageCheck func(code string) (canonical, warning string, err error)
+
+	warnings []string
 }
+
+// Warnings returns the non-blocking warnings of the last execution.
+func (service *Service) Warnings() []string { return service.warnings }
 
 // New returns a structure service. A nil allocator falls back to the cooperative random allocator.
 func New(life *lifecycle.Lifecycle, allocator model.Allocator) *Service {
@@ -433,6 +441,21 @@ func (service *Service) run(book model.BookID, reason string, steps []Step, dryR
 	paths, manifest, err := service.load(book)
 	if err != nil {
 		return nil, err
+	}
+	service.warnings = nil
+	for index := range steps {
+		step := &steps[index]
+		if step.Op != "setting" || step.Key != "language" || service.LanguageCheck == nil {
+			continue
+		}
+		canonical, warning, checkErr := service.LanguageCheck(step.Value)
+		if checkErr != nil {
+			return nil, checkErr
+		}
+		if warning != "" {
+			service.warnings = append(service.warnings, warning)
+		}
+		step.Value = canonical
 	}
 	allocator := service.Allocator
 	if dryRun {
@@ -1396,9 +1419,16 @@ func ApplySettingValue(settings *model.Settings, key, value string) error {
 				"output expects monolith, chapter or part, got %q", value)
 		}
 		settings.Output = mode
+	case "language":
+		language := strings.TrimSpace(value)
+		if !model.ValidateLanguageTag(language) {
+			return fail("structure.invalid-value",
+				"language expects an id such as de, de-DE or pt-BR, got %q", value)
+		}
+		settings.Language = language
 	default:
 		return fail("structure.unknown-setting",
-			"unknown book setting %q; use numbering, toc, index-depth or output", key)
+			"unknown book setting %q; use numbering, toc, index-depth, output or language", key)
 	}
 	return nil
 }

@@ -1,7 +1,6 @@
 package grammar
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -94,7 +93,7 @@ func TestCheckChunkedOffsetsMatchTheBody(t *testing.T) {
 		t.Fatalf("the fixture must exceed one chunk: %d bytes", len(body))
 	}
 
-	findings, err := NewClient(server.URL, nil).Check(context.Background(), body)
+	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +124,7 @@ func TestCheckOversizedParagraphIsOneRequest(t *testing.T) {
 	if len(body) <= chunkBytes {
 		t.Fatalf("fixture too small: %d", len(body))
 	}
-	findings, err := NewClient(server.URL, nil).Check(context.Background(), body)
+	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +153,7 @@ func TestCheckChunkFailureDiscardsAllFindings(t *testing.T) {
 	defer server.Close()
 
 	body := "teh first\n\nsecond paragraph\n\nthird paragraph\n\n" + strings.Repeat("more prose\n\n", 500)
-	findings, err := NewClient(server.URL, nil).Check(context.Background(), body)
+	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
 	if err == nil {
 		t.Fatalf("a failed chunk must fail the whole check, findings %+v", findings)
 	}
@@ -172,7 +171,7 @@ func TestCheckEmptyBodySendsNoRequest(t *testing.T) {
 	defer server.Close()
 	client := NewClient(server.URL, nil)
 	for _, body := range []string{"", "   ", "\n\n\n"} {
-		findings, err := client.Check(context.Background(), body)
+		findings, err := checkDefault(t, client, body)
 		if err != nil || len(findings) != 0 {
 			t.Fatalf("%q: findings %+v, err %v", body, findings, err)
 		}
@@ -201,7 +200,7 @@ func TestCheckChunkedCodeSpanIsFiltered(t *testing.T) {
 	defer server.Close()
 
 	body := strings.Repeat("plain paragraph text\n\n", 250) + "Inline `teh` code.\n"
-	findings, err := NewClient(server.URL, nil).Check(context.Background(), body)
+	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +216,7 @@ func TestCheckFencedBlockAcrossParagraphs(t *testing.T) {
 
 	body := strings.Repeat("plain paragraph text\n\n", 250) +
 		"```text\nteh inside a fence\n```\n" + "tail paragraph\n"
-	findings, err := NewClient(server.URL, nil).Check(context.Background(), body)
+	findings, err := checkDefault(t, NewClient(server.URL, nil), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +249,7 @@ func TestGrammarCliffFixtures(t *testing.T) {
 			fmt.Fprintf(&builder, "Paragraph %d has teh typo inside its prose line.\n\n", index)
 		}
 		body := builder.String()
-		findings, err := client.Check(context.Background(), body)
+		findings, err := checkDefault(t, client, body)
 		if err != nil {
 			t.Fatalf("%s: %v", size.name, err)
 		}

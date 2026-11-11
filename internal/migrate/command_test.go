@@ -11,6 +11,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/config"
 	"github.com/Blue-Alien-Tec/clabok/internal/coordinator"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
+	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
@@ -64,7 +65,7 @@ func TestMigrateApplyCommand(t *testing.T) {
 	if code != cli.ExitOK {
 		t.Fatalf("apply exit %d: %s", code, stderr)
 	}
-	if containerVersion(t, scene.Paths) != 3 {
+	if containerVersion(t, scene.Paths) != model.Version {
 		t.Fatal("apply did not migrate the container")
 	}
 	var envelope struct {
@@ -74,7 +75,7 @@ func TestMigrateApplyCommand(t *testing.T) {
 		t.Fatalf("payload %s: %v", stdout, err)
 	}
 	report := envelope.Data
-	if len(report.Books) != 1 || !report.Books[0].Changed || report.Books[0].Manifest.To != 3 {
+	if len(report.Books) != 1 || !report.Books[0].Changed || report.Books[0].Manifest.To != model.Version {
 		t.Fatalf("report %+v", report.Books)
 	}
 }

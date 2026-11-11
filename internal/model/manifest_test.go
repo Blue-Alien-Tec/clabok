@@ -82,6 +82,51 @@ func TestDecodeUpgradesVersion2(t *testing.T) {
 	}
 }
 
+func TestDecodeUpgradesVersion3(t *testing.T) {
+	document := `{"version":3,"id":"x","root":{"id":"1","kind":"title","title":"X"},"settings":{}}`
+	manifest, err := Decode([]byte(document))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != Version {
+		t.Fatalf("version %d, want %d", manifest.Version, Version)
+	}
+	if manifest.Settings.Language != "" {
+		t.Fatalf("an old book must not gain a language: %q", manifest.Settings.Language)
+	}
+}
+
+func TestLanguageSettingRoundTrip(t *testing.T) {
+	manifest, err := Decode([]byte(
+		`{"version":3,"id":"x","root":{"id":"1","kind":"title","title":"X"},"settings":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(`"language"`)) {
+		t.Fatalf("an unset language is written: %s", data)
+	}
+
+	manifest.Settings.Language = "de-DE"
+	data, err = manifest.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"language": "de-DE"`)) {
+		t.Fatalf("the language is missing: %s", data)
+	}
+	decoded, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Settings.Language != "de-DE" {
+		t.Fatalf("language %q", decoded.Settings.Language)
+	}
+}
+
 func TestDecodeRejectsInvalidDocuments(t *testing.T) {
 	cases := []struct {
 		document string
@@ -89,7 +134,7 @@ func TestDecodeRejectsInvalidDocuments(t *testing.T) {
 	}{
 		{`{"version":2,"id":"x","root":{"id":"1","kind":"title","title":"X"},"bogus":1}`, "model.unknown-key"},
 		{`{"version":2,"version":2}`, "model.duplicate-key"},
-		{`{"version":4,"id":"x"}`, "model.manifest-version"},
+		{`{"version":5,"id":"x"}`, "model.manifest-version"},
 		{`{"version":1,"id":"x"}`, "model.manifest-version"},
 		{`{"id":"x"}`, "model.manifest-version"},
 		{`{`, "model.invalid-json"},

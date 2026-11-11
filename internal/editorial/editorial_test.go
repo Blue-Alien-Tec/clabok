@@ -81,6 +81,11 @@ func readFile(t *testing.T, path string) string {
 func quietGrammar(t *testing.T, directory string) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/languages" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"}]`)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"matches":[]}`)
 	}))

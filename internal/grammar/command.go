@@ -28,6 +28,7 @@ type checkPayload struct {
 	Block    string    `json:"block,omitempty"`
 	Checked  bool      `json:"checked"`
 	Reason   string    `json:"reason,omitempty"`
+	Language string    `json:"language,omitempty"`
 	Degraded string    `json:"degraded,omitempty"`
 	Count    int       `json:"count"`
 	Findings []Finding `json:"findings,omitempty"`
@@ -61,14 +62,102 @@ func (payload checkPayload) Text() string {
 	return builder.String()
 }
 
+type languagesPayload struct {
+	DryRun       bool       `json:"dryRun"`
+	Default      string     `json:"default"`
+	DefaultKnown bool       `json:"defaultKnown"`
+	Book         string     `json:"book,omitempty"`
+	BookLanguage string     `json:"bookLanguage,omitempty"`
+	Supported    bool       `json:"supported,omitempty"`
+	Server       string     `json:"server"`
+	Cached       bool       `json:"cached"`
+	Stale        bool       `json:"stale,omitempty"`
+	Fetched      string     `json:"fetched,omitempty"`
+	Count        int        `json:"count"`
+	Languages    []Language `json:"languages"`
+}
+
+// DryRunResult marks the payload as a dry-run receipt; the command writes nothing but the cache.
+func (payload languagesPayload) DryRunResult() bool { return payload.DryRun }
+
+func (payload languagesPayload) Text() string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "default language: %s", payload.Default)
+	if payload.DefaultKnown {
+		builder.WriteString(" (supported)")
+	}
+	builder.WriteByte('\n')
+	if payload.Book != "" {
+		fmt.Fprintf(&builder, "book %s: %s", payload.Book, payload.BookLanguage)
+		if payload.Supported {
+			builder.WriteString(" (supported)")
+		}
+		builder.WriteByte('\n')
+	}
+	for _, language := range payload.Languages {
+		fmt.Fprintf(&builder, "%s  %s\n", language.Code, language.Name)
+	}
+	state := "server"
+	if payload.Cached {
+		state = "cached"
+	}
+	if payload.Stale {
+		state += ", stale"
+	}
+	if payload.Fetched != "" {
+		state += " (fetched " + payload.Fetched + ")"
+	}
+	fmt.Fprintf(&builder, "%d language(s), %s\n", payload.Count, state)
+	return builder.String()
+}
+
+// languagesCommand prints the supported set, the configured default and an optional book language.
+func languagesCommand(env *cli.Env, bookRaw string, refresh bool) (*cli.Result, error) {
+	values, configErr := config.Load(env)
+	if configErr != nil {
+		return nil, configErr
+	}
+	life, _, lifeErr := lifecycle.FromEnv(env)
+	if lifeErr != nil {
+		return nil, lifeErr
+	}
+	client := NewClientTimeout(values.GrammarEndpoint, nil, values.GrammarTimeout)
+	languages, cached, stale, fetched := languageSnapshot(client, refresh)
+	if len(languages) == 0 {
+		return nil, cli.Fail("grammar.unreachable",
+			"the grammar server cannot be reached and no language list is cached").
+			WithHint("run `pecia grammar serve` once to fetch the list")
+	}
+	payload := languagesPayload{
+		DryRun: env.Globals.DryRun, Default: values.GrammarLanguage,
+		Server: values.GrammarEndpoint, Cached: cached, Stale: stale, Fetched: fetched,
+		Count: len(languages), Languages: languages,
+	}
+	_, payload.DefaultKnown = findLanguage(languages, payload.Default)
+	if bookRaw != "" {
+		bookID, bookErr := requireBook(bookRaw)
+		if bookErr != nil {
+			return nil, bookErr
+		}
+		settings, settingsErr := BookSettings(life, bookID)
+		if settingsErr != nil {
+			return nil, cli.AsError(settingsErr)
+		}
+		payload.Book = string(bookID)
+		payload.BookLanguage = Resolve(settings, values.GrammarLanguage)
+		_, payload.Supported = findLanguage(languages, payload.BookLanguage)
+	}
+	return &cli.Result{Data: payload}, nil
+}
+
 func grammarCommand() *cli.Command {
-	var book, block, file, raw, jar, finding string
-	var allSafe, requireCheck bool
+	var book, block, file, raw, jar, finding, languageFlag string
+	var allSafe, requireCheck, refresh bool
 	var expect int
 	return &cli.Command{
 		Name:     "grammar",
 		Summary:  "check prose, apply findings and manage the LanguageTool server",
-		Usage:    "pecia grammar <check|apply|serve|server-stop|server-info> ...",
+		Usage:    "pecia grammar <check|apply|languages|serve|server-stop|server-info> ...",
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("grammar")
@@ -79,8 +168,10 @@ func grammarCommand() *cli.Command {
 			set.StringVar(&jar, "jar", "", "LanguageTool server jar")
 			set.BoolVar(&allSafe, "all-safe", false, "apply all findings with one replacement")
 			set.BoolVar(&requireCheck, "require-check", false, "fail when the check cannot complete")
+			set.StringVar(&languageFlag, "language", "", "check language id, or auto for --file and --raw")
 			set.StringVar(&finding, "finding", "", "1-based finding indices")
 			set.IntVar(&expect, "expect", -1, "expected number of replacements")
+			set.BoolVar(&refresh, "refresh", false, "refresh the cached language list")
 			return set
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
@@ -126,13 +217,19 @@ func grammarCommand() *cli.Command {
 					interval, cap := Watchdog(values.GrammarTimeout)
 					info.Timeout = interval.String()
 					info.Cap = cap.String()
+					info.Language = values.GrammarLanguage
+					client := NewClientTimeout(values.GrammarEndpoint, nil, values.GrammarTimeout)
+					info.Languages, info.LanguagesCached, info.LanguagesStale,
+						info.LanguagesFetched = languageSnapshot(client, false)
 					info.DryRun = env.Globals.DryRun
 					return &cli.Result{Data: info}, nil
+				case "languages":
+					return languagesCommand(env, book, refresh)
 				}
 			}
 			if len(args) != 1 || args[0] != "check" {
 				return nil, cli.Usage("usage.invalid-arguments",
-					"grammar takes check, apply, serve, server-stop or server-info").
+					"grammar takes check, apply, languages, serve, server-stop or server-info").
 					WithHint("pecia grammar check --book <id> --block <id>")
 			}
 			sources := 0
@@ -153,13 +250,19 @@ func grammarCommand() *cli.Command {
 			if configErr != nil {
 				return nil, configErr
 			}
-			_, layout, lifeErr := lifecycle.FromEnv(env)
+			life, layout, lifeErr := lifecycle.FromEnv(env)
 			if lifeErr != nil {
 				return nil, lifeErr
 			}
 			payload := checkPayload{DryRun: env.Globals.DryRun}
 			content := raw
+			language := strings.TrimSpace(values.GrammarLanguage)
 			if book != "" {
+				if strings.TrimSpace(languageFlag) != "" {
+					return nil, cli.Usage("usage.invalid-arguments",
+						"--language is only for --file and --raw; a book uses its declared language").
+						WithHint("pecia book set <book> language <id>")
+				}
 				bookID, bookErr := requireBook(book)
 				if bookErr != nil {
 					return nil, bookErr
@@ -173,6 +276,11 @@ func grammarCommand() *cli.Command {
 					return nil, cli.AsError(readErr)
 				}
 				content = read
+				settings, settingsErr := BookSettings(life, bookID)
+				if settingsErr != nil {
+					return nil, cli.AsError(settingsErr)
+				}
+				language = Resolve(settings, language)
 				payload.Book = string(bookID)
 				payload.Block = blockID.String()
 			} else if file != "" {
@@ -182,19 +290,24 @@ func grammarCommand() *cli.Command {
 				}
 				content = read
 			}
+			if strings.TrimSpace(languageFlag) != "" {
+				language = strings.TrimSpace(languageFlag)
+			}
 			blockID := model.ZeroID
 			if block != "" {
 				blockID, _ = model.ParseID(block)
 			}
 			gate := NewGateTimeout(values.GrammarEndpoint, ParsePolicy(values.GrammarPolicy),
 				ReadTerms(layout.Terms()), values.GrammarTimeout)
+			gate.AdHoc = book == ""
 			gate.Start = func(endpoint string) error {
 				_, startErr := Serve(endpoint, jar)
 				return startErr
 			}
-			report := gate.Evaluate(context.Background(), blockID, content)
+			report := gate.Evaluate(context.Background(), blockID, content, language)
 			payload.Checked = report.Checked
 			payload.Reason = report.Reason
+			payload.Language = report.Language
 			payload.Degraded = report.Degraded
 			payload.Warnings = report.Warnings()
 			payload.Count = len(report.Findings)

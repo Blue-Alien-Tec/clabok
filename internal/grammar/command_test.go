@@ -62,6 +62,11 @@ func dataOf(t *testing.T, stdout string) map[string]any {
 
 func TestGrammarGateEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/languages" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"}]`)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"matches":[{"message":"Possible typo","offset":4,"length":3,`+
 			`"rule":{"id":"MORFOLOGIK_RULE_EN_US"},"replacements":[{"value":"the"}]}]}`)
@@ -111,6 +116,11 @@ func TestGrammarGateEndToEnd(t *testing.T) {
 
 func TestGrammarApplyEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/languages" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"}]`)
+			return
+		}
 		_ = r.ParseForm()
 		text := r.Form.Get("text")
 		matches := make([]map[string]any, 0)
@@ -263,7 +273,8 @@ func TestGrammarServerInfoWatchdog(t *testing.T) {
 func TestGrammarConfiguredTimeoutIsUsed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v2/languages" {
-			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"}]`)
 			return
 		}
 		time.Sleep(600 * time.Millisecond)
@@ -292,8 +303,159 @@ func TestGrammarConfiguredTimeoutIsUsed(t *testing.T) {
 	}
 }
 
+func TestGrammarLanguagesCommand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"},`+
+			`{"code":"de-DE","longCode":"de-DE","name":"German (Germany)"}]`)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	payload := dataOf(t, runOK(t, directory, "grammar", "languages"))
+	if language, _ := payload["default"].(string); language != "en-US" {
+		t.Fatalf("default %v", payload["default"])
+	}
+	if count, _ := payload["count"].(float64); count != 2 {
+		t.Fatalf("count %v", payload["count"])
+	}
+	if cached, _ := payload["cached"].(bool); cached {
+		t.Fatalf("first list must be live: %v", payload)
+	}
+	payload = dataOf(t, runOK(t, directory, "grammar", "languages"))
+	if cached, _ := payload["cached"].(bool); !cached {
+		t.Fatalf("second list must be cached: %v", payload)
+	}
+
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	runOK(t, directory, "book", "open", "guide")
+	runOK(t, directory, "book", "set", "guide", "language", "de-DE")
+	payload = dataOf(t, runOK(t, directory, "grammar", "languages", "--book", "guide"))
+	if language, _ := payload["bookLanguage"].(string); language != "de-DE" {
+		t.Fatalf("book language %v", payload["bookLanguage"])
+	}
+	if supported, _ := payload["supported"].(bool); !supported {
+		t.Fatalf("de-DE must be supported: %v", payload)
+	}
+}
+
+func TestGrammarServerInfoIncludesLanguages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"},`+
+			`{"code":"de-DE","longCode":"de-DE","name":"German (Germany)"}]`)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	info := dataOf(t, runOK(t, directory, "grammar", "server-info"))
+	if language, _ := info["language"].(string); language != "en-US" {
+		t.Fatalf("default language %v", info["language"])
+	}
+	languages, _ := info["languages"].([]any)
+	if len(languages) != 2 {
+		t.Fatalf("languages %v", info["languages"])
+	}
+}
+
+func TestGrammarCheckLanguageFlag(t *testing.T) {
+	sent := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v2/languages" {
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English"},`+
+				`{"code":"de-DE","longCode":"de-DE","name":"German"}]`)
+			return
+		}
+		_ = r.ParseForm()
+		sent = r.Form.Get("language")
+		fmt.Fprint(w, `{"matches":[],"language":{"code":"de-DE",`+
+			`"detectedLanguage":{"code":"de-DE"}}}`)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+
+	payload := dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "teh cat",
+		"--language", "de-DE"))
+	if language, _ := payload["language"].(string); language != "de-DE" || sent != "de-DE" {
+		t.Fatalf("language %v sent %q", payload["language"], sent)
+	}
+	payload = dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "teh cat",
+		"--language", "auto"))
+	if language, _ := payload["language"].(string); language != "de-DE" || sent != "auto" {
+		t.Fatalf("auto language %v sent %q", payload["language"], sent)
+	}
+
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	runOK(t, directory, "book", "open", "guide")
+	chapter := dataOf(t, runOK(t, directory, "add", "--book", "guide", "--title", "Chapter"))["target"].(string)
+	written := dataOf(t, runOK(t, directory, "body", "set", "--book", "guide", "0",
+		"--parent", chapter, "--body", "teh cat"))
+	block, _ := written["block"].(string)
+	code, _, stderr := run(t, directory, "grammar", "check", "--book", "guide", "--block", block,
+		"--language", "de-DE")
+	if code == cli.ExitOK || !strings.Contains(stderr, "usage.invalid-arguments") {
+		t.Fatalf("--language with --book must be refused: exit %d %s", code, stderr)
+	}
+}
+
+func TestBookLanguageSelectsFindings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v2/languages" {
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English"},`+
+				`{"code":"de-DE","longCode":"de-DE","name":"German"}]`)
+			return
+		}
+		_ = r.ParseForm()
+		if r.Form.Get("language") != "de-DE" {
+			fmt.Fprint(w, `{"matches":[]}`)
+			return
+		}
+		fmt.Fprint(w, `{"matches":[{"message":"German rule","offset":0,"length":3,`+
+			`"rule":{"id":"DE_RULE"},"replacements":[{"value":"der"}]}]}`)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
+	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
+	runOK(t, directory, "book", "new", "--title", "Guide")
+	runOK(t, directory, "book", "open", "guide")
+	chapter := dataOf(t, runOK(t, directory, "add", "--book", "guide", "--title", "Chapter"))["target"].(string)
+
+	runOK(t, directory, "book", "set", "guide", "language", "de-DE")
+	code, _, stderr := run(t, directory, "body", "set", "--book", "guide", "0",
+		"--parent", chapter, "--body", "teh cat")
+	if code == cli.ExitOK || !strings.Contains(stderr, "body.grammar-blocked") {
+		t.Fatalf("de-DE must block the English finding: exit %d %s", code, stderr)
+	}
+
+	runOK(t, directory, "book", "set", "guide", "language", "en-US")
+	written := dataOf(t, runOK(t, directory, "body", "set", "--book", "guide", "0",
+		"--parent", chapter, "--body", "teh cat"))
+	report, _ := written["grammar"].(map[string]any)
+	if language, _ := report["language"].(string); language != "en-US" {
+		t.Fatalf("en-US report %v", report)
+	}
+	if checked, _ := report["checked"].(bool); !checked {
+		t.Fatalf("en-US report %v", report)
+	}
+}
+
 func TestTermsEndToEnd(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/languages" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `[{"code":"en-US","longCode":"en-US","name":"English (US)"}]`)
+			return
+		}
 		_ = r.ParseForm()
 		text := r.Form.Get("text")
 		matches := make([]map[string]any, 0)

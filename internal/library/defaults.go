@@ -21,9 +21,13 @@ type DefaultsResult struct {
 func (result DefaultsResult) DryRunResult() bool { return result.DryRun }
 
 func (result DefaultsResult) Text() string {
-	return fmt.Sprintf("defaults (%s): numbering=%t toc=%t index-depth=%d output=%s",
+	language := result.Settings.Language
+	if language == "" {
+		language = "inherit"
+	}
+	return fmt.Sprintf("defaults (%s): numbering=%t toc=%t index-depth=%d output=%s language=%s",
 		result.Source, result.Settings.Numbering.Enabled, result.Settings.TOC.Enabled,
-		result.Settings.IndexDepth, result.Settings.Output)
+		result.Settings.IndexDepth, result.Settings.Output, language)
 }
 
 // Defaults returns the effective library defaults and where they come from.

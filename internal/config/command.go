@@ -24,6 +24,7 @@ type grammarValues struct {
 	Endpoint string `json:"endpoint"`
 	Policy   string `json:"policy"`
 	Timeout  string `json:"timeout"`
+	Language string `json:"language"`
 }
 
 type daemonValues struct {
@@ -70,8 +71,9 @@ func (payload showPayload) Text() string {
 	fmt.Fprintf(&builder, "rollback: undo=%d book=%d\n",
 		payload.Values.Rollback.UndoLimit, payload.Values.Rollback.BookPointLimit)
 	fmt.Fprintf(&builder, "concurrency: %s\n", payload.Values.Concurrency.Mode)
-	fmt.Fprintf(&builder, "grammar: policy=%s timeout=%s endpoint=%s\n",
-		payload.Values.Grammar.Policy, payload.Values.Grammar.Timeout, payload.Values.Grammar.Endpoint)
+	fmt.Fprintf(&builder, "grammar: policy=%s timeout=%s language=%s endpoint=%s\n",
+		payload.Values.Grammar.Policy, payload.Values.Grammar.Timeout,
+		payload.Values.Grammar.Language, payload.Values.Grammar.Endpoint)
 	fmt.Fprintf(&builder, "asciiui: %d override(s)\n", len(payload.Values.Asciiui.Types))
 	return builder.String()
 }
@@ -196,7 +198,7 @@ func runShow(env *cli.Env, args []string) (*cli.Result, error) {
 			Rollback: rollbackValues{UndoLimit: values.UndoLimit, BookPointLimit: values.BookPointLimit},
 			Grammar: grammarValues{
 				Endpoint: values.GrammarEndpoint, Policy: values.GrammarPolicy,
-				Timeout: values.GrammarTimeout.String(),
+				Timeout: values.GrammarTimeout.String(), Language: values.GrammarLanguage,
 			},
 			Concurrency: concurrencyValues{
 				Mode:   values.ConcurrencyMode,

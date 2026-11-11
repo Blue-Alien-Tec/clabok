@@ -17,9 +17,13 @@ The check talks to a LanguageTool server over HTTP. Fenced code blocks and inlin
 
 `grammar.timeout` is the watchdog interval and defaults to five seconds; the cap is three intervals. The request has no hard deadline. While it runs, the gate probes the server once per interval and keeps waiting for the same request, so a slow but healthy server is not abandoned, and no check is sent twice. A server that stays silent for the whole cap is reported as `grammar.timeout`; only a server that stops answering the probe triggers the start attempt.
 
+The check language is book data. A book may declare one with `book set <id> language <id>`; without it `grammar.language` applies, then `en-US`. Every request and every paragraph chunk carries that one language. `grammar languages` prints the supported set, the configured default and an optional book language from a ten-minute cache in the temp grammar state. `auto` is a diagnostic for `grammar check --file` and `--raw` only: a write path refuses it, and a language the server does not report is reported as `grammar.language-unsupported`, never replaced by a fallback.
+
 The gate covers every prose path: body set, append and prepend, body replace, index prose, the footer, note blocks and layout notes. A dry run performs the same check.
 
 `grammar check` checks a block, a file or raw text. Findings carry a line, a column, a rule, a message and the available replacements; the output is JSON or a short text summary. An incomplete check reports `checked: false` with a stable `reason` and one warning, so it never looks like a clean result. `--require-check` turns that skip into a failure for CI and release gates.
+
+`--language` names the language for `--file` and `--raw`; `auto` reports the detected language code. A `--book` check uses the declared book language and refuses `--language`.
 
 `grammar apply` re-checks the body, applies server-provided replacements from right to left, guards the count with `--expect`, writes once and reports the remaining findings. Only findings with one replacement are applied by `--all-safe`.
 

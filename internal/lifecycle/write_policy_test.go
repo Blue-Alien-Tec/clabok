@@ -34,7 +34,7 @@ func oldBook(t *testing.T, version int) (*Lifecycle, store.Layout, store.BookPat
 		t.Fatal(err)
 	}
 	if version != model.Version {
-		data = bytes.Replace(data, []byte(`"version": 3`),
+		data = bytes.Replace(data, []byte(fmt.Sprintf(`"version": %d`, model.Version)),
 			[]byte(fmt.Sprintf(`"version": %d`, version)), 1)
 	}
 	container := store.New()

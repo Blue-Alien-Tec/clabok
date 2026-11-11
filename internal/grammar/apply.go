@@ -141,10 +141,15 @@ func runApply(env *cli.Env, bookRaw, blockRaw, indices string, allSafe bool, exp
 	if configErr != nil {
 		return nil, configErr
 	}
-	_, layout, lifeErr := lifecycle.FromEnv(env)
+	life, layout, lifeErr := lifecycle.FromEnv(env)
 	if lifeErr != nil {
 		return nil, lifeErr
 	}
+	settings, settingsErr := BookSettings(life, bookID)
+	if settingsErr != nil {
+		return nil, cli.AsError(settingsErr)
+	}
+	language := Resolve(settings, values.GrammarLanguage)
 	text, readErr := readBlockForWrite(env, bookID, blockID)
 	if readErr != nil {
 		return nil, cli.AsError(readErr)
@@ -158,7 +163,7 @@ func runApply(env *cli.Env, bookRaw, blockRaw, indices string, allSafe bool, exp
 	payload := applyPayload{
 		DryRun: env.Globals.DryRun, Book: string(bookID), Block: blockID.String(),
 	}
-	report := gate.Evaluate(context.Background(), blockID, text)
+	report := gate.Evaluate(context.Background(), blockID, text, language)
 	if report.Unchecked() {
 		payload.Reason = report.Reason
 		payload.Degraded = report.Degraded
@@ -185,7 +190,7 @@ func runApply(env *cli.Env, bookRaw, blockRaw, indices string, allSafe bool, exp
 	// Re-check the result so remaining findings are reported; apply itself is the repair path and
 	// must not block a partial fix. The replacement text is server-driven. An unchecked re-check
 	// leaves the body unchanged: a repair that cannot be verified is not written.
-	recheck := gate.Evaluate(context.Background(), blockID, next)
+	recheck := gate.Evaluate(context.Background(), blockID, next, language)
 	if recheck.Unchecked() {
 		payload.Checked = false
 		payload.Reason = recheck.Reason

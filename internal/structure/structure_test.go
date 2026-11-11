@@ -334,9 +334,18 @@ func TestSettings(t *testing.T) {
 	if _, err := s.service.SetSetting("fixture", "output", "part", false); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.service.SetSetting("fixture", "language", "de-DE", false); err != nil {
+		t.Fatal(err)
+	}
 	settings := s.manifest(t).Settings
 	if !settings.Numbering.Enabled || settings.IndexDepth != 3 || settings.Output != model.OutputPart {
 		t.Fatalf("settings %+v", settings)
+	}
+	if settings.Language != "de-DE" {
+		t.Fatalf("language %q", settings.Language)
+	}
+	if _, err := s.service.SetSetting("fixture", "language", "de_DE", false); err == nil {
+		t.Fatal("expected structure.invalid-value")
 	}
 	if _, err := s.service.SetSetting("fixture", "output", "stripe", false); err == nil {
 		t.Fatal("expected structure.invalid-value")

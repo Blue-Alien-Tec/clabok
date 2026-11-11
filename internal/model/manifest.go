@@ -12,8 +12,8 @@ import (
 )
 
 // Version is the supported manifest schema version. Version 2 added optional block metadata;
-// version 3 added the index-prose block reference.
-const Version = 3
+// version 3 added the index-prose block reference; version 4 added the optional book language.
+const Version = 4
 
 // BookID names a book in the store. It is not an element ID and is not referenced by other books.
 type BookID string

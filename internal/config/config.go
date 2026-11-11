@@ -32,6 +32,7 @@ type grammarSection struct {
 	Endpoint *string `json:"endpoint,omitempty"`
 	Policy   *string `json:"policy,omitempty"`
 	Timeout  *string `json:"timeout,omitempty"`
+	Language *string `json:"language,omitempty"`
 }
 
 type daemonSection struct {
@@ -69,6 +70,7 @@ type builtinDefaults struct {
 	GrammarEndpoint string
 	GrammarPolicy   string
 	GrammarTimeout  string
+	GrammarLanguage string
 	ConcurrencyMode string
 	DaemonSocket    string
 }
@@ -82,6 +84,7 @@ var builtin = builtinDefaults{
 	GrammarEndpoint: "",
 	GrammarPolicy:   "block",
 	GrammarTimeout:  "5s",
+	GrammarLanguage: "en-US",
 	ConcurrencyMode: "file",
 	DaemonSocket:    "",
 }
@@ -142,6 +145,13 @@ func (f *file) grammarTimeout() string {
 	return ""
 }
 
+func (f *file) grammarLanguage() string {
+	if f.Grammar != nil && f.Grammar.Language != nil {
+		return *f.Grammar.Language
+	}
+	return ""
+}
+
 func (f *file) concurrencyMode() string {
 	if f.Concurrency != nil && f.Concurrency.Mode != nil {
 		return *f.Concurrency.Mode
@@ -177,7 +187,7 @@ func (f *file) prune() {
 		f.Rollback = nil
 	}
 	if f.Grammar != nil && f.Grammar.Endpoint == nil && f.Grammar.Policy == nil &&
-		f.Grammar.Timeout == nil {
+		f.Grammar.Timeout == nil && f.Grammar.Language == nil {
 		f.Grammar = nil
 	}
 	if f.Concurrency != nil {

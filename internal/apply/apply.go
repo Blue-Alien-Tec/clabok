@@ -298,10 +298,17 @@ func applyCommand() *cli.Command {
 			gate := grammar.NewGateTimeout(values.GrammarEndpoint,
 				grammar.ParsePolicy(values.GrammarPolicy), grammar.ReadTerms(layout.Terms()),
 				values.GrammarTimeout)
-			if proseErr := checkPlanProse(gate, steps); proseErr != nil {
+			settings, settingsErr := grammar.BookSettings(life, bookID)
+			if settingsErr != nil {
+				return nil, cli.AsError(settingsErr)
+			}
+			if proseErr := checkPlanProse(gate, steps,
+				grammar.Resolve(settings, values.GrammarLanguage)); proseErr != nil {
 				return nil, proseErr
 			}
 			service := structure.New(life, idspace.New(life, layout))
+			service.LanguageCheck = grammar.LanguageCheck(values.GrammarEndpoint,
+				values.GrammarTimeout)
 			receipts, applyErr := service.Execute(bookID, steps, env.Globals.DryRun)
 			if applyErr != nil {
 				return nil, structure.MapError(applyErr)
@@ -313,7 +320,7 @@ func applyCommand() *cli.Command {
 
 // checkPlanProse runs the grammar gate over every body text in the plan before anything is written,
 // so a blocked finding leaves the book untouched.
-func checkPlanProse(gate *grammar.Gate, steps []structure.Step) *cli.Error {
+func checkPlanProse(gate *grammar.Gate, steps []structure.Step, language string) *cli.Error {
 	for _, step := range steps {
 		text := ""
 		block := model.ZeroID
@@ -325,7 +332,7 @@ func checkPlanProse(gate *grammar.Gate, steps []structure.Step) *cli.Error {
 		default:
 			continue
 		}
-		report := gate.Evaluate(context.Background(), block, text)
+		report := gate.Evaluate(context.Background(), block, text, language)
 		if report.Blocked() {
 			return cli.Fail("body.grammar-blocked",
 				"the grammar check found %d finding(s)", len(report.Findings)).

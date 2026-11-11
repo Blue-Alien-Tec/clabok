@@ -469,3 +469,42 @@ func TestGrammarTimeoutKey(t *testing.T) {
 		t.Fatalf("a zero timeout must be rejected: %s", stderr)
 	}
 }
+
+func TestGrammarLanguageKey(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+
+	code, stdout, stderr := runCommand(t, "config", "get", "grammar.language")
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var got struct {
+		Value  any    `json:"value"`
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal(parseEnvelope(t, stdout).Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Value != "en-US" || got.Source != "default" {
+		t.Fatalf("default language %+v", got)
+	}
+
+	if code, _, stderr := runCommand(t, "config", "set", "grammar.language", "de-DE"); code != cli.ExitOK {
+		t.Fatalf("set exit %d: %s", code, stderr)
+	}
+	code, stdout, stderr = runCommand(t, "config", "get", "grammar.language")
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if err := json.Unmarshal(parseEnvelope(t, stdout).Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Value != "de-DE" || got.Source != "file" {
+		t.Fatalf("language %+v", got)
+	}
+
+	code, _, stderr = runCommand(t, "config", "set", "grammar.language", "de_DE")
+	if code == cli.ExitOK || !strings.Contains(stderr, "grammar.language") {
+		t.Fatalf("an invalid tag must be rejected: %s", stderr)
+	}
+}

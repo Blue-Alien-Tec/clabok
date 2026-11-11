@@ -354,6 +354,17 @@ func TestSettingsRules(t *testing.T) {
 	manifest = validManifest()
 	manifest.Settings.IndexDepth = 0
 	expectCode(t, manifest, "model.invalid-setting")
+
+	manifest = validManifest()
+	manifest.Settings.Language = "de-DE"
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("a valid language tag was rejected: %v", err)
+	}
+	for _, language := range []string{"d", "de_DE", "de-DE-", "-DE", "deutsch", "d1"} {
+		manifest = validManifest()
+		manifest.Settings.Language = language
+		expectCode(t, manifest, "model.invalid-setting")
+	}
 }
 
 func TestBookIDRules(t *testing.T) {

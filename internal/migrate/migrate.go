@@ -789,9 +789,14 @@ func manifestSteps(from, to int) ([]string, error) {
 	if to > model.Version {
 		return nil, fail("migrate.unsupported-target", "target %d is newer than %d", to, model.Version)
 	}
-	steps := make([]string, 0, 1)
-	if from == 2 {
-		steps = append(steps, "manifest-v2-v3")
+	steps := make([]string, 0, 3)
+	for version := from; version < to; version++ {
+		switch version {
+		case 2:
+			steps = append(steps, "manifest-v2-v3")
+		case 3:
+			steps = append(steps, "manifest-v3-v4")
+		}
 	}
 	return steps, nil
 }

@@ -181,7 +181,7 @@ func layoutCommand() *cli.Command {
 					if textErr != nil {
 						return nil, textErr
 					}
-					report, textErr = evaluateProse(env, prose)
+					report, textErr = evaluateProse(env, bookID, prose)
 					if textErr != nil {
 						return nil, textErr
 					}

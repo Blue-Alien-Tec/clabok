@@ -31,6 +31,7 @@ type Values struct {
 	GrammarEndpoint string
 	GrammarPolicy   string
 	GrammarTimeout  time.Duration
+	GrammarLanguage string
 	ConcurrencyMode string
 	DaemonSocket    string
 	AsciiUITypes    map[string]string
@@ -141,6 +142,7 @@ func resolve(document *file, location Location, globals cli.Globals) *Values {
 		GrammarEndpoint: builtin.GrammarEndpoint,
 		GrammarPolicy:   builtin.GrammarPolicy,
 		GrammarTimeout:  parseDuration(builtin.GrammarTimeout, 5*time.Second),
+		GrammarLanguage: builtin.GrammarLanguage,
 		ConcurrencyMode: builtin.ConcurrencyMode,
 		DaemonSocket:    builtin.DaemonSocket,
 		AsciiUITypes:    map[string]string{},
@@ -162,6 +164,9 @@ func resolve(document *file, location Location, globals cli.Globals) *Values {
 	}
 	if timeout := document.grammarTimeout(); timeout != "" {
 		values.GrammarTimeout = parseDuration(timeout, values.GrammarTimeout)
+	}
+	if language := strings.TrimSpace(document.grammarLanguage()); language != "" {
+		values.GrammarLanguage = language
 	}
 	if mode := document.concurrencyMode(); mode != "" {
 		values.ConcurrencyMode = mode

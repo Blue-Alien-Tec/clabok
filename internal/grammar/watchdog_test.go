@@ -31,7 +31,7 @@ func TestWatchdogAcceptsLateAnswerFromOneRequest(t *testing.T) {
 
 	client := NewClient(server.URL, nil)
 	client.Timeout = 40 * time.Millisecond
-	findings, err := client.Check(context.Background(), "teh cat")
+	findings, err := checkDefault(t, client, "teh cat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,13 +65,14 @@ func TestWatchdogRearmsAfterOneFailedProbe(t *testing.T) {
 
 	client := NewClient(server.URL, nil)
 	client.Timeout = 40 * time.Millisecond
+	seedLanguages(t, server.URL, DefaultLanguage)
 	gate := &Gate{Client: client, Policy: PolicyWarn}
 	started := false
 	gate.Start = func(string) error {
 		started = true
 		return errors.New("no restart expected")
 	}
-	report := gate.Evaluate(context.Background(), 0, "teh cat")
+	report := gate.Evaluate(context.Background(), 0, "teh cat", DefaultLanguage)
 	if started {
 		t.Fatal("a single failed probe must not restart the server")
 	}
@@ -94,13 +95,14 @@ func TestWatchdogTwoDeadProbesTakeTheUnreachablePath(t *testing.T) {
 
 	client := NewClient(server.URL, nil)
 	client.Timeout = 20 * time.Millisecond
+	seedLanguages(t, server.URL, DefaultLanguage)
 	gate := &Gate{Client: client, Policy: PolicyBlock}
 	started := false
 	gate.Start = func(string) error {
 		started = true
 		return errors.New("no server")
 	}
-	report := gate.Evaluate(context.Background(), 0, "teh cat")
+	report := gate.Evaluate(context.Background(), 0, "teh cat", DefaultLanguage)
 	if !started {
 		t.Fatal("two dead probes must trigger the start attempt")
 	}
@@ -130,7 +132,7 @@ func TestWatchdogCapTimesOutAgainstLiveServer(t *testing.T) {
 	client := NewClient(server.URL, nil)
 	client.Timeout = 20 * time.Millisecond
 	start := time.Now()
-	_, err := client.Check(context.Background(), "teh cat")
+	_, err := checkDefault(t, client, "teh cat")
 	if !errors.Is(err, ErrTimeout) {
 		t.Fatalf("expected ErrTimeout, got %v", err)
 	}
@@ -149,7 +151,7 @@ func TestCheckTransportErrors(t *testing.T) {
 	unreachable := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := unreachable.URL
 	unreachable.Close()
-	_, err := NewClient(url, nil).Check(context.Background(), "text")
+	_, err := checkDefault(t, NewClient(url, nil), "text")
 	if !errors.Is(err, ErrUnreachable) || !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("connection refused: %v", err)
 	}
@@ -161,7 +163,7 @@ func TestCheckTransportErrors(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer failing.Close()
-	_, err = NewClient(failing.URL, nil).Check(context.Background(), "text")
+	_, err = checkDefault(t, NewClient(failing.URL, nil), "text")
 	var response *ErrResponse
 	if !errors.As(err, &response) || response.Status != http.StatusInternalServerError {
 		t.Fatalf("expected ErrResponse, got %v", err)
@@ -175,7 +177,7 @@ func TestCheckTransportErrors(t *testing.T) {
 		fmt.Fprint(w, `{"matches":`)
 	}))
 	defer garbled.Close()
-	_, err = NewClient(garbled.URL, nil).Check(context.Background(), "text")
+	_, err = checkDefault(t, NewClient(garbled.URL, nil), "text")
 	if !errors.As(err, &response) || ReasonFor(err) != ReasonResponse {
 		t.Fatalf("expected ErrResponse for malformed JSON, got %v", err)
 	}
@@ -186,7 +188,7 @@ func TestGateSkipIsTruthful(t *testing.T) {
 	client.Timeout = 20 * time.Millisecond
 	gate := &Gate{Client: client, Policy: PolicyBlock}
 	gate.Start = func(string) error { return errors.New("no server") }
-	report := gate.Evaluate(context.Background(), 0, "teh cat")
+	report := gate.Evaluate(context.Background(), 0, "teh cat", DefaultLanguage)
 	if report.Checked || !report.Unchecked() {
 		t.Fatalf("report %+v", report)
 	}

@@ -20,6 +20,9 @@ type Settings struct {
 	TOC        TOC        `json:"toc"`
 	IndexDepth int        `json:"indexDepth"`
 	Output     OutputMode `json:"output"`
+	// Language is the declared check language of the book. Empty inherits grammar.language, then
+	// the built-in default; Normalize never fills it, so an unset language stays absent.
+	Language string `json:"language,omitempty"`
 }
 
 // DefaultSettings returns the settings of a new book.

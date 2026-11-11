@@ -2,18 +2,60 @@ package grammar
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 const matchPayload = `{"matches":[{"message":"Possible typo","offset":4,"length":3,` +
 	`"rule":{"id":"MORFOLOGIK_RULE_EN_US"},"replacements":[{"value":"the"}]}]}`
+
+// TestMain isolates the grammar state directory so caches never leak between tests.
+func TestMain(m *testing.M) {
+	directory, err := os.MkdirTemp("", "clabok-grammar-test-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("CLABOK_GRAMMAR_STATE_DIR", directory)
+	code := m.Run()
+	os.RemoveAll(directory)
+	os.Exit(code)
+}
+
+// seedLanguages writes a fresh language cache so a gate test needs no language endpoint.
+func seedLanguages(t *testing.T, endpoint string, codes ...string) {
+	t.Helper()
+	languages := make([]Language, 0, len(codes))
+	for _, code := range codes {
+		languages = append(languages, Language{Code: code, Name: code})
+	}
+	list := LanguageList{Endpoint: endpoint, Fetched: time.Now().UTC(), Languages: languages}
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(languageCachePath(), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkDefault runs a check in the built-in language and returns its findings.
+func checkDefault(t *testing.T, client *Client, text string) ([]Finding, error) {
+	t.Helper()
+	result, err := client.Check(context.Background(), text, DefaultLanguage)
+	return result.Findings, err
+}
 
 func matchServer(t *testing.T, calls *int) *httptest.Server {
 	t.Helper()
@@ -24,7 +66,7 @@ func matchServer(t *testing.T, calls *int) *httptest.Server {
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("parse form: %v", err)
 		}
-		if language := r.Form.Get("language"); language != Language {
+		if language := r.Form.Get("language"); language != DefaultLanguage {
 			t.Errorf("language %q", language)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -36,7 +78,7 @@ func TestClientCheck(t *testing.T) {
 	server := matchServer(t, nil)
 	defer server.Close()
 
-	findings, err := NewClient(server.URL, nil).Check(context.Background(), "one\nteh cat")
+	findings, err := checkDefault(t, NewClient(server.URL, nil), "one\nteh cat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +99,7 @@ func TestTermSuppression(t *testing.T) {
 	server := matchServer(t, nil)
 	defer server.Close()
 
-	findings, err := NewClient(server.URL, []string{"TEH"}).Check(context.Background(), "one\nteh cat")
+	findings, err := checkDefault(t, NewClient(server.URL, []string{"TEH"}), "one\nteh cat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +113,7 @@ func TestUnavailable(t *testing.T) {
 	url := server.URL
 	server.Close()
 
-	_, err := NewClient(url, nil).Check(context.Background(), "text")
+	_, err := checkDefault(t, NewClient(url, nil), "text")
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
@@ -119,7 +161,7 @@ func TestLanguageToolLive(t *testing.T) {
 		t.Fatalf("server info %+v", info)
 	}
 
-	findings, err := NewClient(endpoint, nil).Check(context.Background(), "This are a test.")
+	findings, err := checkDefault(t, NewClient(endpoint, nil), "This are a test.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,17 +186,21 @@ func freePort(t *testing.T) int {
 
 func TestGatePolicies(t *testing.T) {
 	server := matchServer(t, nil)
+	seedLanguages(t, server.URL, DefaultLanguage, "de-DE")
 	gate := NewGate(server.URL, PolicyWarn, nil)
-	report := gate.Evaluate(context.Background(), 10, "teh cat")
+	report := gate.Evaluate(context.Background(), 10, "teh cat", DefaultLanguage)
 	if !report.Checked || len(report.Findings) != 1 || report.Blocked() {
 		t.Fatalf("warn report %+v", report)
 	}
 	if report.Findings[0].Block != 10 {
 		t.Fatalf("finding block %+v", report.Findings[0])
 	}
+	if report.Language != DefaultLanguage {
+		t.Fatalf("report language %q", report.Language)
+	}
 
 	gate.Policy = PolicyBlock
-	report = gate.Evaluate(context.Background(), 10, "teh cat")
+	report = gate.Evaluate(context.Background(), 10, "teh cat", DefaultLanguage)
 	if !report.Blocked() {
 		t.Fatalf("block report %+v", report)
 	}
@@ -165,7 +211,7 @@ func TestGatePolicies(t *testing.T) {
 		started = true
 		return errors.New("no server")
 	}
-	report = gate.Evaluate(context.Background(), 10, "teh cat")
+	report = gate.Evaluate(context.Background(), 10, "teh cat", DefaultLanguage)
 	if !started || report.Degraded == "" || len(report.Findings) != 0 || report.Blocked() {
 		t.Fatalf("degraded report %+v (started %v)", report, started)
 	}

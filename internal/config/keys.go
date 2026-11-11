@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
 
 const asciiuiPrefix = "asciiui.types."
@@ -165,6 +166,24 @@ var keyBindings = map[string]binding{
 			}
 		},
 	},
+	"grammar.language": {
+		name:         "grammar.language",
+		defaultValue: builtin.GrammarLanguage,
+		get: func(document *file) (any, bool) {
+			if document.Grammar != nil && document.Grammar.Language != nil {
+				return *document.Grammar.Language, true
+			}
+			return nil, false
+		},
+		set: func(document *file, raw string) *cli.Error {
+			return setLanguage(&document.Grammar, raw)
+		},
+		unset: func(document *file) {
+			if document.Grammar != nil {
+				document.Grammar.Language = nil
+			}
+		},
+	},
 	"concurrency.mode": {
 		name:         "concurrency.mode",
 		defaultValue: builtin.ConcurrencyMode,
@@ -308,6 +327,20 @@ func setTimeout(section **grammarSection, raw string) *cli.Error {
 		*section = &grammarSection{}
 	}
 	(*section).Timeout = &value
+	return nil
+}
+
+func setLanguage(section **grammarSection, raw string) *cli.Error {
+	value := strings.TrimSpace(unquote(raw))
+	if !model.ValidateLanguageTag(value) {
+		return cli.Usage("usage.invalid-value",
+			"grammar.language: expected a language id such as de, de-DE or pt-BR, got %q", raw).
+			WithDetails(map[string]any{"key": "grammar.language"})
+	}
+	if *section == nil {
+		*section = &grammarSection{}
+	}
+	(*section).Language = &value
 	return nil
 }
 

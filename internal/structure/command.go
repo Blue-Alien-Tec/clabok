@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/config"
+	"github.com/Blue-Alien-Tec/clabok/internal/grammar"
 	"github.com/Blue-Alien-Tec/clabok/internal/idspace"
 	"github.com/Blue-Alien-Tec/clabok/internal/lifecycle"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
@@ -25,14 +27,15 @@ func (details validationDetails) Text() string {
 }
 
 type payload struct {
-	DryRun  bool     `json:"dryRun"`
-	Book    string   `json:"book"`
-	Target  string   `json:"target,omitempty"`
-	Kind    string   `json:"kind,omitempty"`
-	Parent  string   `json:"parent,omitempty"`
-	Index   *int     `json:"index,omitempty"`
-	Order   []string `json:"order,omitempty"`
-	Changed bool     `json:"changed"`
+	DryRun   bool              `json:"dryRun"`
+	Book     string            `json:"book"`
+	Target   string            `json:"target,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Parent   string            `json:"parent,omitempty"`
+	Index    *int              `json:"index,omitempty"`
+	Order    []string          `json:"order,omitempty"`
+	Changed  bool              `json:"changed"`
+	Warnings []grammar.Warning `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt.
@@ -378,7 +381,12 @@ func settingsCommand() *cli.Command {
 			if setErr != nil {
 				return nil, MapError(setErr)
 			}
-			return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
+			result := payloadOf(receipt, env.Globals.DryRun)
+			for _, warning := range service.Warnings() {
+				result.Warnings = append(result.Warnings,
+					grammar.Warning{Code: grammar.LanguageUnverified, Message: warning})
+			}
+			return &cli.Result{Data: result}, nil
 		},
 	}
 }
@@ -388,7 +396,13 @@ func newService(env *cli.Env) (*Service, *cli.Error) {
 	if err != nil {
 		return nil, err
 	}
-	return New(life, idspace.New(life, layout)), nil
+	values, configErr := config.Load(env)
+	if configErr != nil {
+		return nil, configErr
+	}
+	service := New(life, idspace.New(life, layout))
+	service.LanguageCheck = grammar.LanguageCheck(values.GrammarEndpoint, values.GrammarTimeout)
+	return service, nil
 }
 
 func requireBook(raw string) (model.BookID, *cli.Error) {
@@ -467,6 +481,13 @@ func MapError(err error) *cli.Error {
 		return cli.Reject("book.invalid", "the book does not validate; nothing was written").
 			WithHint("this indicates a command bug; use rollback to return to the previous state").
 			WithDetails(validationDetails{Issues: validation.Issues})
+	}
+	var coded interface {
+		error
+		ErrorCode() string
+	}
+	if errors.As(err, &coded) && coded.ErrorCode() == grammar.ReasonLanguageUnsupported {
+		return cli.Reject(coded.ErrorCode(), "%s", coded.Error())
 	}
 	return cli.AsError(err)
 }

@@ -49,8 +49,8 @@ func newScene(t *testing.T, manifestVersion, registryVersion int) *scene {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifestVersion != 3 {
-		data = bytes.Replace(data, []byte(`"version": 3`),
+	if manifestVersion != model.Version {
+		data = bytes.Replace(data, []byte(fmt.Sprintf(`"version": %d`, model.Version)),
 			[]byte(fmt.Sprintf(`"version": %d`, manifestVersion)), 1)
 	}
 	container := store.New()
@@ -129,7 +129,8 @@ func TestStatusReportsPendingSteps(t *testing.T) {
 	if book.State != "closed" || book.Manifest.From != 2 || !book.Manifest.Supported {
 		t.Fatalf("book %+v", book)
 	}
-	if len(book.Manifest.Steps) != 1 || book.Manifest.Steps[0] != "manifest-v2-v3" {
+	if len(book.Manifest.Steps) != 2 || book.Manifest.Steps[0] != "manifest-v2-v3" ||
+		book.Manifest.Steps[1] != "manifest-v3-v4" {
 		t.Fatalf("steps %+v", book.Manifest.Steps)
 	}
 	if report.Registry.From != 1 || len(report.Registry.Steps) != 1 {
@@ -259,7 +260,7 @@ func TestVerifyFailureRestoresTheContainer(t *testing.T) {
 }
 
 func TestCurrentBookIsANoOp(t *testing.T) {
-	scene := newScene(t, 3, 2)
+	scene := newScene(t, model.Version, 2)
 	report, err := scene.Service.Apply("fixture", false, 0, true, false)
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +274,7 @@ func TestCurrentBookIsANoOp(t *testing.T) {
 }
 
 func TestRegistryOnlyMovesOnAll(t *testing.T) {
-	scene := newScene(t, 3, 1)
+	scene := newScene(t, model.Version, 1)
 	if _, err := scene.Service.Apply("fixture", false, 0, true, false); err != nil {
 		t.Fatal(err)
 	}
