@@ -1,26 +1,26 @@
 class Clabok < Formula
   desc "Command-line authoring tool for structured Markdown books"
   homepage "https://github.com/Blue-Alien-Tec/clabok"
-  version "0.5.3"
+  version "0.5.5"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.3/pecia_0.5.3_darwin_arm64.tar.gz"
-      sha256 "941f865da8a30d46683dc06931a5b52343bce043afd07e4b4ef4dd490a7874aa"
+      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.5/pecia_0.5.5_darwin_arm64.tar.gz"
+      sha256 "b675e4d89f8c4b2e9f722e2c44527035e04d10313f130981b890a7c9de3e0ea1"
     else
-      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.3/pecia_0.5.3_darwin_amd64.tar.gz"
-      sha256 "8c93cd2a6786bc5f7e50c018dd3ebb06d33bb3b398a9017b75c655aadfceeb08"
+      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.5/pecia_0.5.5_darwin_amd64.tar.gz"
+      sha256 "8010c13c359ddc9d0fac65b4c433e26f862a5499a474e1f1673b2ccfc36fa573"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.3/pecia_0.5.3_linux_arm64.tar.gz"
-      sha256 "e51f4f7a79d6afbfe798c16fa626cab4ee944cf877146aded61b93714e97cb14"
+      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.5/pecia_0.5.5_linux_arm64.tar.gz"
+      sha256 "8814a37cbb2a6071d2e61fc2cdd99f27b264d41c7a3a67af59b5c8dc77d6e46a"
     else
-      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.3/pecia_0.5.3_linux_amd64.tar.gz"
-      sha256 "7df146665980bc7f9f5a26a68b183de0e385c3851b190c8849f2a0fb2edc5059"
+      url "https://github.com/Blue-Alien-Tec/clabok/releases/download/v0.5.5/pecia_0.5.5_linux_amd64.tar.gz"
+      sha256 "309b7848d7aa5e30cbb9f8070dddb633fcd9e24ea27ecb6d596c8998b396a9b1"
     end
   end
 
