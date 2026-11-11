@@ -96,10 +96,26 @@ func (payload termsPayload) Text() string {
 func termsCommand() *cli.Command {
 	var term, reason, id, scope, book, language string
 	var confirm, allTerms bool
+	actions := []cli.Action{
+		{Name: "set", Summary: "request a term addition",
+			Reads: []string{"term", "reason", "scope", "book"}},
+		{Name: "delete", Summary: "request a term removal",
+			Reads: []string{"term", "reason", "scope", "book"}},
+		{Name: "pending", Summary: "list the pending term requests", Reads: []string{}},
+		{Name: "commit", Summary: "write a confirmed pending request into its layer file",
+			Reads: []string{"id", "confirm"}},
+		{Name: "discard", Summary: "drop a pending request",
+			Reads: []string{"id"}},
+		{Name: "list", Summary: "list the effective term layers",
+			Reads: []string{"scope", "language"}},
+		{Name: "check", Summary: "ask the server whether a term is an ordinary word",
+			Reads: []string{"term", "scope", "book", "all"}},
+	}
 	return &cli.Command{
 		Name:     "terms",
 		Summary:  "request, confirm and inspect the store-level term layers",
 		Usage:    "pecia terms <set|delete|pending|commit|discard|list|check> [--term <t>] [--reason <r>] [--scope <global|code>|--book <b>] [--id <id>] [--confirm]",
+		Actions:  actions,
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("terms")
@@ -116,7 +132,7 @@ func termsCommand() *cli.Command {
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 1 {
 				return nil, cli.Usage("usage.invalid-arguments",
-					"terms takes set, delete, pending, commit, discard, list or check").
+					"terms takes %s", cli.ActionList(actions)).
 					WithHint("pecia terms set --term <t> --reason <r> --scope global")
 			}
 			life, layout, lifeErr := lifecycle.FromEnv(env)
@@ -240,8 +256,7 @@ func termsCommand() *cli.Command {
 				return checkTerms(env, values, life, layout, term, scope, book, allTerms)
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
-					"unknown terms action %q; use set, delete, pending, commit, discard, list or check",
-					args[0])
+					"unknown terms action %q; use %s", args[0], cli.ActionList(actions))
 			}
 		},
 	}

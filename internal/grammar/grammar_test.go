@@ -231,7 +231,7 @@ func TestPrepareText(t *testing.T) {
 		t.Fatalf("prose was removed: %q", prepared.text)
 	}
 	codeAt := strings.Index(prepared.text, "code")
-	if codeAt < 0 || !prepared.inCode(prepared.original(codeAt)) {
+	if codeAt < 0 || !prepared.maskedOverlap(prepared.original(codeAt), prepared.original(codeAt+4)) {
 		t.Fatalf("the code span is not mapped: %q", prepared.text)
 	}
 	if prepared.original(len(prepared.text)) != len(input) {

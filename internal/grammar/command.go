@@ -24,17 +24,18 @@ func Register(registry *cli.Registry) {
 }
 
 type checkPayload struct {
-	DryRun     bool          `json:"dryRun"`
-	Book       string        `json:"book,omitempty"`
-	Block      string        `json:"block,omitempty"`
-	Checked    bool          `json:"checked"`
-	Reason     string        `json:"reason,omitempty"`
-	Language   string        `json:"language,omitempty"`
-	Degraded   string        `json:"degraded,omitempty"`
-	Count      int           `json:"count"`
-	Findings   []Finding     `json:"findings,omitempty"`
-	Suppressed []Suppression `json:"suppressed,omitempty"`
-	Warnings   []Warning     `json:"warnings,omitempty"`
+	DryRun     bool            `json:"dryRun"`
+	Book       string          `json:"book,omitempty"`
+	Block      string          `json:"block,omitempty"`
+	Checked    bool            `json:"checked"`
+	Reason     string          `json:"reason,omitempty"`
+	Language   string          `json:"language,omitempty"`
+	Degraded   string          `json:"degraded,omitempty"`
+	Count      int             `json:"count"`
+	Findings   []Finding       `json:"findings,omitempty"`
+	Suppressed []Suppression   `json:"suppressed,omitempty"`
+	Masked     []MaskedFinding `json:"masked,omitempty"`
+	Warnings   []Warning       `json:"warnings,omitempty"`
 }
 
 // DryRunResult marks the payload as a dry-run receipt; a check writes nothing.
@@ -77,6 +78,15 @@ func (payload checkPayload) Text() string {
 		}
 		fmt.Fprintf(&builder, "%d suppressed by terms (%s)\n",
 			len(payload.Suppressed), strings.Join(parts, ", "))
+	}
+	if len(payload.Masked) > 0 {
+		total, reasons := 0, make([]string, 0, len(payload.Masked))
+		for _, entry := range payload.Masked {
+			total += entry.Count
+			reasons = append(reasons, fmt.Sprintf("%s %d", entry.Rule, entry.Count))
+		}
+		fmt.Fprintf(&builder, "%d suppressed by markup structure (%s)\n",
+			total, strings.Join(reasons, ", "))
 	}
 	return builder.String()
 }
@@ -173,10 +183,23 @@ func grammarCommand() *cli.Command {
 	var book, block, file, raw, jar, finding, languageFlag string
 	var allSafe, requireCheck, refresh bool
 	var expect int
+	actions := []cli.Action{
+		{Name: "check", Summary: "check a body, a file or raw text",
+			Reads: []string{"book", "block", "file", "raw", "require-check", "language"}},
+		{Name: "apply", Summary: "apply findings to a body",
+			Reads: []string{"book", "block", "finding", "all-safe", "expect"}},
+		{Name: "languages", Summary: "list the languages the server supports",
+			Reads: []string{"language", "refresh"}},
+		{Name: "serve", Summary: "start the shared LanguageTool server",
+			Reads: []string{"jar"}},
+		{Name: "server-stop", Summary: "stop the shared LanguageTool server", Reads: []string{}},
+		{Name: "server-info", Summary: "report the server state and the watchdog", Reads: []string{}},
+	}
 	return &cli.Command{
 		Name:     "grammar",
 		Summary:  "check prose, apply findings and manage the LanguageTool server",
 		Usage:    "pecia grammar <check|apply|languages|serve|server-stop|server-info> ...",
+		Actions:  actions,
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("grammar")
@@ -248,7 +271,7 @@ func grammarCommand() *cli.Command {
 			}
 			if len(args) != 1 || args[0] != "check" {
 				return nil, cli.Usage("usage.invalid-arguments",
-					"grammar takes check, apply, languages, serve, server-stop or server-info").
+					"grammar takes %s", cli.ActionList(actions)).
 					WithHint("pecia grammar check --book <id> --block <id>")
 			}
 			sources := 0
@@ -333,6 +356,7 @@ func grammarCommand() *cli.Command {
 			payload.Count = len(report.Findings)
 			payload.Findings = report.Findings
 			payload.Suppressed = report.Suppressed
+			payload.Masked = report.Masked
 			if report.Unchecked() && requireCheck {
 				return nil, cli.Fail("grammar.check-skipped", "%s", report.Degraded).
 					WithHint("--require-check makes an incomplete check a failure").

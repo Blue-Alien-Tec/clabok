@@ -39,10 +39,19 @@ func (result layoutPayload) Text() string {
 
 func asciiuiCommand() *cli.Command {
 	var book, parent, block, file string
+	actions := []cli.Action{
+		{Name: "add", Summary: "add a layout block from a spec file",
+			Reads: []string{"book", "parent", "file"}},
+		{Name: "set", Summary: "replace the spec of a layout block",
+			Reads: []string{"book", "block", "file"}},
+		{Name: "remove", Summary: "remove a layout block",
+			Reads: []string{"book", "block"}},
+	}
 	return &cli.Command{
 		Name:     "asciiui",
 		Summary:  "author an ASCII UI layout on a locked UILayout block",
 		Usage:    "pecia asciiui <add|set|remove> --book <id> [--parent <node> --file <path|->] [--block <id> [--file <path|->]]",
+		Actions:  actions,
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("asciiui")
@@ -55,7 +64,7 @@ func asciiuiCommand() *cli.Command {
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 1 {
 				return nil, cli.Usage("usage.invalid-arguments",
-					"asciiui takes add, set or remove").
+					"asciiui takes %s", cli.ActionList(actions)).
 					WithHint("pecia asciiui add --book <id> --parent <node> --file <path>")
 			}
 			bookID, bookErr := requireBook(book)
@@ -116,7 +125,7 @@ func asciiuiCommand() *cli.Command {
 				return &cli.Result{Data: layoutPayloadOf(receipt, "remove", model.ZeroID, env.Globals.DryRun)}, nil
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
-					"unknown asciiui action %q; use add, set or remove", args[0])
+					"unknown asciiui action %q; use %s", args[0], cli.ActionList(actions))
 			}
 		},
 	}

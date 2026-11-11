@@ -70,6 +70,15 @@ func ReadStdin(reader io.Reader) ([]byte, error) {
 	return Decode(data)
 }
 
+// ReadValue reads a command value from a file, or from standard input when path is "-". It is the
+// single convention for user-supplied values, so every command accepts the same encodings.
+func ReadValue(path string, stdin io.Reader) ([]byte, error) {
+	if path == "-" {
+		return ReadStdin(stdin)
+	}
+	return ReadFile(path)
+}
+
 // normalizeUTF8 validates UTF-8 and refuses NUL bytes, which indicate UTF-16 without a BOM or a
 // binary file.
 func normalizeUTF8(data []byte) ([]byte, error) {

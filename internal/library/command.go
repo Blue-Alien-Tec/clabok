@@ -197,14 +197,21 @@ func purgeBookCommand() *cli.Command {
 }
 
 func defaultsCommand() *cli.Command {
+	actions := []cli.Action{
+		{Name: "show", Summary: "show the library defaults", Reads: []string{}},
+		{Name: "set", Summary: "set one default as a key and a value", Reads: []string{}},
+		{Name: "unset", Summary: "reset every default", Reads: []string{}},
+	}
 	return &cli.Command{
 		Name:     "library defaults",
 		Summary:  "show, change or reset the library defaults",
 		Usage:    "pecia library defaults <show | set <key> <value> | unset>",
+		Actions:  actions,
 		Mutating: true,
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) == 0 {
-				return nil, cli.Usage("usage.missing-argument", "library defaults needs show, set or unset").
+				return nil, cli.Usage("usage.missing-argument",
+					"library defaults needs %s", cli.ActionList(actions)).
 					WithHint("pecia library defaults show")
 			}
 			service, serviceErr := FromEnv(env)
@@ -243,7 +250,7 @@ func defaultsCommand() *cli.Command {
 				return &cli.Result{Data: result}, nil
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
-					"unknown library defaults action %q; use show, set or unset", args[0])
+					"unknown library defaults action %q; use %s", args[0], cli.ActionList(actions))
 			}
 		},
 	}

@@ -42,10 +42,19 @@ func (result payload) Text() string {
 func Register(registry *cli.Registry) {
 	var book string
 	var all, write, verify bool
+	actions := []cli.Action{
+		{Name: "status", Summary: "report the index state of a book or the library",
+			Reads: []string{"book", "all", "verify"}},
+		{Name: "build", Summary: "build the search index",
+			Reads: []string{"book", "all", "write"}},
+		{Name: "clear", Summary: "remove the search index",
+			Reads: []string{"book", "all", "write"}},
+	}
 	registry.Add(&cli.Command{
 		Name:    "index",
 		Summary: "build, inspect or clear the derived search index",
 		Usage:   "pecia index <status|build|clear> [--book <id> | --all] [--write] [--verify]",
+		Actions: actions,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("index")
 			set.StringVar(&book, "book", "", "book id")
@@ -65,7 +74,7 @@ func Register(registry *cli.Registry) {
 			case "status", "build", "clear":
 			default:
 				return nil, cli.Usage("usage.invalid-value",
-					"unknown index action %q; use status, build or clear", action)
+					"unknown index action %q; use %s", action, cli.ActionList(actions))
 			}
 			if verify && action != "status" {
 				return nil, cli.Usage("usage.invalid-value", "--verify applies to index status")

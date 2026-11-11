@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/badge"
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
+	"github.com/Blue-Alien-Tec/clabok/internal/textinput"
 )
 
 type rootValues struct {
@@ -158,13 +161,7 @@ func Register(registry *cli.Registry) {
 		Usage:   "pecia config get <key>",
 		Run:     runGet,
 	})
-	registry.Add(&cli.Command{
-		Name:     "config set",
-		Summary:  "set one value",
-		Usage:    "pecia config set <key> <value>",
-		Mutating: true,
-		Run:      runSet,
-	})
+	registry.Add(configSetCommand())
 	registry.Add(&cli.Command{
 		Name:     "config unset",
 		Summary:  "restore one value to its default",
@@ -233,12 +230,83 @@ func runGet(env *cli.Env, args []string) (*cli.Result, error) {
 	return &cli.Result{Data: getPayload{Key: args[0], Value: value, Source: source}}, nil
 }
 
-func runSet(env *cli.Env, args []string) (*cli.Result, error) {
+// configSetCommand wires `config set`. The value may be positional or come from a file, so a JSON
+// object survives a shell that strips its quotes.
+func configSetCommand() *cli.Command {
+	var file string
+	return &cli.Command{
+		Name:     "config set",
+		Summary:  "set one value",
+		Usage:    "pecia config set <key> (<value> | --file <path|->)",
+		Mutating: true,
+		Flags: func(env *cli.Env) *flag.FlagSet {
+			set := env.NewFlagSet("config set")
+			set.StringVar(&file, "file", "", "file that holds the value, or - for stdin")
+			return set
+		},
+		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
+			return runSet(env, args, file)
+		},
+	}
+}
+
+// setArguments resolves the key and the value of `config set` from the positionals or from the file.
+func setArguments(args []string, file string) (string, string, *cli.Error) {
+	if file != "" {
+		if len(args) != 1 {
+			return "", "", cli.Usage("usage.invalid-arguments",
+				"config set takes a key and no value when --file is used").
+				WithHint("pecia config set <key> --file <path|->")
+		}
+		value, readErr := readValueFile(file)
+		if readErr != nil {
+			return "", "", readErr
+		}
+		return args[0], value, nil
+	}
 	if len(args) != 2 {
-		return nil, cli.Usage("usage.invalid-arguments", "config set takes a key and one value").
+		return "", "", cli.Usage("usage.invalid-arguments", "config set takes a key and one value").
 			WithHint("pecia config set <key> <value>")
 	}
-	key, raw := args[0], args[1]
+	return args[0], args[1], nil
+}
+
+// readValueFile decodes a value file with the same rules as every other text input.
+func readValueFile(path string) (string, *cli.Error) {
+	data, err := textinput.ReadValue(path, os.Stdin)
+	if err != nil {
+		var decodeErr *textinput.Error
+		if errors.As(err, &decodeErr) {
+			return "", cli.AsError(decodeErr)
+		}
+		return "", cli.Fail("config.read-failed", "%v", err)
+	}
+	return trimOneLineBreak(string(data)), nil
+}
+
+// trimOneLineBreak removes the single trailing line break that an editor appends to a file.
+func trimOneLineBreak(value string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(value, "\n"), "\r")
+}
+
+// valueHint names the shell boundary when a JSON value arrived mangled, instead of reporting it as a
+// JSON defect. It only adds the action; the error and its code stay unchanged.
+func valueHint(err *cli.Error, file, raw string) *cli.Error {
+	if file != "" || err == nil || err.Code != "usage.invalid-value" {
+		return err
+	}
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return err
+	}
+	return err.WithHint("a shell strips the quotes of a JSON value; pass it with --file <path|->")
+}
+
+func runSet(env *cli.Env, args []string, file string) (*cli.Result, error) {
+	key, raw, argErr := setArguments(args, file)
+	if argErr != nil {
+		return nil, argErr
+	}
 	document, location, err := readDocument(env, true)
 	if err != nil {
 		return nil, err
@@ -249,7 +317,7 @@ func runSet(env *cli.Env, args []string) (*cli.Result, error) {
 	}
 	beforeMode := resolve(document, location, env.Globals).ConcurrencyMode
 	if setErr := setValue(document, key, raw); setErr != nil {
-		return nil, setErr
+		return nil, valueHint(setErr, file, raw)
 	}
 	if issues := validate(document); len(issues) > 0 {
 		return nil, invalidError(issues)

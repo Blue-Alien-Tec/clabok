@@ -33,7 +33,7 @@ pecia config set grammar.language de-DE
 pecia config validate
 ```
 
-Badge detectors live under `badges.detectors.<id>` in `clabok.json`: one JSON object per detector with a `kind` and its query, plus optional presentation defaults (`label`, `color`, `link`, `logo`, `style`). `config set badges.detectors.<id> '<json>'` validates the object strictly and stores it; `config unset` removes it, and the built-in IDs `go`, `module`, `license`, `remote` and `version` are reserved. A `file` detector accepts a path with `*` and `**` globs; `command` and `http` are the only external kinds and are documented as the render exception.
+Badge detectors live under `badges.detectors.<id>` in `clabok.json`: one JSON object per detector with a `kind` and its query, plus optional presentation defaults (`label`, `color`, `link`, `logo`, `style`). `config set badges.detectors.<id> '<json>'` validates the object strictly and stores it; `config unset` removes it, and the built-in IDs `go`, `module`, `license`, `remote` and `version` are reserved. A shell strips the quotes of that JSON value, so `config set <key> --file <path|->` reads the value from a file or standard input instead, decodes it like every other input and trims one trailing line break; the two forms are mutually exclusive. A `file` detector accepts a path with `*` and `**` globs; `paths` takes an ordered candidate list where the first existing match wins, and `exclude` removes glob matches from every candidate. `command` and `http` are the only external kinds and are documented as the render exception.
 
 
 ---

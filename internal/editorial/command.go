@@ -116,10 +116,17 @@ func grammarReportText(report grammar.Report) string {
 
 func proseCommand() *cli.Command {
 	var book, node, text, file string
+	actions := []cli.Action{
+		{Name: "set", Summary: "set the index prose of a chapter",
+			Reads: []string{"book", "node", "prose", "file"}},
+		{Name: "clear", Summary: "clear the index prose of a chapter",
+			Reads: []string{"book", "node"}},
+	}
 	return &cli.Command{
 		Name:     "prose",
 		Summary:  "set or clear the one-line index prose of a node",
 		Usage:    "pecia prose <set|clear> --book <id> --node <id> [--prose <text> | --file <path|->]",
+		Actions:  actions,
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("prose")
@@ -131,7 +138,8 @@ func proseCommand() *cli.Command {
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 1 {
-				return nil, cli.Usage("usage.invalid-arguments", "prose takes set or clear").
+				return nil, cli.Usage("usage.invalid-arguments",
+					"prose takes %s", cli.ActionList(actions)).
 					WithHint("pecia prose set --book <id> --node <id> --prose <text>")
 			}
 			bookID, bookErr := requireBook(book)
@@ -165,7 +173,7 @@ func proseCommand() *cli.Command {
 				}
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
-					"unknown prose action %q; use set or clear", args[0])
+					"unknown prose action %q; use %s", args[0], cli.ActionList(actions))
 			}
 			service, serviceErr := newService(env)
 			if serviceErr != nil {
@@ -185,10 +193,21 @@ func proseCommand() *cli.Command {
 
 func regionCommand() *cli.Command {
 	var book, kind, target, targetID, text, file string
+	actions := []cli.Action{
+		{Name: "set", Summary: "write a region body",
+			Reads: []string{"book", "kind", "target", "id", "body", "file"}},
+		{Name: "clear", Summary: "clear a region body",
+			Reads: []string{"book", "kind", "target", "id"}},
+		{Name: "notes", Summary: "add a note to a node or block",
+			Reads: []string{"book", "target", "id", "body", "file"}},
+		{Name: "remove", Summary: "remove a note from a node or block",
+			Reads: []string{"book", "target", "id"}},
+	}
 	return &cli.Command{
 		Name:     "region",
 		Summary:  "author the footer and notes regions",
 		Usage:    "pecia region <set|clear|notes|remove> --book <id> [--kind footer | --target node|block --id <id>] [--file <path|->]",
+		Actions:  actions,
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("region")
@@ -203,7 +222,7 @@ func regionCommand() *cli.Command {
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 1 {
 				return nil, cli.Usage("usage.invalid-arguments",
-					"region takes set, clear, notes or remove").
+					"region takes %s", cli.ActionList(actions)).
 					WithHint("pecia region notes --book <id> --target node --id <id> --file <path>")
 			}
 			bookID, bookErr := requireBook(book)
@@ -291,7 +310,7 @@ func regionCommand() *cli.Command {
 				return &cli.Result{Data: result}, nil
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
-					"unknown region action %q; use set, clear, notes or remove", args[0])
+					"unknown region action %q; use %s", args[0], cli.ActionList(actions))
 			}
 		},
 	}

@@ -183,6 +183,60 @@ func TestDetectorValidationRejectsSecrets(t *testing.T) {
 	}
 }
 
+func TestDetectorValidationPaths(t *testing.T) {
+	rejected := []Detector{
+		{Kind: KindFile, Path: "a.txt", Paths: []string{"b.txt"}},
+		{Kind: KindFile},
+		{Kind: KindFile, Paths: []string{"a.txt", "../b.txt"}},
+		{Kind: KindFile, Path: "a.txt", Exclude: []string{"../b"}},
+	}
+	for _, detector := range rejected {
+		if err := ValidateDetector("test", detector); err == nil {
+			t.Fatalf("expected a validation error for %+v", detector)
+		}
+	}
+	if err := ValidateDetector("test", Detector{Kind: KindFile, Path: "a.txt"}); err != nil {
+		t.Fatalf("a single path must stay valid: %v", err)
+	}
+	ordered := Detector{Kind: KindFile, Paths: []string{"Directory.Build.targets", "*.csproj"},
+		Exclude: []string{"**/Assembly-CSharp*.csproj"}, Format: FormatRegex,
+		Pattern: `<LangVersion>\s*([^<]+)\s*</LangVersion>`}
+	if err := ValidateDetector("test", ordered); err != nil {
+		t.Fatalf("ordered paths rejected: %v", err)
+	}
+}
+
+func TestResolveFilePathsOrder(t *testing.T) {
+	directory := t.TempDir()
+	for name, content := range map[string]string{"first.txt": "one", "second.txt": "two"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolver := Resolver{ProjectDir: directory, Detectors: map[string]Detector{
+		"ordered": {Kind: KindFile, Paths: []string{"first.txt", "second.txt"}, Format: FormatText},
+		"fallback": {Kind: KindFile, Paths: []string{"missing.txt", "second.txt"},
+			Format: FormatText},
+		"excluded": {Kind: KindFile, Paths: []string{"*.txt"}, Exclude: []string{"first.txt"},
+			Format: FormatText},
+	}}
+	cases := []struct {
+		id      string
+		message string
+		source  string
+	}{
+		{"ordered", "one", "first.txt"},
+		{"fallback", "two", "second.txt"},
+		{"excluded", "two", "second.txt"},
+	}
+	for _, testCase := range cases {
+		value, ok, reason := resolver.Resolve(model.Badge{ID: testCase.id})
+		if !ok || value.Message != testCase.message || value.Source != testCase.source {
+			t.Fatalf("%s = %+v, ok %v, reason %q", testCase.id, value, ok, reason)
+		}
+	}
+}
+
 func TestBuiltinIDsAreReserved(t *testing.T) {
 	if !BuiltinID("license") || !BuiltinID("go") || BuiltinID("unity-editor") {
 		t.Fatal("builtin ids")

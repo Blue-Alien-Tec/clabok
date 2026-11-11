@@ -59,10 +59,25 @@ func layoutCommand() *cli.Command {
 	var book, parent, path, noteText, file string
 	var depth int
 	var clear bool
+	actions := []cli.Action{
+		{Name: "add", Summary: "add the repository-layout block",
+			Reads: []string{"book", "parent"}},
+		{Name: "set", Summary: "set the layout root and depth",
+			Reads: []string{"book", "path", "depth"}},
+		{Name: "exclude", Summary: "exclude a path from the generated tree",
+			Reads: []string{"book", "path"}},
+		{Name: "include", Summary: "drop an exclusion",
+			Reads: []string{"book", "path", "clear"}},
+		{Name: "note", Summary: "set or clear the one-line note of a path",
+			Reads: []string{"book", "path", "note", "file", "clear"}},
+		{Name: "show", Summary: "show the layout configuration and its notes",
+			Reads: []string{"book"}},
+	}
 	return &cli.Command{
 		Name:     "layout",
 		Summary:  "author the generated repository-layout block from git ls-files",
 		Usage:    "pecia layout <add|set|exclude|include|note|show> --book <id> [--parent <node>] [--path <dir>] [--depth <n>] [--note <t> | --file <path|->] [--clear]",
+		Actions:  actions,
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("layout")
@@ -78,7 +93,7 @@ func layoutCommand() *cli.Command {
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 1 {
 				return nil, cli.Usage("usage.invalid-arguments",
-					"layout takes add, set, exclude, include, note or show").
+					"layout takes %s", cli.ActionList(actions)).
 					WithHint("pecia layout add --book <id> --parent <node> --path . --depth 2")
 			}
 			bookID, bookErr := requireBook(book)
@@ -232,7 +247,7 @@ func layoutCommand() *cli.Command {
 				return &cli.Result{Data: view}, nil
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
-					"unknown layout action %q; use add, set, exclude, include, note or show", action)
+					"unknown layout action %q; use %s", action, cli.ActionList(actions))
 			}
 		},
 	}

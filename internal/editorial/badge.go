@@ -76,12 +76,28 @@ func badgeCommand() *cli.Command {
 	var preset string
 	var order, cacheSeconds int
 	var required, force bool
-	return &cli.Command{
+	var command *cli.Command
+	command = &cli.Command{
 		Name:    "badge",
 		Summary: "declare, remove or inspect the repository badges of the library README",
-		Usage: "pecia badge <add|remove|show|detect|explain|check> --book <id> [--id <badge>] " +
-			"[--label <label>] [--message <text>] [--link <url>] [--style <style>] [--logo <slug>] " +
-			"[--color <color>] [--required] [--order <n>] [--group <name>]",
+		Actions: []cli.Action{
+			{Name: "add", Summary: "declare a badge or update one declaration",
+				Reads: []string{"book", "id", "source", "label", "message", "link", "style", "logo",
+					"logo-color", "label-color", "color", "alt", "group", "order", "cache-seconds",
+					"required"}},
+			{Name: "remove", Summary: "remove one badge declaration",
+				Reads: []string{"book", "id"}},
+			{Name: "show", Summary: "list the badges, their detectors and their values",
+				Reads: []string{"book", "id"}},
+			{Name: "detect", Summary: "report the project kinds that match a preset",
+				Reads: []string{}},
+			{Name: "explain", Summary: "show the detector, precedence and hash of one badge",
+				Reads: []string{"book", "id"}},
+			{Name: "check", Summary: "report unresolved badges",
+				Reads: []string{"book"}},
+			{Name: "init", Summary: "write a preset's detectors and badge declarations",
+				Reads: []string{"book", "preset", "force"}},
+		},
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("badge")
@@ -108,7 +124,7 @@ func badgeCommand() *cli.Command {
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 1 {
 				return nil, cli.Usage("usage.invalid-arguments",
-					"badge takes add, remove, show, detect, explain or check").
+					"badge takes %s", command.ActionList()).
 					WithHint("pecia badge add --book <id> --id go")
 			}
 			action := args[0]
@@ -182,10 +198,11 @@ func badgeCommand() *cli.Command {
 				return badgeExplain(env, bookID, id)
 			default:
 				return nil, cli.Usage("usage.invalid-arguments",
-					"unknown badge action %q; use add, remove, show, detect, explain or check", action)
+					"unknown badge action %q; use %s", action, command.ActionList())
 			}
 		},
 	}
+	return command
 }
 
 // badgeShow lists the declared badges with their resolution.

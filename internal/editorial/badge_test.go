@@ -16,6 +16,11 @@ func TestBadgePresetFlow(t *testing.T) {
 		[]byte("m_EditorVersion: 6000.1.0f1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(directory, "ProjectSettings", "ProjectSettings.asset"),
+		[]byte("  bundleVersion: 1.2.3\n  scriptingBackend:\n    Standalone: 1\n"),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
 	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
 	runOK(t, directory, "book", "open", "library")
 
@@ -29,6 +34,12 @@ func TestBadgePresetFlow(t *testing.T) {
 	shown := runOK(t, directory, "badge", "show", "--book", "library")
 	if !strings.Contains(shown, "unity-editor") || !strings.Contains(shown, "6000.1.0f1") {
 		t.Fatalf("show %s", shown)
+	}
+	if !strings.Contains(shown, "project-version") || !strings.Contains(shown, "1.2.3") {
+		t.Fatalf("the preset must declare the project version: %s", shown)
+	}
+	if !strings.Contains(shown, "IL2CPP") {
+		t.Fatalf("the preset must resolve the backend block: %s", shown)
 	}
 	if strings.Contains(shown, `"id": "go"`) {
 		t.Fatalf("the unity preset must not declare a Go badge: %s", shown)

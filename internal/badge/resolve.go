@@ -147,18 +147,65 @@ func (resolver Resolver) builtinVersion() (Value, bool, string) {
 	return versionValue(resolver.ProjectDir)
 }
 
-func (resolver Resolver) resolveFile(id string, detector Detector) (Value, bool, string) {
-	matches, err := resolver.matches(detector.Path)
+// resolvePath returns the first candidate of a file detector that exists after the exclusions.
+func (resolver Resolver) resolvePath(detector Detector) (string, bool, string) {
+	candidates := detectorPaths(detector)
+	if len(candidates) == 0 {
+		return "", false, "no file is configured"
+	}
+	excluded := make([]*regexp.Regexp, 0, len(detector.Exclude))
+	for _, pattern := range detector.Exclude {
+		expression, err := globRegexp(filepath.ToSlash(pattern))
+		if err != nil {
+			return "", false, err.Error()
+		}
+		excluded = append(excluded, expression)
+	}
+	for _, candidate := range candidates {
+		matches, err := resolver.matches(candidate)
+		if err != nil {
+			return "", false, err.Error()
+		}
+		for _, path := range matches {
+			if excludedFromProject(resolver.ProjectDir, path, excluded) {
+				continue
+			}
+			return path, true, ""
+		}
+	}
+	if len(candidates) == 1 {
+		return "", false, fmt.Sprintf("%s is missing", candidates[0])
+	}
+	return "", false, fmt.Sprintf("none of %s exists", strings.Join(candidates, ", "))
+}
+
+// excludedFromProject reports whether a project path matches one of the exclusion globs.
+func excludedFromProject(projectDir, path string, patterns []*regexp.Regexp) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+	relative, err := filepath.Rel(projectDir, path)
 	if err != nil {
-		return Value{}, false, err.Error()
+		return false
 	}
-	if len(matches) == 0 {
-		return Value{}, false, fmt.Sprintf("%s is missing", detector.Path)
+	slashed := filepath.ToSlash(relative)
+	for _, pattern := range patterns {
+		if pattern.MatchString(slashed) {
+			return true
+		}
 	}
-	path := matches[0]
+	return false
+}
+
+func (resolver Resolver) resolveFile(id string, detector Detector) (Value, bool, string) {
+	path, found, reason := resolver.resolvePath(detector)
+	if !found {
+		return Value{}, false, reason
+	}
+	name := relativeName(resolver.ProjectDir, path)
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
-		return Value{}, false, fmt.Sprintf("%s cannot be read", detector.Path)
+		return Value{}, false, fmt.Sprintf("%s cannot be read", name)
 	}
 	format := detector.Format
 	if format == "" {
@@ -175,7 +222,7 @@ func (resolver Resolver) resolveFile(id string, detector Detector) (Value, bool,
 		}
 		match := pattern.FindStringSubmatch(string(data))
 		if match == nil {
-			return Value{}, false, fmt.Sprintf("%s does not match %s", detector.Path, detector.Pattern)
+			return Value{}, false, fmt.Sprintf("%s does not match %s", name, detector.Pattern)
 		}
 		message = match[0]
 		if len(match) > 1 {
@@ -184,11 +231,11 @@ func (resolver Resolver) resolveFile(id string, detector Detector) (Value, bool,
 	case FormatJSON, FormatYAML, FormatTOML, FormatXML:
 		parsed, parseErr := parseStructured(format, data)
 		if parseErr != nil {
-			return Value{}, false, fmt.Sprintf("%s: %v", detector.Path, parseErr)
+			return Value{}, false, fmt.Sprintf("%s: %v", name, parseErr)
 		}
 		found, ok := queryValue(parsed, detector.Query)
 		if !ok {
-			return Value{}, false, fmt.Sprintf("%s has no %s", detector.Path, detector.Query)
+			return Value{}, false, fmt.Sprintf("%s has no %s", name, detector.Query)
 		}
 		message = formatValue(found)
 	default:
@@ -199,9 +246,9 @@ func (resolver Resolver) resolveFile(id string, detector Detector) (Value, bool,
 	}
 	message = cutMessage(detector.Prefix + message + detector.Suffix)
 	if message == "" {
-		return Value{}, false, fmt.Sprintf("%s resolved to an empty value", detector.Path)
+		return Value{}, false, fmt.Sprintf("%s resolved to an empty value", name)
 	}
-	return Value{Message: message, Source: relativeName(resolver.ProjectDir, path)}, true, ""
+	return Value{Message: message, Source: name}, true, ""
 }
 
 func (resolver Resolver) resolvePackage(id string, detector Detector) (Value, bool, string) {

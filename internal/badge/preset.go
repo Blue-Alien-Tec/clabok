@@ -41,19 +41,29 @@ func Preset(name string) (PresetSpec, bool) {
 				},
 				"unity-backend": {
 					Kind: KindFile, Path: "ProjectSettings/ProjectSettings.asset",
-					Format: FormatRegex, Pattern: `scriptingBackend:\s*\n\s*Standalone:\s*(\d)`,
-					Map:   map[string]string{"0": "Mono", "1": "IL2CPP"},
-					Label: "backend", Color: "lightgrey",
+					Format:  FormatRegex,
+					Pattern: `scriptingBackend:(?:\s*\n\s*[A-Za-z]+:\s*\d+)*\s*\n\s*Standalone:\s*(\d)`,
+					Map:     map[string]string{"0": "Mono", "1": "IL2CPP"},
+					Label:   "backend", Color: "lightgrey",
 				},
 				"csharp-lang": {
-					Kind: KindFile, Path: "*.csproj", Format: FormatRegex,
+					Kind: KindFile, Format: FormatRegex,
+					// Directory.Build.targets is hand-authored; a Unity *.csproj is generated with the
+					// editor's language version, so it is only a fallback and never the answer.
+					Paths:   []string{"Directory.Build.targets", "*.csproj"},
+					Exclude: []string{"**/Assembly-CSharp*.csproj"},
 					Pattern: `<LangVersion>\s*([^<]+)\s*</LangVersion>`,
 					Label:   "C#", Color: "512BD4", Logo: "csharp",
+				},
+				"project-version": {
+					Kind: KindFile, Path: "ProjectSettings/ProjectSettings.asset",
+					Format: FormatRegex, Pattern: `bundleVersion:\s*(\S+)`,
+					Label: "version", Color: "orange",
 				},
 			},
 			Badges: []model.Badge{
 				{ID: "unity-editor"}, {ID: "unity-backend"}, {ID: "csharp-lang"},
-				{ID: "license"}, {ID: "remote"},
+				{ID: "project-version"}, {ID: "license"}, {ID: "remote"},
 			},
 		}, true
 	case "go":
@@ -94,8 +104,17 @@ func Preset(name string) (PresetSpec, bool) {
 					Kind: KindPackage, Ecosystem: "dotnet", Field: "TargetFramework",
 					Label: ".NET", Color: "512BD4", Logo: "dotnet",
 				},
+				"project-version": {
+					Kind: KindFile,
+					// Directory.Build.props is the shared, hand-authored place for the version; a
+					// project file is the fallback.
+					Paths:  []string{"Directory.Build.props", "*.csproj"},
+					Format: FormatXML, Query: "Project/PropertyGroup/Version",
+					Label: "version", Color: "orange",
+				},
 			},
-			Badges: []model.Badge{{ID: "target-framework"}, {ID: "license"}, {ID: "remote"}},
+			Badges: []model.Badge{{ID: "target-framework"}, {ID: "project-version"},
+				{ID: "license"}, {ID: "remote"}},
 		}, true
 	case "generic":
 		return PresetSpec{
@@ -107,10 +126,12 @@ func Preset(name string) (PresetSpec, bool) {
 }
 
 // Detect reports the applicable project kinds with their evidence. It writes nothing and picks no
-// preset implicitly.
+// preset implicitly. One project yields one ecosystem: a Unity project also carries generated
+// *.csproj and *.sln files, so unity wins and .NET is not reported beside it.
 func Detect(projectDir string) []Detection {
 	detections := make([]Detection, 0, 5)
-	if fileExists(projectDir, "ProjectSettings/ProjectVersion.txt") {
+	unity := fileExists(projectDir, "ProjectSettings/ProjectVersion.txt")
+	if unity {
 		detections = append(detections, Detection{Kind: "unity", Preset: "unity",
 			Evidence: "ProjectSettings/ProjectVersion.txt"})
 	}
@@ -125,14 +146,32 @@ func Detect(projectDir string) []Detection {
 		detections = append(detections, Detection{Kind: "rust", Preset: "rust",
 			Evidence: "Cargo.toml"})
 	}
-	if matches, _ := filepath.Glob(filepath.Join(projectDir, "*.csproj")); len(matches) > 0 {
-		detections = append(detections, Detection{Kind: "dotnet", Preset: "dotnet",
-			Evidence: filepath.Base(matches[0])})
-	} else if matches, _ := filepath.Glob(filepath.Join(projectDir, "*.sln")); len(matches) > 0 {
-		detections = append(detections, Detection{Kind: "dotnet", Preset: "dotnet",
-			Evidence: filepath.Base(matches[0])})
+	if !unity {
+		if evidence, ok := dotnetEvidence(projectDir); ok {
+			detections = append(detections, Detection{Kind: "dotnet", Preset: "dotnet",
+				Evidence: evidence})
+		}
 	}
 	return detections
+}
+
+// dotnetEvidence returns the project or solution file that identifies a .NET project. Unity's
+// generated Assembly-CSharp files never count, even when Unity itself is not detected.
+func dotnetEvidence(projectDir string) (string, bool) {
+	for _, pattern := range []string{"*.csproj", "*.sln"} {
+		matches, err := filepath.Glob(filepath.Join(projectDir, pattern))
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			name := filepath.Base(match)
+			if strings.HasPrefix(name, "Assembly-CSharp") {
+				continue
+			}
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // DetectorConflicts reports configured detector ids of a preset that differ from the preset.

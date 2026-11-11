@@ -20,6 +20,7 @@ type commandEnvelope struct {
 type commandError struct {
 	Code    string          `json:"code"`
 	Message string          `json:"message"`
+	Hint    string          `json:"hint"`
 	Details json.RawMessage `json:"details"`
 }
 
@@ -109,6 +110,138 @@ func TestSetDryRunLeavesFileUntouched(t *testing.T) {
 	}
 	if !change.DryRun || !change.Changed {
 		t.Fatalf("unexpected receipt %+v", change)
+	}
+}
+
+func TestSetValueFromFile(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	writeConfigDocument(t, project, `{"version":1}`)
+	value := `{"kind":"file","path":"Packages/manifest.json","format":"regex",` +
+		`"pattern":"\"x\":\\s*\"([^\"]+)\""}`
+	path := filepath.Join(project, "detector.json")
+	if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := runCommand(t, "config", "set", "badges.detectors.custom", "--file", path)
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var document struct {
+		Badges struct {
+			Detectors map[string]struct {
+				Path    string `json:"path"`
+				Pattern string `json:"pattern"`
+			} `json:"detectors"`
+		} `json:"badges"`
+	}
+	raw, err := os.ReadFile(filepath.Join(project, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	detector := document.Badges.Detectors["custom"]
+	if detector.Path != "Packages/manifest.json" || detector.Pattern != `"x":\s*"([^"]+)"` {
+		t.Fatalf("unexpected detector %+v", detector)
+	}
+}
+
+func TestSetScalarFromFileTrimsOneLineBreak(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	writeConfigDocument(t, project, `{"version":1}`)
+	path := filepath.Join(project, "policy.txt")
+	if err := os.WriteFile(path, []byte("warn\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := runCommand(t, "config", "set", "grammar.policy", "--file", path)
+	if code != cli.ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var document struct {
+		Grammar struct {
+			Policy string `json:"policy"`
+		} `json:"grammar"`
+	}
+	raw, err := os.ReadFile(filepath.Join(project, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Grammar.Policy != "warn" {
+		t.Fatalf("the trailing line break was stored: %q", document.Grammar.Policy)
+	}
+}
+
+func TestSetRejectsFileWithValue(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	writeConfigDocument(t, project, `{"version":1}`)
+
+	code, _, stderr := runCommand(t, "config", "set", "store.root", "data", "--file", "value.json")
+	if code != cli.ExitUsage {
+		t.Fatalf("exit %d", code)
+	}
+	payload := parseEnvelope(t, stderr)
+	if payload.Error == nil || payload.Error.Code != "usage.invalid-arguments" {
+		t.Fatalf("unexpected error %+v", payload.Error)
+	}
+}
+
+func TestSetFileReadFailure(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	writeConfigDocument(t, project, `{"version":1}`)
+
+	path := filepath.Join(project, "missing.json")
+	code, _, stderr := runCommand(t, "config", "set", "store.root", "--file", path)
+	if code != cli.ExitFailure {
+		t.Fatalf("exit %d", code)
+	}
+	payload := parseEnvelope(t, stderr)
+	if payload.Error == nil || payload.Error.Code != "config.read-failed" {
+		t.Fatalf("unexpected error %+v", payload.Error)
+	}
+}
+
+func TestSetMangledJSONNamesTheShell(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	writeConfigDocument(t, project, `{"version":1}`)
+
+	code, _, stderr := runCommand(t, "config", "set", "badges.detectors.custom", `{"kind":"file",}`)
+	if code != cli.ExitUsage {
+		t.Fatalf("exit %d", code)
+	}
+	payload := parseEnvelope(t, stderr)
+	if payload.Error == nil || payload.Error.Code != "usage.invalid-value" {
+		t.Fatalf("unexpected error %+v", payload.Error)
+	}
+	if !strings.Contains(payload.Error.Hint, "--file") {
+		t.Fatalf("the hint does not name the transport: %q", payload.Error.Hint)
+	}
+}
+
+func TestTrimOneLineBreak(t *testing.T) {
+	cases := map[string]string{
+		"warn\n":     "warn",
+		"warn\r\n":   "warn",
+		"warn\r":     "warn",
+		"warn":       "warn",
+		"warn\n\n":   "warn\n",
+		"":           "",
+		"line\nnext": "line\nnext",
+	}
+	for input, want := range cases {
+		if got := trimOneLineBreak(input); got != want {
+			t.Fatalf("trimOneLineBreak(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

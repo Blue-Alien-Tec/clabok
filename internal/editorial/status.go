@@ -98,6 +98,36 @@ type statusView struct {
 // DryRunResult marks the payload as a dry-run receipt; a view writes nothing either way.
 func (result statusView) DryRunResult() bool { return true }
 
+// statusLevelActions are the nested `status level …` actions.
+var statusLevelActions = []cli.Action{
+	{Name: "level add", Summary: "add a custom status level",
+		Reads: []string{"book", "level-id", "label", "color", "description", "description-file",
+			"description-block", "before", "after", "first", "last"}},
+	{Name: "level set", Summary: "change a status level",
+		Reads: []string{"book", "level-id", "label", "color", "description", "description-file",
+			"description-block", "clear-description"}},
+	{Name: "level move", Summary: "reorder a status level",
+		Reads: []string{"book", "level-id", "before", "after", "first", "last"}},
+	{Name: "level remove", Summary: "remove a status level",
+		Reads: []string{"book", "level-id"}},
+}
+
+// statusActions are the top-level `status …` actions plus the nested level actions.
+var statusActions = append([]cli.Action{
+	{Name: "enable", Summary: "render the status column and the legend",
+		Reads: []string{"book"}},
+	{Name: "disable", Summary: "stop rendering the status output and keep the assignments",
+		Reads: []string{"book"}},
+	{Name: "set", Summary: "assign a status level to a node or block",
+		Reads: []string{"book", "target", "id", "state"}},
+	{Name: "clear", Summary: "remove a status assignment",
+		Reads: []string{"book", "target", "id"}},
+	{Name: "show", Summary: "show the levels, the legend and the assignments",
+		Reads: []string{"book"}},
+	{Name: "list", Summary: "list the levels, the legend and the assignments",
+		Reads: []string{"book"}},
+}, statusLevelActions...)
+
 func statusCommand() *cli.Command {
 	var book, target, id, state, levelID, label, color, description, descriptionFile string
 	var descriptionBlock, before, after string
@@ -106,6 +136,7 @@ func statusCommand() *cli.Command {
 		Name:     "status",
 		Summary:  "switch the status system, configure levels, assign levels and show them",
 		Usage:    "pecia status <enable|disable|set|clear|show|list> --book <id> | status level <add|set|move|remove> --book <id>",
+		Actions:  statusActions,
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("status")
@@ -224,7 +255,7 @@ func statusCommand() *cli.Command {
 
 func statusUsage() *cli.Error {
 	return cli.Usage("usage.invalid-arguments",
-		"status takes enable, disable, set, clear, show, list or level <add|set|move|remove>").
+		"status takes %s", cli.ActionList(statusActions)).
 		WithHint("pecia status level add --book <id> --level-id <id> --label <label>")
 }
 

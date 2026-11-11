@@ -3,10 +3,54 @@ package textinput
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf16"
 )
+
+func TestReadValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "value.txt")
+	if err := os.WriteFile(path, []byte("\xEF\xBB\xBFhello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadValue(path, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("file: %v", err)
+	}
+	if string(got) != "hello\n" {
+		t.Fatalf("file = %q", got)
+	}
+
+	got, err = ReadValue("-", strings.NewReader("\xEF\xBB\xBFstdin"))
+	if err != nil {
+		t.Fatalf("stdin: %v", err)
+	}
+	if string(got) != "stdin" {
+		t.Fatalf("stdin = %q", got)
+	}
+
+	if _, err := ReadValue(filepath.Join(t.TempDir(), "missing.txt"), strings.NewReader("")); err == nil {
+		t.Fatal("a missing file must fail")
+	}
+}
+
+func TestReadValueRejectsBinary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "value.bin")
+	if err := os.WriteFile(path, []byte{0x00, 0x01}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ReadValue(path, strings.NewReader(""))
+	if err == nil {
+		t.Fatal("binary input must be refused")
+	}
+	var decodeErr *Error
+	if !errors.As(err, &decodeErr) || decodeErr.Code != CodeInvalid {
+		t.Fatalf("unexpected error %v", err)
+	}
+}
 
 func encodeUTF16(text string, order binary.ByteOrder) []byte {
 	units := utf16.Encode([]rune(text))

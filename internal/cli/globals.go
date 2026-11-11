@@ -26,6 +26,13 @@ type Env struct {
 	Globals Globals
 }
 
+// globalFlagNames lists the flags NewFlagSet registers for every command. The command help lists
+// command-specific flags only; the guide documents the globals once.
+var globalFlagNames = map[string]bool{
+	"project": true, "config": true, "store-root": true, "temp-root": true,
+	"docs-root": true, "text": true, "dry-run": true, "help": true,
+}
+
 // NewFlagSet returns a flag set that accepts the global flags. A command adds its own flags to it.
 func (e *Env) NewFlagSet(name string) *flag.FlagSet {
 	set := flag.NewFlagSet(name, flag.ContinueOnError)

@@ -37,8 +37,12 @@ var builtinIDs = []string{"go", "module", "license", "remote", "version"}
 
 // Detector describes one declarative badge source. It is configuration, not book data.
 type Detector struct {
-	Kind    string   `json:"kind"`
+	Kind string `json:"kind"`
+	// Path is the single candidate of a file detector. Paths is the ordered form; a detector sets at
+	// most one of the two.
 	Path    string   `json:"path,omitempty"`
+	Paths   []string `json:"paths,omitempty"`
+	Exclude []string `json:"exclude,omitempty"`
 	Format  string   `json:"format,omitempty"`
 	Pattern string   `json:"pattern,omitempty"`
 	Query   string   `json:"query,omitempty"`
@@ -77,8 +81,22 @@ func ValidateDetector(id string, detector Detector) error {
 	}
 	switch detector.Kind {
 	case KindFile:
-		if !safeRelative(detector.Path) {
-			return fmt.Errorf("%s: path must stay inside the project", id)
+		if len(detector.Paths) > 0 && strings.TrimSpace(detector.Path) != "" {
+			return fmt.Errorf("%s: path and paths are mutually exclusive", id)
+		}
+		candidates := detectorPaths(detector)
+		if len(candidates) == 0 {
+			return fmt.Errorf("%s: a file detector needs a path or paths", id)
+		}
+		for _, candidate := range candidates {
+			if !safeRelative(candidate) {
+				return fmt.Errorf("%s: path must stay inside the project", id)
+			}
+		}
+		for _, pattern := range detector.Exclude {
+			if !safeRelative(pattern) {
+				return fmt.Errorf("%s: exclude must stay inside the project", id)
+			}
 		}
 		switch detector.Format {
 		case "", FormatText:
@@ -160,6 +178,17 @@ func ValidateDetector(id string, detector Detector) error {
 		}
 	default:
 		return fmt.Errorf("%s: unknown detector kind %q", id, detector.Kind)
+	}
+	return nil
+}
+
+// detectorPaths returns the ordered candidates of a file detector: Paths when set, else Path.
+func detectorPaths(detector Detector) []string {
+	if len(detector.Paths) > 0 {
+		return detector.Paths
+	}
+	if strings.TrimSpace(detector.Path) != "" {
+		return []string{detector.Path}
 	}
 	return nil
 }

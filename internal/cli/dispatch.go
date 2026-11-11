@@ -49,7 +49,7 @@ func Run(registry *Registry, args []string, stdout, stderr io.Writer) int {
 		return ExitCode(parseErr.Kind)
 	}
 	if help || env.Globals.Help {
-		result, _ := commandHelpResult(registry, command.Name)
+		result, _ := commandHelpResult(env, registry, actionTopicName(command, positionals))
 		return emitResult(env, command.Name, result)
 	}
 

@@ -130,13 +130,14 @@ type Finding struct {
 
 // Report is the outcome of one check.
 type Report struct {
-	Policy     string        `json:"policy,omitempty"`
-	Checked    bool          `json:"checked"`
-	Reason     string        `json:"reason,omitempty"`
-	Language   string        `json:"language,omitempty"`
-	Degraded   string        `json:"degraded,omitempty"`
-	Findings   []Finding     `json:"findings,omitempty"`
-	Suppressed []Suppression `json:"suppressed,omitempty"`
+	Policy     string          `json:"policy,omitempty"`
+	Checked    bool            `json:"checked"`
+	Reason     string          `json:"reason,omitempty"`
+	Language   string          `json:"language,omitempty"`
+	Degraded   string          `json:"degraded,omitempty"`
+	Findings   []Finding       `json:"findings,omitempty"`
+	Suppressed []Suppression   `json:"suppressed,omitempty"`
+	Masked     []MaskedFinding `json:"masked,omitempty"`
 }
 
 // Suppression records one finding a term layer removed, so suppression is never silent.
@@ -148,6 +149,15 @@ type Suppression struct {
 	Field  string   `json:"field"`
 	Offset int      `json:"offset"`
 	Length int      `json:"length"`
+}
+
+// MaskedFinding counts the findings one documented false-positive rule removed. The rule set is
+// language independent in shape: an entry is keyed by the rule the server emitted, so a new artefact
+// is one row and never a branch on the check language.
+type MaskedFinding struct {
+	Rule   string `json:"rule"`
+	Count  int    `json:"count"`
+	Reason string `json:"reason"`
 }
 
 // Blocked reports whether the policy refuses the write. Only findings block a write; an unchecked
@@ -262,6 +272,7 @@ type CheckResult struct {
 	Findings   []Finding
 	Language   string
 	Suppressed []Suppression
+	Masked     []MaskedFinding
 }
 
 // Check sends the text in the given language and returns the unsuppressed findings in body order.
@@ -272,6 +283,16 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 	prepared := prepareText(text)
 	findings := make([]Finding, 0)
 	suppressed := make([]Suppression, 0)
+	masked := make([]MaskedFinding, 0)
+	addMasked := func(rule, reason string) {
+		for index := range masked {
+			if masked[index].Rule == rule && masked[index].Reason == reason {
+				masked[index].Count++
+				return
+			}
+		}
+		masked = append(masked, MaskedFinding{Rule: rule, Count: 1, Reason: reason})
+	}
 	reported := ""
 	for _, span := range chunkPrepared(prepared.text, chunkBytes) {
 		matches, detected, err := client.fetch(ctx, prepared.text[span.start:span.end], language)
@@ -285,6 +306,10 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 			match.Offset += span.start
 			finding, ok := client.finding(text, prepared, match)
 			if !ok {
+				continue
+			}
+			if reason := artefactReason(finding, text); reason != "" {
+				addMasked(finding.Rule, reason)
 				continue
 			}
 			if entries := client.Terms.Suppress(finding.Offending, finding.Replacements); len(entries) > 0 {
@@ -310,7 +335,8 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 	} else if effective == "" {
 		effective = reported
 	}
-	return CheckResult{Findings: findings, Language: effective, Suppressed: suppressed}, nil
+	return CheckResult{Findings: findings, Language: effective, Suppressed: suppressed,
+		Masked: masked}, nil
 }
 
 // Resolve returns the effective check language: the book setting, then the project default, then
@@ -329,7 +355,7 @@ func Resolve(settings model.Settings, fallback string) string {
 func (client *Client) finding(text string, prepared preparedText, match wireMatch) (Finding, bool) {
 	start := prepared.original(match.Offset)
 	end := prepared.original(match.Offset + match.Length)
-	if start < 0 || end <= start || prepared.inCode(start) {
+	if start < 0 || end <= start || prepared.maskedOverlap(start, end) {
 		return Finding{}, false
 	}
 	offending := segment(text, start, end-start)
@@ -567,6 +593,7 @@ func (gate *Gate) Evaluate(ctx context.Context, block model.ID, text, language s
 	report.Language = findings.Language
 	report.Findings = findings.Findings
 	report.Suppressed = findings.Suppressed
+	report.Masked = findings.Masked
 	return report
 }
 
@@ -632,34 +659,29 @@ func position(text string, offset int) (int, int) {
 	return line, column
 }
 
-// codeSpan is one original code range that the prose check must ignore.
-type codeSpan struct {
+// maskedSpan is one original range the prose check must ignore: a code span or a Markdown marker.
+type maskedSpan struct {
 	start int
 	end   int
 }
 
 // preparedText is the prose view sent to the language check plus the map back to the original body.
-// Fenced blocks are dropped; inline code becomes the word "code"; the map keeps every finding on
-// real prose with its original offsets.
+// Fenced blocks are dropped; inline code becomes the word "code"; Markdown markers become spaces; the
+// map keeps every finding on real prose with its original offsets.
 type preparedText struct {
 	text    string
 	offsets []int
-	spans   []codeSpan
+	spans   []maskedSpan
 }
 
-// prepareText removes code from the check without losing the offsets. The language check is about
-// prose; a command example or an identifier must not produce a prose finding.
+// prepareText removes code and Markdown structure from the check without losing the offsets. The
+// language check is about prose; a command example, an identifier or a bold marker must not produce a
+// prose finding. The mask is language independent and byte preserving, so every offset stays valid.
 func prepareText(text string) preparedText {
 	var builder strings.Builder
 	offsets := make([]int, 0, len(text))
-	spans := make([]codeSpan, 0)
+	spans := make([]maskedSpan, 0)
 	original := 0
-	copyBytes := func(start, end int) {
-		for index := start; index < end; index++ {
-			builder.WriteByte(text[index])
-			offsets = append(offsets, index)
-		}
-	}
 	inFence := false
 	for _, line := range strings.SplitAfter(text, "\n") {
 		lineStart := original
@@ -675,31 +697,228 @@ func prepareText(text string) preparedText {
 			offsets = append(offsets, lineStart+len(line)-1)
 			continue
 		}
+		markers := markupMask(line)
 		for index := 0; index < len(line); {
-			if line[index] != '`' {
-				copyBytes(lineStart+index, lineStart+index+1)
-				index++
+			if line[index] == '`' {
+				end := index + 1
+				for end < len(line) && line[end] != '`' {
+					end++
+				}
+				if end < len(line) {
+					spans = append(spans, maskedSpan{start: lineStart + index, end: lineStart + end + 1})
+					builder.WriteString("code")
+					for count := 0; count < len("code"); count++ {
+						offsets = append(offsets, lineStart+index)
+					}
+					index = end + 1
+					continue
+				}
+			}
+			if markers[index] {
+				builder.WriteByte(' ')
+			} else {
+				builder.WriteByte(line[index])
+			}
+			offsets = append(offsets, lineStart+index)
+			index++
+		}
+		// Coalesce the masked bytes of this line into spans, so a finding that touches a marker is
+		// dropped exactly like a code finding.
+		runStart := -1
+		for index := 0; index <= len(line); index++ {
+			if index < len(line) && markers[index] {
+				if runStart < 0 {
+					runStart = index
+				}
 				continue
 			}
-			end := index + 1
-			for end < len(line) && line[end] != '`' {
-				end++
+			if runStart >= 0 {
+				spans = append(spans, maskedSpan{start: lineStart + runStart, end: lineStart + index})
+				runStart = -1
 			}
-			if end >= len(line) {
-				copyBytes(lineStart+index, lineStart+index+1)
-				index++
-				continue
-			}
-			spans = append(spans, codeSpan{start: lineStart + index, end: lineStart + end + 1})
-			for _, character := range []byte("code") {
-				builder.WriteByte(character)
-				offsets = append(offsets, lineStart+index)
-			}
-			index = end + 1
 		}
 	}
 	offsets = append(offsets, len(text))
 	return preparedText{text: builder.String(), offsets: offsets, spans: spans}
+}
+
+// markupMask marks the Markdown structure bytes of one line: blockquote and list markers, table
+// pipes, emphasis delimiters, inline HTML tags, links and reference definitions. Only markers are
+// marked, never the prose they wrap; an intra-word underscore stays content.
+func markupMask(line string) []bool {
+	markers := make([]bool, len(line))
+	mark := func(start, end int) {
+		for index := start; index < end && index < len(markers); index++ {
+			markers[index] = true
+		}
+	}
+	start := 0
+	for start < len(line) && (line[start] == ' ' || line[start] == '\t') {
+		start++
+	}
+	if start < len(line) && line[start] == '>' {
+		end := start + 1
+		if end < len(line) && line[end] == ' ' {
+			end++
+		}
+		mark(start, end)
+		start = end
+	}
+	switch {
+	case start+1 < len(line) && (line[start] == '-' || line[start] == '+' || line[start] == '*') &&
+		line[start+1] == ' ':
+		mark(start, start+2)
+		start += 2
+	default:
+		digits := start
+		for digits < len(line) && line[digits] >= '0' && line[digits] <= '9' {
+			digits++
+		}
+		if digits > start && digits+1 < len(line) &&
+			(line[digits] == '.' || line[digits] == ')') && line[digits+1] == ' ' {
+			mark(start, digits+2)
+			start = digits + 2
+		}
+	}
+	if isReferenceDefinition(line, start) {
+		mark(start, len(line))
+		return markers
+	}
+	for index := start; index < len(line); index++ {
+		switch line[index] {
+		case '|', '*':
+			mark(index, index+1)
+		case '_':
+			if emphasisDelimiter(line, index) {
+				mark(index, index+1)
+			}
+		case '~':
+			if index+1 < len(line) && line[index+1] == '~' {
+				mark(index, index+2)
+				index++
+			}
+		case '<':
+			if end := htmlTagEnd(line, index); end > index {
+				mark(index, end)
+				index = end - 1
+			}
+		case '[':
+			if end := maskLink(line, index, mark); end > index {
+				index = end - 1
+			}
+		case '!':
+			if index+1 < len(line) && line[index+1] == '[' {
+				mark(index, index+1)
+				if end := maskLink(line, index+1, mark); end > index {
+					index = end - 1
+				}
+			}
+		}
+	}
+	return markers
+}
+
+// emphasisDelimiter reports whether an underscore or star is a delimiter rather than an intra-word
+// character, so `snake_case` stays one word and `_word_` loses its markers.
+func emphasisDelimiter(line string, index int) bool {
+	before := index > 0 && isWordByte(line[index-1])
+	after := index+1 < len(line) && isWordByte(line[index+1])
+	return !(before && after)
+}
+
+func isWordByte(value byte) bool {
+	return value >= '0' && value <= '9' || value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z'
+}
+
+// htmlTagEnd returns the end offset of an inline HTML tag at index, or zero when the angle bracket
+// is ordinary text such as "<10".
+func htmlTagEnd(line string, index int) int {
+	if index+1 >= len(line) {
+		return 0
+	}
+	next := line[index+1]
+	if next != '/' && next != '!' && !isWordByte(next) {
+		return 0
+	}
+	offset := strings.IndexByte(line[index:], '>')
+	if offset < 0 {
+		return 0
+	}
+	return index + offset + 1
+}
+
+// isReferenceDefinition reports a link definition line, which carries a target and no prose.
+func isReferenceDefinition(line string, start int) bool {
+	if start >= len(line) || line[start] != '[' {
+		return false
+	}
+	offset := strings.IndexByte(line[start:], ']')
+	if offset < 0 {
+		return false
+	}
+	rest := line[start+offset+1:]
+	return strings.HasPrefix(rest, ":") && strings.TrimSpace(rest[1:]) != ""
+}
+
+// maskLink marks a link or image at the bracket, keeping the visible text. It returns the offset
+// after the link.
+func maskLink(line string, index int, mark func(int, int)) int {
+	offset := strings.IndexByte(line[index:], ']')
+	if offset < 0 {
+		return index
+	}
+	close := index + offset
+	mark(index, index+1)
+	mark(close, close+1)
+	end := close + 1
+	switch {
+	case end < len(line) && line[end] == '(':
+		if destination := strings.IndexByte(line[end:], ')'); destination >= 0 {
+			mark(end, end+destination+1)
+			end += destination + 1
+		}
+	case end < len(line) && line[end] == '[':
+		if reference := strings.IndexByte(line[end:], ']'); reference >= 0 {
+			mark(end, end+reference+1)
+			end += reference + 1
+		}
+	}
+	return end
+}
+
+// artefactReason names the documented false positive a finding is, or returns "". The table is keyed
+// by the rule the server emitted, so a new artefact is one clause and never a language branch.
+func artefactReason(finding Finding, text string) string {
+	if finding.Rule == "DE_CASE" && touchesSpacedDash(text, finding.Offset, finding.Offset+finding.Length) {
+		return "the finding touches a spaced dash"
+	}
+	return ""
+}
+
+// touchesSpacedDash reports whether a finding range or its immediate neighbourhood contains an em or
+// en dash with a space on both sides. Some servers anchor the finding on the dash itself and select
+// the following word as the replacement, so the range alone is not enough.
+func touchesSpacedDash(text string, start, end int) bool {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(text) {
+		end = len(text)
+	}
+	const window = 6
+	if from := start - window; from > 0 {
+		start = from
+	} else {
+		start = 0
+	}
+	if to := end + window; to < len(text) {
+		end = to
+	} else {
+		end = len(text)
+	}
+	region := text[start:end]
+	return strings.Contains(region, " — ") || strings.Contains(region, " – ")
 }
 
 // original maps one offset of the prepared text back to the body.
@@ -713,10 +932,10 @@ func (prepared preparedText) original(index int) int {
 	return prepared.offsets[index]
 }
 
-// inCode reports whether an original offset lies inside a replaced code span.
-func (prepared preparedText) inCode(index int) bool {
+// maskedOverlap reports whether an original range intersects a masked span.
+func (prepared preparedText) maskedOverlap(start, end int) bool {
 	for _, span := range prepared.spans {
-		if index >= span.start && index < span.end {
+		if start < span.end && span.start < end {
 			return true
 		}
 	}

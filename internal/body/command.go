@@ -402,13 +402,7 @@ func readBodyText(file, text string) (string, *cli.Error) {
 	if text != "" {
 		return decodeInput(text)
 	}
-	var data []byte
-	var err error
-	if file == "-" {
-		data, err = textinput.ReadStdin(os.Stdin)
-	} else {
-		data, err = textinput.ReadFile(file)
-	}
+	data, err := textinput.ReadValue(file, os.Stdin)
 	if err != nil {
 		return "", inputError(err)
 	}

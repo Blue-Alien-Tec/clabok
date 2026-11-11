@@ -9,17 +9,52 @@ import (
 // Handler runs a command after its flags were parsed. args holds the positional arguments only.
 type Handler func(*Env, []string) (*Result, error)
 
+// Action is one positional action of a group command. The group keeps a single flag set; Reads names
+// the flags the action consumes, so the help shows exactly those instead of every group flag.
+type Action struct {
+	Name    string
+	Summary string
+	Reads   []string
+}
+
 // Command is one entry of the command surface. Multi-word names such as "config show" are the
-// canonical form; there is no separate subcommand tree.
+// canonical form; there is no separate subcommand tree. A command with Actions is a group.
 type Command struct {
 	Name     string
 	Summary  string
 	Usage    string
 	Mutating bool
+	Actions  []Action
 	// Flags builds the command flag set. It must start from Env.NewFlagSet so the global flags
 	// stay accepted. A nil Flags means "global flags only".
 	Flags func(*Env) *flag.FlagSet
 	Run   Handler
+}
+
+// ActionNames lists the action names in table order.
+func (command *Command) ActionNames() []string {
+	names := make([]string, 0, len(command.Actions))
+	for _, action := range command.Actions {
+		names = append(names, action.Name)
+	}
+	return names
+}
+
+// ActionList renders the action names as "a, b or c" for a diagnostic.
+func (command *Command) ActionList() string {
+	return ActionList(command.Actions)
+}
+
+// ActionList renders an action table as "a, b or c".
+func ActionList(actions []Action) string {
+	names := make([]string, 0, len(actions))
+	for _, action := range actions {
+		names = append(names, action.Name)
+	}
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
 
 // Registry holds the commands. Registration happens once during wiring.
@@ -44,7 +79,12 @@ func (r *Registry) Add(command *Command) {
 		panic("cli: duplicate command " + command.Name)
 	}
 	if command.Usage == "" {
-		command.Usage = "pecia " + command.Name
+		if len(command.Actions) > 0 {
+			command.Usage = "pecia " + command.Name + " <" +
+				strings.Join(command.ActionNames(), "|") + "> [flags]"
+		} else {
+			command.Usage = "pecia " + command.Name
+		}
 	}
 	r.commands[command.Name] = command
 }

@@ -39,10 +39,21 @@ func Register(registry *cli.Registry) {
 	var book string
 	var all, write, strict bool
 	var to, keep int
+	actions := []cli.Action{
+		{Name: "status", Summary: "report the manifest, store and registry state",
+			Reads: []string{"book", "all"}},
+		{Name: "plan", Summary: "plan the migration steps without writing",
+			Reads: []string{"book", "all", "to", "strict"}},
+		{Name: "apply", Summary: "apply the planned migration",
+			Reads: []string{"book", "all", "to", "write", "strict"}},
+		{Name: "cleanup", Summary: "prune migration history",
+			Reads: []string{"book", "all", "keep", "write"}},
+	}
 	registry.Add(&cli.Command{
 		Name:    "migrate",
 		Summary: "report, plan and apply book and store schema migrations",
 		Usage:   "pecia migrate <status|plan|apply|cleanup> [--book <id> | --all] [--to <version>] [--keep N] [--write] [--strict]",
+		Actions: actions,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("migrate")
 			set.StringVar(&book, "book", "", "book id")
@@ -64,7 +75,7 @@ func Register(registry *cli.Registry) {
 			case "status", "plan", "apply", "cleanup":
 			default:
 				return nil, cli.Usage("usage.invalid-value",
-					"unknown migrate action %q; use status, plan, apply or cleanup", action)
+					"unknown migrate action %q; use %s", action, cli.ActionList(actions))
 			}
 			if book != "" && !model.BookID(book).Valid() {
 				return nil, cli.Usage("usage.invalid-value", "invalid book id %q", book)

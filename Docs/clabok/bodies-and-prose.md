@@ -29,7 +29,19 @@ $body = @'
 $body | pecia body set --book guide 0 --parent <chapter-id> --file -
 ```
 
-In Windows PowerShell 5.1, `Set-Content -Encoding UTF8` writes a byte-order mark (accepted and stripped), and `Get-Content` without `-Encoding UTF8` displays UTF-8 text as `mojibake` even though the file is correct. If a pipe mangles non-ASCII characters, set `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` or pass the file directly.
+In Windows PowerShell 5.1, `Set-Content -Encoding UTF8` writes a byte-order mark (accepted and stripped), and `Get-Content` without `-Encoding UTF8` displays UTF-8 text as `mojibake` even though the file is correct. If a pipe mangles non-ASCII characters, set `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` or pass the file directly. The same boundary strips the quotes of a structured value: `config set badges.detectors.<id> '{...}'` loses its double quotes in 5.1 and in 7, so pass the object with `--file`:
+
+```text
+# Windows PowerShell 5.1
+$detector = @'
+{"kind":"file","path":"ProjectSettings/ProjectVersion.txt","format":"regex","pattern":"m_EditorVersion:\\s*(\\S+)"}
+'@
+$detector | Out-File -Encoding UTF8 detector.json
+pecia config set badges.detectors.unity-editor --file detector.json
+
+# PowerShell 7: standard input
+$detector | pecia config set badges.detectors.unity-editor --file -
+```
 
 ```text
 pecia body set --book guide 0 --parent <chapter> --file chapter.md
