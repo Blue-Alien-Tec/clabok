@@ -968,7 +968,7 @@ func renderMonolith(manifest *model.Manifest, bodies map[model.ID]string, index 
 		}
 		return "#" + target.Anchor
 	})
-	topNav, bottomNav := readmeNav(nav, index, "")
+	topNav, bottomNav := readmeNav(nav, index, "", documentIndexShown(manifest))
 	chapters := make([]string, 0, len(manifest.Root.Children))
 	for _, child := range manifest.Root.Children {
 		if child.Kind == model.KindLink {
@@ -1003,7 +1003,7 @@ func renderChapters(manifest *model.Manifest, bodies map[model.ID]string, index 
 		return target.Href()
 	})
 	first := firstDocument(manifest, layout, nil, nil)
-	topNav, bottomNav := readmeNav(nav, index, first)
+	topNav, bottomNav := readmeNav(nav, index, first, documentIndexShown(manifest))
 	sections := readmeSections(readmeInput{
 		manifest: manifest, bodies: bodies, entries: entries, documents: index,
 		topNav: topNav, bottomNav: bottomNav, badges: badges, isLibrary: nav.IsLibrary,
@@ -1059,7 +1059,7 @@ func renderParts(manifest *model.Manifest, bodies map[model.ID]string, index []I
 		return target.Href()
 	})
 	first := firstDocument(manifest, layout, parts, partFile)
-	topNav, bottomNav := readmeNav(nav, index, first)
+	topNav, bottomNav := readmeNav(nav, index, first, documentIndexShown(manifest))
 	sections := readmeSections(readmeInput{
 		manifest: manifest, bodies: bodies, entries: entries, documents: index,
 		topNav: topNav, bottomNav: bottomNav, badges: badges, isLibrary: nav.IsLibrary,

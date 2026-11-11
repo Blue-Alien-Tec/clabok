@@ -40,7 +40,7 @@ func navJoin(parts []string) string {
 // readmeNav returns the top and bottom navigation of a book README. Every registered book appears
 // as a direct link, in library order; the current book is not linked to itself. The library jumps to
 // its Document Index.
-func readmeNav(nav Navigation, index []IndexEntry, first string) (top, bottom string) {
+func readmeNav(nav Navigation, index []IndexEntry, first string, showDocumentIndex bool) (top, bottom string) {
 	books := make([]string, 0, len(nav.Books))
 	for _, book := range nav.Books {
 		if book.Title == "" || book.Href == "" {
@@ -50,7 +50,7 @@ func readmeNav(nav Navigation, index []IndexEntry, first string) (top, bottom st
 	}
 	if nav.IsLibrary {
 		parts := append([]string(nil), books...)
-		if len(index) > 0 {
+		if len(index) > 0 && showDocumentIndex {
 			parts = append(parts, navDocumentLink)
 		}
 		if len(parts) == 0 {
@@ -82,6 +82,12 @@ func chapterNav(previous, next string) string {
 		parts = append(parts, "[Next →]("+next+")")
 	}
 	return navJoin(parts)
+}
+
+// documentIndexShown reports whether the README renders the document index slot. The navigation
+// must not link a section the book hides.
+func documentIndexShown(manifest *model.Manifest) bool {
+	return manifest.Settings.Library.Shows(model.SlotDocumentIndex)
 }
 
 // firstDocument returns the first content file of a split mode, or "".
