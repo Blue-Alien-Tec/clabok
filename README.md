@@ -62,6 +62,8 @@ The [CLABOK](Docs/clabok/README.md) book is the full guide: book model, authorin
 
 MIT. See [LICENSE](LICENSE).
 
+<p align="right"><IMG src="generated-content.png" alt="AI badge" width="128"></p>
+
 
 <a id="ai-transparency"></a>
 
