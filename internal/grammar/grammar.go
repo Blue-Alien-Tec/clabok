@@ -17,6 +17,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
@@ -303,8 +304,9 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 			reported = detected
 		}
 		for _, match := range matches {
-			match.Offset += span.start
-			finding, ok := client.finding(text, prepared, match)
+			start := byteOffset(prepared.text, span.start, span.end, match.Offset)
+			end := byteOffset(prepared.text, span.start, span.end, match.Offset+match.Length)
+			finding, ok := client.finding(text, prepared, match, start, end)
 			if !ok {
 				continue
 			}
@@ -351,17 +353,19 @@ func Resolve(settings model.Settings, fallback string) string {
 	return DefaultLanguage
 }
 
-// finding maps one match from prepared space back to the body.
-func (client *Client) finding(text string, prepared preparedText, match wireMatch) (Finding, bool) {
-	start := prepared.original(match.Offset)
-	end := prepared.original(match.Offset + match.Length)
+// finding maps one match from prepared space back to the body. The server reports UTF-16 code units,
+// so the caller converts them to prepared byte offsets first.
+func (client *Client) finding(text string, prepared preparedText, match wireMatch,
+	start, end int) (Finding, bool) {
 	if start < 0 || end <= start || prepared.maskedOverlap(start, end) {
 		return Finding{}, false
 	}
-	offending := segment(text, start, end-start)
-	line, column := position(text, start)
+	originalStart := prepared.original(start)
+	originalEnd := prepared.original(end)
+	offending := segment(text, originalStart, originalEnd-originalStart)
+	line, column := position(text, originalStart)
 	return Finding{
-		Line: line, Column: column, Offset: start, Length: end - start,
+		Line: line, Column: column, Offset: originalStart, Length: originalEnd - originalStart,
 		Rule: match.RuleID, Message: match.Message, Offending: offending,
 		Replacements: match.Values,
 	}, true
@@ -940,6 +944,32 @@ func (prepared preparedText) maskedOverlap(start, end int) bool {
 		}
 	}
 	return false
+}
+
+// byteOffset converts a UTF-16 code-unit offset, which the server reports, into a byte offset of text
+// between start and end. A surrogate pair counts as two units; a unit that lands inside a pair keeps
+// the offset before it. The result is clamped to end.
+func byteOffset(text string, start, end, units int) int {
+	if units <= 0 {
+		return start
+	}
+	if end > len(text) {
+		end = len(text)
+	}
+	index, counted := start, 0
+	for index < end {
+		value, size := utf8.DecodeRuneInString(text[index:end])
+		width := 1
+		if value > 0xFFFF {
+			width = 2
+		}
+		if counted+width > units {
+			return index
+		}
+		counted += width
+		index += size
+	}
+	return index
 }
 
 // ReadTerms reads the store-level term list. A missing file is an empty list.

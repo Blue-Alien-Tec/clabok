@@ -94,15 +94,67 @@ func caseServer(t *testing.T) *httptest.Server {
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("parse form: %v", err)
 		}
-		at := strings.Index(r.Form.Get("text"), "Die")
+		sent := r.Form.Get("text")
+		byteAt := strings.Index(sent, "Die")
 		w.Header().Set("Content-Type", "application/json")
-		if at < 0 {
+		if byteAt < 0 {
 			fmt.Fprint(w, `{"matches":[]}`)
 			return
 		}
+		at := len([]rune(sent[:byteAt]))
 		fmt.Fprintf(w, `{"matches":[{"message":"case","offset":%d,"length":3,`+
 			`"rule":{"id":"DE_CASE"},"replacements":[{"value":"die"}]}]}`, at)
 	}))
+}
+
+func TestByteOffset(t *testing.T) {
+	text := "aöb—c"
+	cases := []struct {
+		units int
+		want  int
+	}{{0, 0}, {1, 1}, {2, 3}, {3, 4}, {4, 7}, {5, 8}}
+	for _, testCase := range cases {
+		if got := byteOffset(text, 0, len(text), testCase.units); got != testCase.want {
+			t.Fatalf("units %d: got %d, want %d", testCase.units, got, testCase.want)
+		}
+	}
+	surrogate := "😀x"
+	if got := byteOffset(surrogate, 0, len(surrogate), 1); got != 0 {
+		t.Fatalf("a unit inside a surrogate pair keeps the offset before it: %d", got)
+	}
+	if got := byteOffset(surrogate, 0, len(surrogate), 2); got != 4 {
+		t.Fatalf("two units end behind the pair: %d", got)
+	}
+}
+
+// TestCheckMapsUtf16Offsets checks that the server's UTF-16 offsets land on the right body bytes when
+// the prose carries multibyte characters before the finding.
+func TestCheckMapsUtf16Offsets(t *testing.T) {
+	body := "Grüße aus München, teh ist falsch.\n"
+	units := len([]rune("Grüße aus München, "))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/languages" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"matches":[{"message":"typo","offset":%d,"length":3,`+
+			`"rule":{"id":"TEST"},"replacements":[{"value":"der"}]}]}`, units)
+	}))
+	defer server.Close()
+
+	result, err := NewClient(server.URL).Check(context.Background(), body, "de-DE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 1 {
+		t.Fatalf("findings %+v", result.Findings)
+	}
+	finding := result.Findings[0]
+	want := strings.Index(body, "teh")
+	if finding.Offset != want || finding.Offending != "teh" || finding.Line != 1 {
+		t.Fatalf("finding %+v, want offset %d", finding, want)
+	}
 }
 
 func TestCheckSuppressesArtefactAfterSpacedDash(t *testing.T) {
