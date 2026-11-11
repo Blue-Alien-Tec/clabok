@@ -63,10 +63,6 @@ The [CLABOK](Docs/clabok/README.md) book is the full guide: book model, authorin
 MIT. See [LICENSE](LICENSE).
 
 
-## Index
-
-- [AI Transparency](#ai-transparency)
-
 ## Document Index
 
 | Book |
