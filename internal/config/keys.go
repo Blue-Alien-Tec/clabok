@@ -7,11 +7,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/badge"
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
+	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
 
 const asciiuiPrefix = "asciiui.types."
+
+const detectorPrefix = "badges.detectors."
+
+// detectorName extracts the detector id of a dynamic configuration key.
+func detectorName(key string) (string, bool) {
+	if !strings.HasPrefix(key, detectorPrefix) {
+		return "", false
+	}
+	name := strings.TrimPrefix(key, detectorPrefix)
+	if name == "" || strings.Contains(name, ".") {
+		return "", false
+	}
+	return name, true
+}
 
 type binding struct {
 	name         string
@@ -238,6 +254,7 @@ func knownKeys() []string {
 		names = append(names, name)
 	}
 	names = append(names, asciiuiPrefix+"<name>")
+	names = append(names, detectorPrefix+"<id>")
 	sort.Strings(names)
 	return names
 }
@@ -344,6 +361,41 @@ func setLanguage(section **grammarSection, raw string) *cli.Error {
 	return nil
 }
 
+func setDetector(document *file, name, raw string) *cli.Error {
+	var detector badge.Detector
+	err := jsonstrict.Decode([]byte(strings.TrimSpace(raw)), &detector,
+		jsonstrict.Options{DisallowUnknownFields: true})
+	if err != nil {
+		return cli.Usage("usage.invalid-value",
+			"badges.detectors.%s: expected one JSON detector object: %v", name, err).
+			WithDetails(map[string]any{"key": detectorPrefix + name})
+	}
+	if badge.BuiltinID(name) {
+		return cli.Usage("usage.invalid-value",
+			"badges.detectors.%s: the id is reserved by a built-in detector", name)
+	}
+	if validateErr := badge.ValidateDetector(name, detector); validateErr != nil {
+		return cli.Usage("usage.invalid-value", "%v", validateErr).
+			WithDetails(map[string]any{"key": detectorPrefix + name})
+	}
+	if document.Badges == nil {
+		document.Badges = &badgesSection{}
+	}
+	if document.Badges.Detectors == nil {
+		document.Badges.Detectors = map[string]badge.Detector{}
+	}
+	document.Badges.Detectors[name] = detector
+	return nil
+}
+
+// documentDetectors returns the configured detector table, never nil.
+func documentDetectors(document *file) map[string]badge.Detector {
+	if document.Badges == nil {
+		return nil
+	}
+	return document.Badges.Detectors
+}
+
 func setMode(document *file, raw string) *cli.Error {
 	value := strings.TrimSpace(unquote(raw))
 	if value != "file" && value != "daemon" {
@@ -379,6 +431,12 @@ func setSocket(document *file, raw string) *cli.Error {
 // lookupValue returns the stored or default value without path resolution and without command
 // flags. It is what a write compares before and after.
 func lookupValue(document *file, key string) (any, string, *cli.Error) {
+	if name, ok := detectorName(key); ok {
+		if detector, exists := documentDetectors(document)[name]; exists {
+			return detector, "file", nil
+		}
+		return nil, "default", nil
+	}
 	if name, ok := asciiuiName(key); ok {
 		value, exists := document.asciiuiTypes()[name]
 		if exists {
@@ -398,6 +456,12 @@ func lookupValue(document *file, key string) (any, string, *cli.Error) {
 
 // getValue returns the effective value: resolved paths and command flags applied.
 func getValue(document *file, location Location, globals cli.Globals, key string) (any, string, *cli.Error) {
+	if name, ok := detectorName(key); ok {
+		if detector, exists := documentDetectors(document)[name]; exists {
+			return detector, "file", nil
+		}
+		return nil, "default", nil
+	}
 	if name, ok := asciiuiName(key); ok {
 		value, exists := document.asciiuiTypes()[name]
 		if exists {
@@ -427,6 +491,15 @@ func builtinTypeName(name string) string {
 }
 
 func setValue(document *file, key, raw string) *cli.Error {
+	if name, ok := detectorName(key); ok {
+		if strings.TrimSpace(raw) == "" {
+			if document.Badges != nil {
+				delete(document.Badges.Detectors, name)
+			}
+			return nil
+		}
+		return setDetector(document, name, raw)
+	}
 	if name, ok := asciiuiName(key); ok {
 		value := strings.TrimSpace(unquote(raw))
 		if value == "" {
@@ -452,6 +525,12 @@ func setValue(document *file, key, raw string) *cli.Error {
 }
 
 func unsetValue(document *file, key string) *cli.Error {
+	if name, ok := detectorName(key); ok {
+		if document.Badges != nil {
+			delete(document.Badges.Detectors, name)
+		}
+		return nil
+	}
 	if name, ok := asciiuiName(key); ok {
 		if document.Asciiui != nil {
 			delete(document.Asciiui.Types, name)

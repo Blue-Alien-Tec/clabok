@@ -7,71 +7,50 @@ import (
 	"testing"
 )
 
-func TestBadgeEndToEnd(t *testing.T) {
+func TestBadgePresetFlow(t *testing.T) {
 	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "go.mod"),
-		[]byte("module github.com/example/clabok\n\ngo 1.27.3\n"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(directory, "ProjectSettings"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "LICENSE"),
-		[]byte("MIT License\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "ProjectSettings", "ProjectVersion.txt"),
+		[]byte("m_EditorVersion: 6000.1.0f1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
 	runOK(t, directory, "book", "new", "--library", "--id", "library", "--title", "CLABOK")
-	runOK(t, directory, "book", "new", "--title", "Guide")
 	runOK(t, directory, "book", "open", "library")
-	runOK(t, directory, "badge", "add", "--book", "library", "--id", "go")
-	runOK(t, directory, "badge", "add", "--book", "library", "--id", "license")
 
-	view := dataOf(t, runOK(t, directory, "badge", "show", "--book", "library"))
-	entries, _ := view["badges"].([]any)
-	if len(entries) != 2 {
-		t.Fatalf("badge view %v", view)
-	}
-	first, _ := entries[0].(map[string]any)
-	if first["resolved"] != true || first["value"] != "1.27.3" || first["source"] != "go.mod" {
-		t.Fatalf("go badge %v", first)
+	detected := runOK(t, directory, "badge", "detect")
+	if !strings.Contains(detected, "unity") {
+		t.Fatalf("detect %s", detected)
 	}
 
-	runOK(t, directory, "book", "close", "library")
-	runOK(t, directory, "sync", "--write")
-	readme := readFile(t, filepath.Join(directory, "README.md"))
-	goBadge := "![go: 1.27.3](https://img.shields.io/badge/go-1.27.3-00ADD8?style=flat-square)"
-	licenseBadge := "![license: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)"
-	for _, want := range []string{goBadge, licenseBadge} {
-		if !strings.Contains(readme, want) {
-			t.Fatalf("missing %q in\n%s", want, readme)
-		}
+	runOK(t, directory, "badge", "init", "--preset", "unity", "--book", "library")
+
+	shown := runOK(t, directory, "badge", "show", "--book", "library")
+	if !strings.Contains(shown, "unity-editor") || !strings.Contains(shown, "6000.1.0f1") {
+		t.Fatalf("show %s", shown)
 	}
-	if strings.Index(readme, goBadge) > strings.Index(readme, "# CLABOK") {
-		t.Fatalf("badges must sit above the title:\n%s", readme)
+	if strings.Contains(shown, `"id": "go"`) {
+		t.Fatalf("the unity preset must not declare a Go badge: %s", shown)
 	}
 
-	runOK(t, directory, "book", "open", "library")
-	runOK(t, directory, "badge", "add", "--book", "library", "--id", "go", "--message", "custom")
-	runOK(t, directory, "book", "close", "library")
-	runOK(t, directory, "sync", "--write")
-	readme = readFile(t, filepath.Join(directory, "README.md"))
-	if !strings.Contains(readme, "![go: custom]") {
-		t.Fatalf("an explicit message must win:\n%s", readme)
+	explained := runOK(t, directory, "badge", "explain", "--book", "library", "--id", "unity-editor")
+	if !strings.Contains(explained, `"hash": "value"`) ||
+		!strings.Contains(explained, `"kind": "file"`) {
+		t.Fatalf("explain %s", explained)
 	}
 
-	runOK(t, directory, "book", "open", "library")
-	runOK(t, directory, "badge", "add", "--book", "library", "--id", "ghost")
-	runOK(t, directory, "book", "close", "library")
-	code, _, stderr := run(t, directory, "check", "--book", "library")
-	if code != 0 {
-		t.Fatalf("check exited %d: %s", code, stderr)
+	checked := runOK(t, directory, "badge", "check", "--book", "library")
+	if !strings.Contains(checked, "checked") || strings.Contains(checked, "unresolved:") {
+		t.Fatalf("check %s", checked)
 	}
 
-	runOK(t, directory, "book", "open", "library")
-	runOK(t, directory, "badge", "remove", "--book", "library", "--id", "go")
-	runOK(t, directory, "badge", "remove", "--book", "library", "--id", "ghost")
-	runOK(t, directory, "book", "close", "library")
-	runOK(t, directory, "sync", "--write")
-	readme = readFile(t, filepath.Join(directory, "README.md"))
-	if strings.Contains(readme, "![go:") {
-		t.Fatalf("the removed badge survived:\n%s", readme)
+	// A second init with a changed detector is refused without --force.
+	runOK(t, directory, "config", "set", "badges.detectors.unity-editor",
+		`{"kind":"static","value":"other"}`)
+	code, _, stderr := run(t, directory, "badge", "init", "--preset", "unity", "--book", "library")
+	if code == 0 || !strings.Contains(stderr, "badge.detector-exists") {
+		t.Fatalf("conflict exit %d: %s", code, stderr)
 	}
+	runOK(t, directory, "badge", "init", "--preset", "unity", "--book", "library", "--force")
 }

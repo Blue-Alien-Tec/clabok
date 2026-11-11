@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/badge"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 )
 
@@ -121,6 +122,29 @@ func validate(document *file) []Issue {
 					Code:    "config.invalid-key",
 					Key:     "asciiui.types",
 					Message: "a type name must not be empty",
+				})
+			}
+		}
+	}
+	if document.Badges != nil {
+		names := make([]string, 0, len(document.Badges.Detectors))
+		for name := range document.Badges.Detectors {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if badge.BuiltinID(name) {
+				issues = append(issues, Issue{
+					Code:    "config.invalid-badge",
+					Key:     detectorPrefix + name,
+					Message: "the id is reserved by a built-in detector",
+				})
+				continue
+			}
+			if err := badge.ValidateDetector(name, document.Badges.Detectors[name]); err != nil {
+				issues = append(issues, Issue{
+					Code: "config.invalid-badge", Key: detectorPrefix + name,
+					Message: err.Error(),
 				})
 			}
 		}

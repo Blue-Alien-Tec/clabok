@@ -134,7 +134,7 @@ func TestDecodeRejectsInvalidDocuments(t *testing.T) {
 	}{
 		{`{"version":2,"id":"x","root":{"id":"1","kind":"title","title":"X"},"bogus":1}`, "model.unknown-key"},
 		{`{"version":2,"version":2}`, "model.duplicate-key"},
-		{`{"version":6,"id":"x"}`, "model.manifest-version"},
+		{`{"version":7,"id":"x"}`, "model.manifest-version"},
 		{`{"version":1,"id":"x"}`, "model.manifest-version"},
 		{`{"id":"x"}`, "model.manifest-version"},
 		{`{`, "model.invalid-json"},

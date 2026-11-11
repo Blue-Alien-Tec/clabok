@@ -11,11 +11,11 @@
 
 Generated content is derived from repository facts on every sync. It is never authored as prose and never edited by hand; the blocks are locked.
 
-Badges are declared in the manifest with an identifier (the detector), an optional label, an optional message and an optional link. The detectors read `go.mod`, the license file, `.git/config` and the build version.
+Badges are declared in the manifest with an identifier (the detector), an optional source, label, message and link, plus the presentation fields `style`, `logo`, `logoColor`, `labelColor`, `color` and `alt`, the ordering fields `order` and `group`, `required` and `cacheSeconds`. A detector is declared in `clabok.json` as `badges.detectors.<id>`: a JSON object with a `kind` and its query. A `file` detector reads text, regex, JSON, YAML, TOML or XML; `package` reads the `node`, `.NET`, `rust` or `go` manifest. The built-in IDs `go`, `module`, `license`, `remote` and `version` stay reserved.
 
-An explicit message always wins over a detector. A missing source omits the badge and reports `badge-unresolved`. The commands are `badge add`, `badge remove` and `badge show`.
+An explicit message always wins over a detector, then the detector applies, then the badge is unresolved and reported as `badge-unresolved`. A `required` badge makes that finding blocking; an optional one stays informational. The commands are `badge add`, `badge remove`, `badge show`, `badge detect`, `badge init`, `badge explain` and `badge check`. `badge init --preset unity` writes the detectors and the declarations from an explicit preset; `badge detect` only reports the project kinds.
 
-The badge line renders only in the library README, above the title. The resolved values participate in the input hash, so a change in the module file, the license file or the remote marks the README as dirty.
+The badge line renders only in the library README, above the title; badges sort by `order`, and a `group` change starts a new line. The rendered URL participates in the input hash, so a style, logo, color or value change marks the README as dirty. `command` and `http` are the documented exception: `sync` and render never execute or fetch them. `command` runs only in `badge check` and caches its output in the temp state; `http` is the rendered image URL and is never fetched. A source that carries a secret placeholder or a credential is refused.
 
 The repository layout is opt-in: `layout add` creates the locked RepoLayout anchor with a path and a depth, and `layout set` changes the path or the depth.
 
@@ -28,7 +28,9 @@ Text UI layouts are described in the ASCII UI Layouts chapter. Their specs live 
 Generated blocks are replaced at render time; `body set` on them is refused. Change them through their commands, then run `sync --check`.
 
 ```text
+pecia badge init --preset unity --book library
 pecia badge add --book library --id license
+pecia badge explain --book library --id unity-editor
 pecia layout add --book guide --parent <chapter> --path . --depth 3
 pecia layout note --book guide --path internal --note "The Go packages."
 ```

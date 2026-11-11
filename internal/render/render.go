@@ -73,6 +73,8 @@ type Service struct {
 	// Navigation describes the current book's place in the library. It drives the README and
 	// per-file navigation.
 	Navigation Navigation
+	// Detectors are the configured badge sources; nil means the built-in set only.
+	Detectors map[string]badge.Detector
 	// ProjectDir holds the repository facts for the badge detectors.
 	ProjectDir string
 }
@@ -149,18 +151,36 @@ func (service *Service) render(source *source.Book) (Result, error) {
 }
 
 // badgeMarkdown renders the resolved badges of the library README. A badge without a value is
-// omitted; Check reports it as badge-unresolved.
+// omitted; Check reports it as badge-unresolved. Badges sort by their order key, and a group change
+// starts a new line.
 func (service *Service) badgeMarkdown(manifest *model.Manifest) string {
-	values, _ := badge.ResolveAll(service.ProjectDir, manifest.Badges)
-	images := make([]string, 0, len(values))
+	resolver := badge.Resolver{ProjectDir: service.ProjectDir, Detectors: service.Detectors}
+	values, _ := resolver.ResolveAll(manifest.Badges)
+	sort.SliceStable(values, func(left, right int) bool {
+		return values[left].Order < values[right].Order
+	})
+	lines := make([]string, 0, 1)
+	line := ""
+	group := ""
 	for _, value := range values {
-		image := fmt.Sprintf("![%s: %s](%s)", value.Label, value.Message, badge.BadgeURL(value))
+		if line != "" && value.Group != group {
+			lines = append(lines, line)
+			line = ""
+		}
+		group = value.Group
+		image := fmt.Sprintf("![%s](%s)", badge.AltText(value), badge.BadgeURL(value))
 		if value.Link != "" {
 			image = "[" + image + "](" + value.Link + ")"
 		}
-		images = append(images, image)
+		if line != "" {
+			line += " "
+		}
+		line += image
 	}
-	return strings.Join(images, " ")
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // repoLayoutBody renders the generated repository tree for one locked RepoLayout block. A missing
@@ -1363,11 +1383,12 @@ func (service *Service) inputMembers(source *source.Book) map[string][]byte {
 		members["repo-layout"] = []byte(tree)
 	}
 	if len(source.Manifest.Badges) > 0 {
-		values, unresolved := badge.ResolveAll(service.ProjectDir, source.Manifest.Badges)
+		resolver := badge.Resolver{ProjectDir: service.ProjectDir, Detectors: service.Detectors}
+		values, unresolved := resolver.ResolveAll(source.Manifest.Badges)
 		var builder strings.Builder
 		for _, value := range values {
-			fmt.Fprintf(&builder, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\n",
-				value.ID, value.Label, value.Message, value.Link, value.Source, value.Color)
+			fmt.Fprintf(&builder, "%s\x00%s\x00%s\x00%s\n",
+				value.ID, badge.BadgeURL(value), value.Link, value.Source)
 		}
 		for _, item := range unresolved {
 			fmt.Fprintf(&builder, "%s\x00%s\n", item.ID, item.Reason)
@@ -1414,12 +1435,19 @@ func (service *Service) Check(book model.BookID) ([]Finding, error) {
 	bodies := source.Bodies
 	layout := LayoutFor(manifest)
 	if len(manifest.Badges) > 0 {
-		_, unresolved := badge.ResolveAll(service.ProjectDir, manifest.Badges)
+		resolver := badge.Resolver{ProjectDir: service.ProjectDir, Detectors: service.Detectors}
+		required := map[string]bool{}
+		for _, declared := range manifest.Badges {
+			if declared.Required {
+				required[declared.ID] = true
+			}
+		}
+		_, unresolved := resolver.ResolveAll(manifest.Badges)
 		for _, item := range unresolved {
 			findings = append(findings, Finding{
 				Code:     "badge-unresolved",
 				Message:  fmt.Sprintf("badge %q: %s", item.ID, item.Reason),
-				Blocking: false,
+				Blocking: required[item.ID],
 			})
 		}
 	}

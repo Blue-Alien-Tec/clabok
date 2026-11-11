@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/badge"
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 )
 
@@ -35,6 +36,7 @@ type Values struct {
 	ConcurrencyMode string
 	DaemonSocket    string
 	AsciiUITypes    map[string]string
+	BadgeDetectors  map[string]badge.Detector
 }
 
 // Load returns the effective configuration for a command.
@@ -167,6 +169,9 @@ func resolve(document *file, location Location, globals cli.Globals) *Values {
 	}
 	if language := strings.TrimSpace(document.grammarLanguage()); language != "" {
 		values.GrammarLanguage = language
+	}
+	if document.Badges != nil {
+		values.BadgeDetectors = document.Badges.Detectors
 	}
 	if mode := document.concurrencyMode(); mode != "" {
 		values.ConcurrencyMode = mode

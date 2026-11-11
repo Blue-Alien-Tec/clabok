@@ -15,12 +15,25 @@ import (
 
 // Value is one resolved badge.
 type Value struct {
-	ID      string
-	Label   string
-	Message string
-	Link    string
-	Source  string
-	Color   string
+	ID         string
+	Detector   string
+	Label      string
+	Message    string
+	Link       string
+	Source     string
+	Color      string
+	Style      string
+	Logo       string
+	LogoColor  string
+	LabelColor string
+	Alt        string
+	Required   bool
+	Order      int
+	Group      string
+	// URL carries the rendered image URL of an http source; Dynamic marks a value that comes from a
+	// cached or remote source instead of a repository fact.
+	URL     string
+	Dynamic bool
 }
 
 // Unresolved reports one declared badge without a value.
@@ -54,66 +67,53 @@ var detectors = map[string]detector{
 
 // Resolve returns the concrete value for one declared badge. ok is false when neither an explicit
 // message nor the detector supplies a value; reason then explains the omission.
+// Resolver.Resolve carries the configuration and cache; this package function is the built-in-only
+// shorthand used by tests.
 func Resolve(projectDir string, declared model.Badge) (Value, bool, string) {
-	known, hasDescriptor := descriptors[declared.ID]
-	label := declared.Label
-	if label == "" && hasDescriptor {
-		label = known.label
-	}
-	if label == "" {
-		label = declared.ID
-	}
-	color := "lightgrey"
-	if hasDescriptor {
-		color = known.color
-	}
-	if declared.Message != "" {
-		return Value{
-			ID: declared.ID, Label: label, Message: declared.Message,
-			Link: declared.Link, Source: "explicit", Color: color,
-		}, true, ""
-	}
-	resolve, exists := detectors[declared.ID]
-	if !exists {
-		return Value{}, false, fmt.Sprintf(
-			"badge %q has no detector and no message", declared.ID)
-	}
-	value, found, reason := resolve(projectDir)
-	if !found {
-		return Value{}, false, reason
-	}
-	value.ID = declared.ID
-	value.Label = label
-	value.Color = color
-	if declared.Link != "" {
-		value.Link = declared.Link
-	}
-	return value, true, ""
+	return Resolver{ProjectDir: projectDir}.Resolve(declared)
 }
 
-// ResolveAll resolves the declared badges in manifest order.
+// ResolveAll resolves the declared badges with the built-in detectors only.
 func ResolveAll(projectDir string, badges []model.Badge) ([]Value, []Unresolved) {
-	values := make([]Value, 0, len(badges))
-	unresolved := make([]Unresolved, 0)
-	for _, declared := range badges {
-		value, ok, reason := Resolve(projectDir, declared)
-		if ok {
-			values = append(values, value)
-			continue
-		}
-		unresolved = append(unresolved, Unresolved{ID: declared.ID, Reason: reason})
-	}
-	return values, unresolved
+	return Resolver{ProjectDir: projectDir}.ResolveAll(badges)
 }
 
-// BadgeURL returns the shields.io URL for a value.
+// BadgeURL returns the shields.io URL for a value, or the declared URL of an http source.
 func BadgeURL(value Value) string {
+	if value.URL != "" {
+		return value.URL
+	}
 	color := value.Color
 	if color == "" {
 		color = "lightgrey"
 	}
-	return fmt.Sprintf("https://img.shields.io/badge/%s-%s-%s?style=flat-square",
-		escape(value.Label), escape(value.Message), color)
+	builder := fmt.Sprintf("https://img.shields.io/badge/%s-%s-%s?style=%s",
+		escape(value.Label), escape(value.Message), color, url.QueryEscape(styleOf(value.Style)))
+	if value.Logo != "" {
+		builder += "&logo=" + url.QueryEscape(value.Logo)
+	}
+	if value.LogoColor != "" {
+		builder += "&logoColor=" + url.QueryEscape(value.LogoColor)
+	}
+	if value.LabelColor != "" {
+		builder += "&labelColor=" + url.QueryEscape(value.LabelColor)
+	}
+	return builder
+}
+
+func styleOf(style string) string {
+	if style == "" {
+		return "flat-square"
+	}
+	return style
+}
+
+// AltText is the Markdown image alt text of a badge.
+func AltText(value Value) string {
+	if value.Alt != "" {
+		return value.Alt
+	}
+	return value.Label + ": " + value.Message
 }
 
 // escape encodes one shields.io path segment: a literal dash is doubled and a space becomes an

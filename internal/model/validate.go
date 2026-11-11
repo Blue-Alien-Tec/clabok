@@ -441,6 +441,39 @@ func (validator *manifestValidator) validateBadges() {
 			continue
 		}
 		seen[badge.ID] = index
+		if source := badge.Source; source != "" && ValidateTypeToken(source) != "" {
+			validator.add("model.invalid-badge", path+".source",
+				"a badge source must be a single token of at most 64 characters")
+		}
+		if !ValidBadgeStyle(badge.Style) {
+			validator.add("model.invalid-badge", path+".style",
+				"unknown badge style %q", badge.Style)
+		}
+		if !ValidBadgeLogo(badge.Logo) {
+			validator.add("model.invalid-badge", path+".logo",
+				"a badge logo must be a simple-icons slug, not a URL or path")
+		}
+		for name, color := range map[string]string{
+			"color": badge.Color, "labelColor": badge.LabelColor, "logoColor": badge.LogoColor,
+		} {
+			if !ValidBadgeColor(color) {
+				validator.add("model.invalid-badge", path+"."+name,
+					"expected a named color or a hex value, got %q", color)
+			}
+		}
+		if strings.ContainsAny(badge.Alt, "\r\n") || strings.Contains(badge.Alt, "](") ||
+			strings.Contains(badge.Alt, "![") || len(badge.Alt) > 80 {
+			validator.add("model.invalid-badge", path+".alt",
+				"an alt text must be a single line without Markdown image syntax, at most 80 characters")
+		}
+		if badge.CacheSeconds < 0 || badge.CacheSeconds > 86400 {
+			validator.add("model.invalid-badge", path+".cacheSeconds",
+				"cacheSeconds must be between 0 and 86400")
+		}
+		if group := badge.Group; group != "" && ValidateTypeToken(group) != "" {
+			validator.add("model.invalid-badge", path+".group",
+				"a badge group must be a single token of at most 32 characters")
+		}
 	}
 }
 

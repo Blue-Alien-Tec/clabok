@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/badge"
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
@@ -40,6 +41,10 @@ type asciiuiValues struct {
 	Types map[string]string `json:"types"`
 }
 
+type badgeValues struct {
+	Detectors map[string]badge.Detector `json:"detectors,omitempty"`
+}
+
 type showValues struct {
 	Store       rootValues        `json:"store"`
 	Temp        rootValues        `json:"temp"`
@@ -48,6 +53,7 @@ type showValues struct {
 	Grammar     grammarValues     `json:"grammar"`
 	Concurrency concurrencyValues `json:"concurrency"`
 	Asciiui     asciiuiValues     `json:"asciiui"`
+	Badges      badgeValues       `json:"badges"`
 }
 
 type showPayload struct {
@@ -75,6 +81,7 @@ func (payload showPayload) Text() string {
 		payload.Values.Grammar.Policy, payload.Values.Grammar.Timeout,
 		payload.Values.Grammar.Language, payload.Values.Grammar.Endpoint)
 	fmt.Fprintf(&builder, "asciiui: %d override(s)\n", len(payload.Values.Asciiui.Types))
+	fmt.Fprintf(&builder, "badges: %d detector(s)\n", len(payload.Values.Badges.Detectors))
 	return builder.String()
 }
 
@@ -205,6 +212,7 @@ func runShow(env *cli.Env, args []string) (*cli.Result, error) {
 				Daemon: daemonValues{Socket: values.DaemonSocket},
 			},
 			Asciiui: asciiuiValues{Types: values.AsciiUITypes},
+			Badges:  badgeValues{Detectors: values.BadgeDetectors},
 		},
 	}}, nil
 }

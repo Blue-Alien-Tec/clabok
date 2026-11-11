@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/badge"
 	"github.com/Blue-Alien-Tec/clabok/internal/cli"
 	"github.com/Blue-Alien-Tec/clabok/internal/jsonstrict"
 )
@@ -48,6 +49,11 @@ type asciiuiSection struct {
 	Types map[string]string `json:"types,omitempty"`
 }
 
+// badgesSection declares the detector table. A detector is one JSON object keyed by its id.
+type badgesSection struct {
+	Detectors map[string]badge.Detector `json:"detectors,omitempty"`
+}
+
 // file is the on-disk document. Every leaf is a pointer so that "absent" and "explicitly zero"
 // stay distinguishable; `unset` restores the default instead of writing a zero.
 type file struct {
@@ -59,6 +65,7 @@ type file struct {
 	Grammar     *grammarSection     `json:"grammar,omitempty"`
 	Concurrency *concurrencySection `json:"concurrency,omitempty"`
 	Asciiui     *asciiuiSection     `json:"asciiui,omitempty"`
+	Badges      *badgesSection      `json:"badges,omitempty"`
 }
 
 type builtinDefaults struct {
@@ -200,6 +207,9 @@ func (f *file) prune() {
 	}
 	if f.Asciiui != nil && len(f.Asciiui.Types) == 0 {
 		f.Asciiui = nil
+	}
+	if f.Badges != nil && len(f.Badges.Detectors) == 0 {
+		f.Badges = nil
 	}
 }
 
