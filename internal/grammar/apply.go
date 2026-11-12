@@ -184,7 +184,7 @@ func runApply(env *cli.Env, bookRaw, blockRaw, indices string, allSafe bool, exp
 	}
 	if issues := prose.CheckProse(next); len(issues) > 0 {
 		return nil, cli.Reject("body.forbidden-heading",
-			"a body must not contain #, ## or ### headings; use #### or deeper for text").
+			"a body must not contain # or ## headings; use ### or deeper for text").
 			WithHint("the replacement would create a structural heading")
 	}
 	// Re-check the result so remaining findings are reported; apply itself is the repair path and

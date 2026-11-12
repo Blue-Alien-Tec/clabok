@@ -282,6 +282,7 @@ type CheckResult struct {
 // checks and reports the detected language; the gate refuses it on write paths.
 func (client *Client) Check(ctx context.Context, text, language string) (CheckResult, error) {
 	prepared := prepareText(text)
+	termSpans := client.Terms.Spans(text)
 	findings := make([]Finding, 0)
 	suppressed := make([]Suppression, 0)
 	masked := make([]MaskedFinding, 0)
@@ -324,6 +325,10 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 			finding := findingAt(text, match, originalStart, originalEnd)
 			if reason := artefactReason(finding, text); reason != "" {
 				addMasked(finding.Rule, reason)
+				continue
+			}
+			if entries := suppressBySpan(termSpans, originalStart, originalEnd); len(entries) > 0 {
+				suppressed = append(suppressed, entries...)
 				continue
 			}
 			if entries := client.Terms.Suppress(finding.Offending, finding.Replacements); len(entries) > 0 {

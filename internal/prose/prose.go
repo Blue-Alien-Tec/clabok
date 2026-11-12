@@ -10,8 +10,9 @@ type Issue struct {
 	Text string `json:"text"`
 }
 
-// CheckProse reports #, ## and ### heading lines outside fenced code blocks. #### and deeper are
-// text, as are lines indented by four spaces.
+// CheckProse reports # and ## heading lines outside fenced code blocks. ### and deeper are text, as
+// are lines indented by four spaces: the structure owns the title and the chapter levels, and a body
+// reproduces the author's own hierarchy from level three down.
 func CheckProse(text string) []Issue {
 	issues := make([]Issue, 0)
 	fence := ""
@@ -31,7 +32,7 @@ func CheckProse(text string) []Issue {
 			fence = "~~~"
 			continue
 		}
-		if level := headingLevel(line); level >= 1 && level <= 3 {
+		if level := headingLevel(line); level >= 1 && level <= 2 {
 			issues = append(issues, Issue{Line: index + 1, Text: line})
 		}
 	}

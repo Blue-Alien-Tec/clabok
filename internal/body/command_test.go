@@ -110,6 +110,26 @@ func TestBodySetGetList(t *testing.T) {
 	}
 }
 
+func TestBodyAcceptsHeadingThree(t *testing.T) {
+	directory := prepareProject(t)
+	body := "### Der Unabhängige Bund\n\n#### Entstehung\n\nText\n"
+	if code, _, stderr := run(t, directory, "body", "set", "--book", "fixture", "11",
+		"--body", body); code != cli.ExitOK {
+		t.Fatalf("set exit %d: %s", code, stderr)
+	}
+	code, stdout, stderr := run(t, directory, "body", "get", "--book", "fixture", "11")
+	if code != cli.ExitOK {
+		t.Fatalf("get exit %d: %s", code, stderr)
+	}
+	if text := decode(t, stdout)["data"].(map[string]any)["text"]; text != body {
+		t.Fatalf("the body changed on the way through: %q", text)
+	}
+	if code, _, stderr := run(t, directory, "body", "append", "--book", "fixture", "11",
+		"--body", "### Nachtrag\n"); code != cli.ExitOK {
+		t.Fatalf("append exit %d: %s", code, stderr)
+	}
+}
+
 func TestBodyFileEncoding(t *testing.T) {
 	directory := prepareProject(t)
 	bomFile := filepath.Join(directory, "bom.md")

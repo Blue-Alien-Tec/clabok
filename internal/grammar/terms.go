@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -112,25 +113,125 @@ func (set TermSet) Suppress(offending string, replacements []string) []Suppressi
 	return entries
 }
 
-// termMatches searches for a term with word boundaries unless the substring form is requested.
+// termMatches reports whether a term occurs in the text, with the same boundary and case rules the
+// span scan uses.
 func termMatches(text string, form TermForm) bool {
 	if form.Term == "" {
 		return false
 	}
-	lowerText := strings.ToLower(text)
-	lowerTerm := strings.ToLower(form.Term)
-	for start := 0; start <= len(lowerText)-len(lowerTerm); {
-		at := strings.Index(lowerText[start:], lowerTerm)
-		if at < 0 {
-			return false
-		}
-		at += start
-		if form.Substring || bounded(lowerText, at, at+len(lowerTerm)) {
-			return true
-		}
-		start = at + 1
+	matched := false
+	scanTerm(text, loweredRunes(form.Term), form.Substring, func(int, int) { matched = true })
+	return matched
+}
+
+// TermSpan is one occurrence of a term in a body. The offsets are bytes in the body text, the same
+// coordinate space the mask and the findings use.
+type TermSpan struct {
+	Start  int
+	End    int
+	Term   string
+	Layer  string
+	Match  string
+	AlsoIn []string
+}
+
+// Spans returns every occurrence of every term in the body, in layer order and body order. Two layers
+// that carry the same term at the same position keep the first layer and list the others in AlsoIn,
+// the way Suppress attributes a token.
+func (set TermSet) Spans(text string) []TermSpan {
+	if len(set.Layers) == 0 || text == "" {
+		return nil
 	}
-	return false
+	spans := make([]TermSpan, 0)
+	seen := make(map[string]int, 8)
+	for _, layer := range set.Layers {
+		for _, raw := range layer.Terms {
+			form := ParseTermForm(raw)
+			if form.Term == "" {
+				continue
+			}
+			lowered := loweredRunes(form.Term)
+			if len(lowered) == 0 {
+				continue
+			}
+			scanTerm(text, lowered, form.Substring, func(start, end int) {
+				key := strconv.Itoa(start) + "\x00" + strings.ToLower(form.Term)
+				if index, exists := seen[key]; exists {
+					spans[index].AlsoIn = append(spans[index].AlsoIn, layer.Scope)
+					return
+				}
+				seen[key] = len(spans)
+				spans = append(spans, TermSpan{
+					Start: start, End: end, Term: form.Term, Layer: layer.Scope,
+					Match: formName(form),
+				})
+			})
+		}
+	}
+	return spans
+}
+
+// suppressBySpan reports the terms whose occurrence touches a body range. A term is the author's
+// declaration that the string is correct, so it silences a finding from any rule, not only a spelling
+// finding on the whole token.
+func suppressBySpan(spans []TermSpan, start, end int) []Suppression {
+	if len(spans) == 0 || end <= start {
+		return nil
+	}
+	entries := make([]Suppression, 0, 1)
+	for _, span := range spans {
+		if start < span.End && span.Start < end {
+			entries = append(entries, Suppression{
+				Term: span.Term, Layer: span.Layer, AlsoIn: span.AlsoIn, Match: span.Match,
+				Field: "span", Offset: start, Length: end - start,
+			})
+		}
+	}
+	return entries
+}
+
+// scanTerm visits every occurrence of a lowered term in the text. The comparison is rune-wise so a
+// case mapping can never move an offset, and it reports byte offsets in the original text.
+func scanTerm(text string, term []rune, substring bool, visit func(start, end int)) {
+	for offset := 0; offset < len(text); {
+		if end, ok := matchTermAt(text, offset, term, substring); ok {
+			visit(offset, end)
+		}
+		_, size := utf8.DecodeRuneInString(text[offset:])
+		if size <= 0 {
+			return
+		}
+		offset += size
+	}
+}
+
+// matchTermAt compares a lowered term against the text at a rune boundary and returns its end offset.
+func matchTermAt(text string, offset int, term []rune, substring bool) (int, bool) {
+	position := offset
+	for _, want := range term {
+		if position >= len(text) {
+			return 0, false
+		}
+		runeValue, size := utf8.DecodeRuneInString(text[position:])
+		if unicode.ToLower(runeValue) != want {
+			return 0, false
+		}
+		position += size
+	}
+	if !substring && !bounded(text, offset, position) {
+		return 0, false
+	}
+	return position, true
+}
+
+// loweredRunes is the case-insensitive form of a term. Lowering is rune-wise, so a case mapping never
+// changes how many runes a term has.
+func loweredRunes(term string) []rune {
+	runes := []rune(term)
+	for index := range runes {
+		runes[index] = unicode.ToLower(runes[index])
+	}
+	return runes
 }
 
 // bounded reports whether the runes around a match are not letters or digits. Underscore, hyphen

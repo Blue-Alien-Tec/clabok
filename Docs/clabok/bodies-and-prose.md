@@ -51,7 +51,7 @@ pecia body get --book guide <block> --lines 1-20
 
 `body replace` performs a counted batch replacement. It takes `--find` and `--replace`, or a `--pairs` file, plus `--expect N`. It applies everything in one atomic write and refuses when the count differs.
 
-The prose rule: a body must not contain `#`, `##` or `###` headings. Structure owns headings; `####` and deeper are text. A leading metadata block is not allowed in a body.
+The prose rule: a body must not contain `#` or `##` headings. Structure owns the title and the chapter levels; `###` and deeper are text, so a body keeps the heading levels of the document it was written from. A heading inside a body renders exactly as written, and the output still tells structure from prose: a structural heading carries its own `<a id="…"></a>` line directly above it, a prose heading does not. A leading metadata block is not allowed in a body.
 
 Text is normalized on write: line endings become newlines, trailing spaces are trimmed, and the file ends with one newline. A byte-order mark is rejected.
 

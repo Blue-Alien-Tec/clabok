@@ -110,7 +110,7 @@ func TestCheckProse(t *testing.T) {
 	}{
 		{"# Title", 1},
 		{"## Sub", 1},
-		{"### Sub", 1},
+		{"### Sub", 0},
 		{"#### Deep", 0},
 		{"##### Deeper", 0},
 		{"text\n# Later", 1},

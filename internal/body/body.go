@@ -481,7 +481,7 @@ func CheckProse(text string) []Issue {
 }
 func headingError(issues []Issue) error {
 	var builder strings.Builder
-	builder.WriteString("a body must not contain #, ## or ### headings; use #### or deeper for text")
+	builder.WriteString("a body must not contain # or ## headings; use ### or deeper for text")
 	for index, issue := range issues {
 		if index >= 3 {
 			builder.WriteString("; ...")
