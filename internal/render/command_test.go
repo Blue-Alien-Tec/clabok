@@ -249,7 +249,7 @@ func TestCheckReportsTermLayers(t *testing.T) {
 	if !strings.Contains(stdout, "languages en-US") {
 		t.Fatalf("missing language summary %s", stdout)
 	}
-	if !strings.Contains(stdout, "2 layer(s), 1 with a file") {
+	if !strings.Contains(stdout, "3 layer(s), 1 with a file") {
 		t.Fatalf("missing layer summary %s", stdout)
 	}
 }

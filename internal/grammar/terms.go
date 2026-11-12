@@ -13,12 +13,17 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Blue-Alien-Tec/clabok/internal/buildinfo"
 	"github.com/Blue-Alien-Tec/clabok/internal/model"
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
 // ScopeGlobal names the store-wide term layer.
 const ScopeGlobal = "global"
+
+// ScopeBuiltin names the read-only layer the tool provides. It never has a file: the words are the
+// product and the executable name, so a body that cites the tool needs no store-level entry.
+const ScopeBuiltin = "builtin"
 
 // TermSubstringMarker prefixes a term that suppresses substrings, for example ~ark for Arkansas.
 const TermSubstringMarker = "~"
@@ -36,10 +41,32 @@ type TermLayer struct {
 	Terms []string
 }
 
-// TermSet is the effective union for one check: the global layer and the layer of the check
-// language. There is no hierarchy and no negative layer.
+// TermSet is the effective union for one check: the read-only built-in words, the global layer and the
+// layer of the check language. There is no hierarchy and no negative layer.
 type TermSet struct {
 	Layers []TermLayer
+}
+
+// BuiltinTerms returns the words the tool provides as terms. They are the product and the executable
+// name, so a body that names the tool is writable under an advisory or blocking gate.
+func BuiltinTerms() []string {
+	return []string{buildinfo.Product, buildinfo.CLI}
+}
+
+// BuiltinLayer returns the read-only layer. It has no path because it is never written.
+func BuiltinLayer() TermLayer {
+	return TermLayer{Scope: ScopeBuiltin, Terms: BuiltinTerms()}
+}
+
+// IsBuiltinTerm reports whether a term is provided by the tool rather than by a store file.
+func IsBuiltinTerm(term string) bool {
+	form := ParseTermForm(term)
+	for _, builtin := range BuiltinTerms() {
+		if strings.EqualFold(form.Term, builtin) {
+			return true
+		}
+	}
+	return false
 }
 
 // Suppress reports whether a term of the set matches the offending text or one of its replacements,
@@ -124,10 +151,11 @@ func bounded(text string, start, end int) bool {
 	return true
 }
 
-// LoadTermSet loads the global layer and, when a language is given, its layer. A missing file is an
-// empty layer.
+// LoadTermSet loads the read-only built-in layer, the global layer and, when a language is given, its
+// layer. A missing file is an empty layer.
 func LoadTermSet(globalPath, termsDir, language string) TermSet {
 	set := TermSet{Layers: []TermLayer{
+		BuiltinLayer(),
 		{Scope: ScopeGlobal, Path: globalPath, Terms: ReadTermLayer(globalPath)},
 	}}
 	language = strings.TrimSpace(language)
@@ -173,9 +201,13 @@ func ParseTermForm(raw string) TermForm {
 	return TermForm{Term: raw}
 }
 
-// TermLayers lists every existing layer: the global file and every language file in termsDir.
+// TermLayers lists every existing layer: the built-in words, the global file and every language file
+// in termsDir.
 func TermLayers(globalPath, termsDir string) []TermLayer {
-	layers := []TermLayer{{Scope: ScopeGlobal, Path: globalPath, Terms: ReadTermLayer(globalPath)}}
+	layers := []TermLayer{
+		BuiltinLayer(),
+		{Scope: ScopeGlobal, Path: globalPath, Terms: ReadTermLayer(globalPath)},
+	}
 	entries, err := os.ReadDir(termsDir)
 	if err != nil {
 		return layers

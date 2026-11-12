@@ -157,8 +157,12 @@ func TestCommitWritesTheLanguageLayer(t *testing.T) {
 		t.Fatalf("the global layer must stay untouched: %v", err)
 	}
 	layer := LoadTermSet(terms, termsDir, "de-DE")
-	if len(layer.Layers) != 2 || len(layer.Layers[1].Terms) != 1 {
+	if len(layer.Layers) != 3 || layer.Layers[0].Scope != ScopeBuiltin {
 		t.Fatalf("loaded layers %+v", layer.Layers)
+	}
+	if language := layer.Layers[len(layer.Layers)-1]; language.Scope != "de-de" ||
+		len(language.Terms) != 1 {
+		t.Fatalf("language layer %+v", language)
 	}
 }
 

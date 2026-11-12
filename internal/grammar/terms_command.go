@@ -14,12 +14,13 @@ import (
 	"github.com/Blue-Alien-Tec/clabok/internal/store"
 )
 
-// TermLayerInfo describes one layer file for list output.
+// TermLayerInfo describes one layer for list output.
 type TermLayerInfo struct {
-	Scope  string `json:"scope"`
-	Path   string `json:"path"`
-	Exists bool   `json:"exists"`
-	Count  int    `json:"count"`
+	Scope    string `json:"scope"`
+	Path     string `json:"path"`
+	Exists   bool   `json:"exists"`
+	ReadOnly bool   `json:"readOnly,omitempty"`
+	Count    int    `json:"count"`
 }
 
 // TermEntry is one term in the effective set.
@@ -63,6 +64,9 @@ func (payload termsPayload) Text() string {
 			state := fmt.Sprintf("%d term(s)", layer.Count)
 			if !layer.Exists {
 				state = "missing"
+			}
+			if layer.ReadOnly {
+				state += ", read-only"
 			}
 			fmt.Fprintf(&builder, "%s (%s, %s)\n", layer.Scope, layer.Path, state)
 		}
@@ -157,6 +161,11 @@ func termsCommand() *cli.Command {
 				}
 				if strings.TrimSpace(reason) == "" {
 					return nil, cli.Usage("usage.missing-argument", "--reason is required")
+				}
+				if IsBuiltinTerm(term) {
+					return nil, cli.Reject("terms.builtin",
+						"%q is provided by the tool and needs no term entry", strings.TrimSpace(term)).
+						WithHint("the read-only layer carries the product and the executable name")
 				}
 				resolved, warnings, scopeErr := resolveTermScope(values, life, scope, book)
 				if scopeErr != nil {
@@ -354,8 +363,10 @@ func listTerms(env *cli.Env, termsPath, termsDir, language string) (*cli.Result,
 
 func layerInfo(layer TermLayer) TermLayerInfo {
 	_, err := os.Stat(layer.Path)
+	builtin := layer.Scope == ScopeBuiltin
 	return TermLayerInfo{
-		Scope: layer.Scope, Path: layer.Path, Exists: err == nil, Count: len(layer.Terms),
+		Scope: layer.Scope, Path: layer.Path, Exists: builtin || err == nil,
+		ReadOnly: builtin, Count: len(layer.Terms),
 	}
 }
 
@@ -378,6 +389,7 @@ type termsCheckPayload struct {
 	DryRun   bool               `json:"dryRun"`
 	Term     string             `json:"term"`
 	Scope    string             `json:"scope"`
+	Builtin  bool               `json:"builtin,omitempty"`
 	TooBroad bool               `json:"tooBroad"`
 	Checked  int                `json:"checked"`
 	Results  []TermCheckOutcome `json:"results,omitempty"`
@@ -389,6 +401,9 @@ func (payload termsCheckPayload) DryRunResult() bool { return payload.DryRun }
 
 func (payload termsCheckPayload) Text() string {
 	var builder strings.Builder
+	if payload.Builtin {
+		fmt.Fprintf(&builder, "%q is provided by the tool; no term entry is needed\n", payload.Term)
+	}
 	for _, result := range payload.Results {
 		state := "suppressible"
 		if result.Accepted {
@@ -447,7 +462,7 @@ func checkTerms(env *cli.Env, values *config.Values, life *lifecycle.Lifecycle,
 	}
 	payload := termsCheckPayload{
 		DryRun: env.Globals.DryRun, Term: strings.TrimSpace(term), Scope: normalized,
-		Warnings: warnings,
+		Builtin: IsBuiltinTerm(term), Warnings: warnings,
 	}
 	ctx := context.Background()
 	for _, language := range languages {

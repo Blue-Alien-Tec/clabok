@@ -143,14 +143,16 @@ func (payload checkPayload) Text() string {
 	}
 	fmt.Fprintf(&builder, "%d finding(s), %d blocking\n", len(payload.Findings), payload.Blocking)
 	if payload.Terms != nil {
-		existing := 0
+		files := 0
 		for _, layer := range payload.Terms.Layers {
-			if layer.Exists {
-				existing++
+			// The built-in layer is always available and never has a file, so it counts as a layer
+			// and not as a file.
+			if layer.Exists && !layer.ReadOnly {
+				files++
 			}
 		}
 		fmt.Fprintf(&builder, "terms: languages %s; %d layer(s), %d with a file\n",
-			strings.Join(payload.Terms.Languages, ", "), len(payload.Terms.Layers), existing)
+			strings.Join(payload.Terms.Languages, ", "), len(payload.Terms.Layers), files)
 	}
 	return builder.String()
 }

@@ -550,7 +550,14 @@ func TestTermsScopedByBook(t *testing.T) {
 
 	listed := dataOf(t, runOK(t, directory, "terms", "list", "--language", "de-DE"))
 	entries, _ := listed["entries"].([]any)
-	if len(entries) != 1 {
+	stored := 0
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if entry["layer"] != "builtin" {
+			stored++
+		}
+	}
+	if stored != 1 {
 		t.Fatalf("list entries %v", listed["entries"])
 	}
 
@@ -610,11 +617,11 @@ func TestTermsEndToEnd(t *testing.T) {
 		_ = r.ParseForm()
 		text := r.Form.Get("text")
 		matches := make([]map[string]any, 0)
-		if at := strings.Index(text, "Clabok"); at >= 0 {
+		if at := strings.Index(text, "Simia"); at >= 0 {
 			matches = append(matches, map[string]any{
-				"message": "possible spelling", "offset": at, "length": 6,
+				"message": "possible spelling", "offset": at, "length": 5,
 				"rule":         map[string]any{"id": "TEST_TERM"},
-				"replacements": []map[string]any{{"value": "CLABOK"}},
+				"replacements": []map[string]any{{"value": "Simia"}},
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -624,7 +631,7 @@ func TestTermsEndToEnd(t *testing.T) {
 
 	directory := t.TempDir()
 	runOK(t, directory, "config", "set", "grammar.endpoint", server.URL)
-	request := dataOf(t, runOK(t, directory, "terms", "set", "--term", "Clabok",
+	request := dataOf(t, runOK(t, directory, "terms", "set", "--term", "Simia",
 		"--reason", "the product name", "--scope", "global"))
 	id, _ := request["id"].(string)
 	if id == "" {
@@ -645,19 +652,19 @@ func TestTermsEndToEnd(t *testing.T) {
 		t.Fatalf("commit without confirm: %s", stderr)
 	}
 	runOK(t, directory, "terms", "commit", "--id", id, "--confirm")
-	if data, err := os.ReadFile(termsPath); err != nil || string(data) != "Clabok\n" {
+	if data, err := os.ReadFile(termsPath); err != nil || string(data) != "Simia\n" {
 		t.Fatalf("terms %q %v", data, err)
 	}
 
-	checked := dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "Clabok is the tool."))
+	checked := dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "Simia is the tool."))
 	if count, _ := checked["count"].(float64); count != 0 {
 		t.Fatalf("the term did not suppress the finding: %v", checked)
 	}
 
-	removed := dataOf(t, runOK(t, directory, "terms", "delete", "--term", "Clabok",
+	removed := dataOf(t, runOK(t, directory, "terms", "delete", "--term", "Simia",
 		"--reason", "no longer needed", "--scope", "global"))
 	runOK(t, directory, "terms", "commit", "--id", removed["id"].(string), "--confirm")
-	checked = dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "Clabok is the tool."))
+	checked = dataOf(t, runOK(t, directory, "grammar", "check", "--raw", "Simia is the tool."))
 	if count, _ := checked["count"].(float64); count != 1 {
 		t.Fatalf("the removed term still suppresses: %v", checked)
 	}

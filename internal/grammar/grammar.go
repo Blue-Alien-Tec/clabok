@@ -306,10 +306,22 @@ func (client *Client) Check(ctx context.Context, text, language string) (CheckRe
 		for _, match := range matches {
 			start := byteOffset(prepared.text, span.start, span.end, match.Offset)
 			end := byteOffset(prepared.text, span.start, span.end, match.Offset+match.Length)
-			finding, ok := client.finding(text, prepared, match, start, end)
-			if !ok {
+			originalStart := prepared.original(start)
+			originalEnd := prepared.original(end)
+			if originalStart < 0 {
 				continue
 			}
+			if originalEnd <= originalStart {
+				// A range that mapped to nothing lies inside a masked span: every substituted byte
+				// maps back to the same body offset, so the finding collapses to zero width.
+				addMasked(match.RuleID, "the finding lies inside masked code or markup")
+				continue
+			}
+			if reason, dropped := prepared.maskedDrop(originalStart, originalEnd); dropped {
+				addMasked(match.RuleID, reason)
+				continue
+			}
+			finding := findingAt(text, match, originalStart, originalEnd)
 			if reason := artefactReason(finding, text); reason != "" {
 				addMasked(finding.Rule, reason)
 				continue
@@ -353,22 +365,16 @@ func Resolve(settings model.Settings, fallback string) string {
 	return DefaultLanguage
 }
 
-// finding maps one match from prepared space back to the body. The server reports UTF-16 code units,
-// so the caller converts them to prepared byte offsets first.
-func (client *Client) finding(text string, prepared preparedText, match wireMatch,
-	start, end int) (Finding, bool) {
-	if start < 0 || end <= start || prepared.maskedOverlap(start, end) {
-		return Finding{}, false
-	}
-	originalStart := prepared.original(start)
-	originalEnd := prepared.original(end)
-	offending := segment(text, originalStart, originalEnd-originalStart)
-	line, column := position(text, originalStart)
+// findingAt builds one finding from a body range the caller already mapped and masked. The server
+// reports UTF-16 code units, so the caller converts them to prepared bytes and then to body bytes.
+func findingAt(text string, match wireMatch, start, end int) Finding {
+	offending := segment(text, start, end-start)
+	line, column := position(text, start)
 	return Finding{
-		Line: line, Column: column, Offset: originalStart, Length: originalEnd - originalStart,
+		Line: line, Column: column, Offset: start, Length: end - start,
 		Rule: match.RuleID, Message: match.Message, Offending: offending,
 		Replacements: match.Values,
-	}, true
+	}
 }
 
 // fetch runs one request under the watchdog. The request stays alive across alive intervals; only a
@@ -944,6 +950,18 @@ func (prepared preparedText) maskedOverlap(start, end int) bool {
 		}
 	}
 	return false
+}
+
+// maskedDrop reports whether a body range touches a masked span, and names why. A dropped finding is
+// always counted through the Masked channel, never discarded silently.
+func (prepared preparedText) maskedDrop(start, end int) (string, bool) {
+	if start < 0 || end <= start {
+		return "", false
+	}
+	if !prepared.maskedOverlap(start, end) {
+		return "", false
+	}
+	return "the finding touches masked code or markup", true
 }
 
 // byteOffset converts a UTF-16 code-unit offset, which the server reports, into a byte offset of text
