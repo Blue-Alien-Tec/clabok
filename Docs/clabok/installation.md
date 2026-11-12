@@ -14,7 +14,7 @@ CLABOK is the project; `pecia` is the command-line tool. It builds as a single G
 Install the current release with `go install`. The command writes `pecia` to `$(go env GOPATH)/bin` (`%USERPROFILE%\go\bin` on Windows); add that directory to `PATH`. `@latest` tracks the newest release:
 
 ```text
-go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v1.1.3
+go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@v1.1.4
 go install github.com/Blue-Alien-Tec/clabok/cmd/pecia@latest
 ```
 
