@@ -33,6 +33,7 @@ type payload struct {
 	Kind     string            `json:"kind,omitempty"`
 	Parent   string            `json:"parent,omitempty"`
 	Index    *int              `json:"index,omitempty"`
+	Part     string            `json:"part,omitempty"`
 	Order    []string          `json:"order,omitempty"`
 	Changed  bool              `json:"changed"`
 	Warnings []grammar.Warning `json:"warnings,omitempty"`
@@ -58,6 +59,7 @@ func payloadOf(receipt Receipt, dryRun bool) payload {
 		DryRun:  dryRun,
 		Book:    string(receipt.Book),
 		Kind:    receipt.Kind,
+		Part:    receipt.Part,
 		Changed: receipt.Changed,
 	}
 	if !receipt.Target.IsZero() {
@@ -90,19 +92,20 @@ func Register(registry *cli.Registry) {
 }
 
 func addCommand() *cli.Command {
-	var book, title, blockType, parent, before, after, refBook, refNode, refBlock string
+	var book, title, blockType, parent, before, after, refBook, refNode, refBlock, part string
 	var index int
 	var link bool
 	return &cli.Command{
 		Name:     "add",
 		Summary:  "add a chapter, subchapter, block or link entry",
-		Usage:    "pecia add --book <id> --title <title> [--parent <node>] [--index N | --before <id> | --after <id>] [--link --ref-book <id> [--ref-node <id> | --ref-block <id>]]",
+		Usage:    "pecia add --book <id> --title <title> [--part <slot|text>] [--parent <node>] [--index N | --before <id> | --after <id>] [--link --ref-book <id> [--ref-node <id> | --ref-block <id>]]",
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("add")
 			set.StringVar(&book, "book", "", "book id")
 			set.StringVar(&title, "title", "", "title of the new unit")
 			set.StringVar(&blockType, "type", "", "optional block type")
+			set.StringVar(&part, "part", "", "part group: a slot 1 to 10 or the group text")
 			set.StringVar(&parent, "parent", "", "destination node")
 			set.StringVar(&before, "before", "", "place before this sibling")
 			set.StringVar(&after, "after", "", "place after this sibling")
@@ -137,13 +140,14 @@ func addCommand() *cli.Command {
 				if refErr != nil {
 					return nil, refErr
 				}
-				receipt, addErr := service.AddLink(bookID, title, ref, placement, env.Globals.DryRun)
+				receipt, addErr := service.AddLink(bookID, title, ref, part, placement, env.Globals.DryRun)
 				if addErr != nil {
 					return nil, MapError(addErr)
 				}
 				return &cli.Result{Data: payloadOf(receipt, env.Globals.DryRun)}, nil
 			}
-			receipt, addErr := service.AddTyped(bookID, title, blockType, placement, env.Globals.DryRun)
+			receipt, addErr := service.AddTyped(bookID, title, blockType, part, placement,
+				env.Globals.DryRun)
 			if addErr != nil {
 				return nil, MapError(addErr)
 			}
@@ -186,22 +190,29 @@ func linkRef(book, node, block string) (*model.Ref, *cli.Error) {
 }
 
 func renameCommand() *cli.Command {
-	var book, title string
+	var book, title, part string
+	var clearPart bool
 	return &cli.Command{
 		Name:     "rename",
 		Summary:  "rename a structural node",
-		Usage:    "pecia rename --book <id> <target> --title <title>",
+		Usage:    "pecia rename --book <id> <target> --title <title> [--part <slot|text> | --clear-part]",
 		Mutating: true,
 		Flags: func(env *cli.Env) *flag.FlagSet {
 			set := env.NewFlagSet("rename")
 			set.StringVar(&book, "book", "", "book id")
 			set.StringVar(&title, "title", "", "new title")
+			set.StringVar(&part, "part", "", "part group: a slot 1 to 10 or the group text")
+			set.BoolVar(&clearPart, "clear-part", false, "clear the part group")
 			return set
 		},
 		Run: func(env *cli.Env, args []string) (*cli.Result, error) {
 			if len(args) != 1 {
 				return nil, cli.Usage("usage.invalid-arguments", "rename takes exactly one unit id").
 					WithHint("pecia rename --book <id> <target> --title <title>")
+			}
+			if part != "" && clearPart {
+				return nil, cli.Usage("usage.invalid-arguments",
+					"use --part or --clear-part, not both")
 			}
 			bookID, bookErr := requireBook(book)
 			if bookErr != nil {
@@ -215,7 +226,16 @@ func renameCommand() *cli.Command {
 			if serviceErr != nil {
 				return nil, serviceErr
 			}
-			receipt, renameErr := service.Rename(bookID, target, title, env.Globals.DryRun)
+			var partValue *string
+			if part != "" {
+				partValue = &part
+			}
+			if clearPart {
+				empty := ""
+				partValue = &empty
+			}
+			receipt, renameErr := service.Rename(bookID, target, title, partValue,
+				env.Globals.DryRun)
 			if renameErr != nil {
 				return nil, MapError(renameErr)
 			}

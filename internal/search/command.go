@@ -329,12 +329,32 @@ func parseQueries(input inputOptions) ([]Query, *cli.Error) {
 	return queries, nil
 }
 
+// partText accepts a part slot or a group text. A slot expands to its hardcoded default, so the
+// filter never has to know the difference.
+func partText(raw string) (string, *cli.Error) {
+	text := strings.TrimSpace(raw)
+	slot, isSlot := model.ParsePartSlot(text)
+	if !isSlot {
+		return text, nil
+	}
+	label, ok := model.PartLabel(slot)
+	if !ok {
+		return "", cli.Usage("usage.invalid-value",
+			"part %q is outside the range 1 to %d", text, model.PartLimit)
+	}
+	return label, nil
+}
+
 func parseFilter(input inputOptions) (Filter, *cli.Error) {
+	part, partErr := partText(input.Part)
+	if partErr != nil {
+		return Filter{}, partErr
+	}
 	filter := Filter{
 		Kinds:       splitList(input.Kind),
 		Types:       splitList(input.Type),
 		Statuses:    splitList(input.Status),
-		Part:        strings.TrimSpace(input.Part),
+		Part:        part,
 		NodePath:    strings.TrimSpace(input.NodePath),
 		BookPath:    strings.TrimSpace(input.BookPath),
 		MissingBody: input.MissingBody,

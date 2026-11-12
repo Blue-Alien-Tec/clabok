@@ -181,14 +181,14 @@ func TestAddUnderBlockFails(t *testing.T) {
 
 func TestRename(t *testing.T) {
 	s := newScene(t)
-	if _, err := s.service.Rename("fixture", 10, "1. Eins", false); err != nil {
+	if _, err := s.service.Rename("fixture", 10, "1. Eins", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	node, _ := s.manifest(t).FindNode(10)
 	if node.Title != "Eins" {
 		t.Fatalf("title %q", node.Title)
 	}
-	_, err := s.service.Rename("fixture", 11, "Body", false)
+	_, err := s.service.Rename("fixture", 11, "Body", nil, false)
 	if err == nil {
 		t.Fatal("expected structure.block-no-title")
 	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.block-no-title" {
@@ -476,7 +476,7 @@ func TestAddLockedBlock(t *testing.T) {
 
 func TestAddTypeOnNodeRejected(t *testing.T) {
 	s := newScene(t)
-	if _, err := s.service.AddTyped("fixture", "Sub", "UILayout", Append(10), false); err == nil {
+	if _, err := s.service.AddTyped("fixture", "Sub", "UILayout", "", Append(10), false); err == nil {
 		t.Fatal("expected structure.type-on-node")
 	} else if structureErr, ok := err.(*Error); !ok || structureErr.Code != "structure.type-on-node" {
 		t.Fatalf("unexpected error %v", err)
@@ -485,7 +485,7 @@ func TestAddTypeOnNodeRejected(t *testing.T) {
 
 func TestUnknownTarget(t *testing.T) {
 	s := newScene(t)
-	_, err := s.service.Rename("fixture", 999, "X", false)
+	_, err := s.service.Rename("fixture", 999, "X", nil, false)
 	if err == nil {
 		t.Fatal("expected structure.unknown-target")
 	}

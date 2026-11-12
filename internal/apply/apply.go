@@ -42,20 +42,23 @@ func fail(code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
 }
 
+// rawStep is one step as it appears in a plan file. Part is a pointer so an absent field keeps the
+// node's group and an explicit empty string clears it.
 type rawStep struct {
-	Op        string `json:"op"`
-	Title     string `json:"title,omitempty"`
-	Type      string `json:"type,omitempty"`
-	Target    string `json:"target,omitempty"`
-	Parent    string `json:"parent,omitempty"`
-	ChildOf   string `json:"childOf,omitempty"`
-	Index     *int   `json:"index,omitempty"`
-	Before    string `json:"before,omitempty"`
-	After     string `json:"after,omitempty"`
-	Recursive bool   `json:"recursive,omitempty"`
-	Key       string `json:"key,omitempty"`
-	Value     string `json:"value,omitempty"`
-	Text      string `json:"text,omitempty"`
+	Op        string  `json:"op"`
+	Title     string  `json:"title,omitempty"`
+	Type      string  `json:"type,omitempty"`
+	Target    string  `json:"target,omitempty"`
+	Parent    string  `json:"parent,omitempty"`
+	ChildOf   string  `json:"childOf,omitempty"`
+	Index     *int    `json:"index,omitempty"`
+	Before    string  `json:"before,omitempty"`
+	After     string  `json:"after,omitempty"`
+	Recursive bool    `json:"recursive,omitempty"`
+	Key       string  `json:"key,omitempty"`
+	Value     string  `json:"value,omitempty"`
+	Text      string  `json:"text,omitempty"`
+	Part      *string `json:"part,omitempty"`
 }
 
 type planFile struct {
@@ -95,7 +98,7 @@ func parseStep(index int, raw rawStep) (structure.Step, error) {
 		if err != nil {
 			return structure.Step{}, located(where, err)
 		}
-		return structure.Step{Op: "add", Title: raw.Title, Type: raw.Type, Placement: placement, Value: raw.Text}, nil
+		return structure.Step{Op: "add", Title: raw.Title, Type: raw.Type, Placement: placement, Value: raw.Text, Part: raw.Part}, nil
 	case "rename":
 		target, err := idOf(raw.Target, where+".target")
 		if err != nil {
@@ -104,7 +107,7 @@ func parseStep(index int, raw rawStep) (structure.Step, error) {
 		if strings.TrimSpace(raw.Title) == "" {
 			return structure.Step{}, fail("apply.invalid-step", "%s.title must not be empty", where)
 		}
-		return structure.Step{Op: "rename", Target: target, Title: raw.Title}, nil
+		return structure.Step{Op: "rename", Target: target, Title: raw.Title, Part: raw.Part}, nil
 	case "move":
 		target, err := idOf(raw.Target, where+".target")
 		if err != nil {
@@ -138,6 +141,12 @@ func parseStep(index int, raw rawStep) (structure.Step, error) {
 			return structure.Step{}, err
 		}
 		return structure.Step{Op: "body", Target: target, Value: raw.Text}, nil
+	case "part":
+		target, err := idOf(raw.Target, where+".target")
+		if err != nil {
+			return structure.Step{}, err
+		}
+		return structure.Step{Op: "part", Target: target, Value: raw.Value}, nil
 	default:
 		return structure.Step{}, fail("apply.invalid-step", "%s.op: unknown operation %q", where, raw.Op)
 	}

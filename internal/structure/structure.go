@@ -59,6 +59,7 @@ type Receipt struct {
 	Kind    string
 	Parent  model.ID
 	Index   int
+	Part    string
 	Order   []model.ID
 	Changed bool
 }
@@ -82,6 +83,9 @@ type Step struct {
 	Anchor           string
 	Description      *string
 	ClearDescription bool
+	// Part is the group text of a chapter or a link entry. A non-nil pointer sets it, and *"" clears
+	// it; nil leaves the node untouched, which is what rename needs.
+	Part *string
 }
 
 // mutation is the pure result of one step: the receipt plus the file effects the commit applies.
@@ -123,13 +127,18 @@ func (service *Service) Execute(book model.BookID, steps []Step, dryRun bool) ([
 
 // Add creates a chapter, subchapter or block. The kind follows the destination parent.
 func (service *Service) Add(book model.BookID, title string, placement Placement, dryRun bool) (Receipt, error) {
-	return service.AddTyped(book, title, "", placement, dryRun)
+	return service.AddTyped(book, title, "", "", placement, dryRun)
 }
 
-// AddTyped creates a unit and sets the block type when it is a block.
-func (service *Service) AddTyped(book model.BookID, title, blockType string, placement Placement, dryRun bool) (Receipt, error) {
-	receipts, err := service.run(book, "struct.add",
-		[]Step{{Op: "add", Title: title, Type: blockType, Placement: placement}}, dryRun)
+// AddTyped creates a unit, sets the block type when it is a block and the part group when it is a
+// chapter or a link entry. An empty part leaves the unit without a group.
+func (service *Service) AddTyped(book model.BookID, title, blockType, part string, placement Placement, dryRun bool) (Receipt, error) {
+	step := Step{Op: "add", Title: title, Type: blockType, Placement: placement}
+	if part != "" {
+		value := part
+		step.Part = &value
+	}
+	receipts, err := service.run(book, "struct.add", []Step{step}, dryRun)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -137,10 +146,14 @@ func (service *Service) AddTyped(book model.BookID, title, blockType string, pla
 }
 
 // AddLink adds a link entry at the book root. The target stays an ID; local and cross-book links
-// are resolved at render time.
-func (service *Service) AddLink(book model.BookID, title string, ref *model.Ref, placement Placement, dryRun bool) (Receipt, error) {
-	receipts, err := service.run(book, "struct.add-link",
-		[]Step{{Op: "add-link", Title: title, Ref: ref, Placement: placement}}, dryRun)
+// are resolved at render time. A link entry may carry a part group like a chapter.
+func (service *Service) AddLink(book model.BookID, title string, ref *model.Ref, part string, placement Placement, dryRun bool) (Receipt, error) {
+	step := Step{Op: "add-link", Title: title, Ref: ref, Placement: placement}
+	if part != "" {
+		value := part
+		step.Part = &value
+	}
+	receipts, err := service.run(book, "struct.add-link", []Step{step}, dryRun)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -248,6 +261,61 @@ func (service *Service) SetStatus(book model.BookID, target model.ID, state stri
 		return Receipt{}, err
 	}
 	return receipts[0], nil
+}
+
+// SetPart assigns the group text of a chapter or a link entry. A slot number one to ten expands to the
+// hardcoded default, any other value is stored as given, and an empty value clears the group.
+func (service *Service) SetPart(book model.BookID, target model.ID, part string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.part",
+		[]Step{{Op: "part", Target: target, Value: part}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// SetPartLabel rewrites the group text of every chapter and link that carries it. The whole group moves
+// in one lock, one snapshot and one manifest write, so a book never shows two spellings of a group.
+func (service *Service) SetPartLabel(book model.BookID, from, to string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.part-label",
+		[]Step{{Op: "part-label", Key: from, Value: to}}, dryRun)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return receipts[0], nil
+}
+
+// PartView is one part group as the book reports it.
+type PartView struct {
+	Slot     int
+	Text     string
+	Chapters int
+}
+
+// PartSummary is the read-only view of the part groups.
+type PartSummary struct {
+	Limit int
+	Parts []PartView
+}
+
+// PartSummary reads the current part groups in document order. The book must be open.
+func (service *Service) PartSummary(book model.BookID) (PartSummary, error) {
+	_, manifest, err := service.load(book)
+	if err != nil {
+		return PartSummary{}, err
+	}
+	summary := PartSummary{Limit: model.PartLimit, Parts: make([]PartView, 0)}
+	for _, text := range manifest.Parts() {
+		chapters := 0
+		for _, node := range manifest.Root.Children {
+			if node.Part == text && node.Kind == model.KindChapter {
+				chapters++
+			}
+		}
+		summary.Parts = append(summary.Parts,
+			PartView{Slot: len(summary.Parts) + 1, Text: text, Chapters: chapters})
+	}
+	return summary, nil
 }
 
 // SetStatusEnabled switches the status system of a book on or off. Assignments stay; a disabled
@@ -430,9 +498,11 @@ func (service *Service) AddBlock(book model.BookID, parent model.ID, dryRun bool
 	return receipts[0], nil
 }
 
-// Rename changes the title of a structural node. Blocks have no title.
-func (service *Service) Rename(book model.BookID, target model.ID, title string, dryRun bool) (Receipt, error) {
-	receipts, err := service.run(book, "struct.rename", []Step{{Op: "rename", Target: target, Title: title}}, dryRun)
+// Rename changes the title of a structural node. Blocks have no title. A non-nil part changes the
+// group text in the same transaction; an empty part clears it.
+func (service *Service) Rename(book model.BookID, target model.ID, title string, part *string, dryRun bool) (Receipt, error) {
+	receipts, err := service.run(book, "struct.rename",
+		[]Step{{Op: "rename", Target: target, Title: title, Part: part}}, dryRun)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -611,6 +681,10 @@ func (step Step) apply(manifest *model.Manifest, ids *bookIDs) (mutation, error)
 		return applyStatusLevelRemove(manifest, step)
 	case "status-config":
 		return applyStatusConfig(manifest, step)
+	case "part":
+		return applyPart(manifest, step)
+	case "part-label":
+		return applyPartLabel(manifest, step)
 	case "badge":
 		return applyBadge(manifest, step)
 	case "badge-remove":
@@ -663,9 +737,16 @@ func applyAdd(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, erro
 	if err != nil {
 		return mutation{}, err
 	}
+	partText, setsPart, partErr := partOf(step)
+	if partErr != nil {
+		return mutation{}, partErr
+	}
 	receipt := Receipt{Book: manifest.ID, Target: id, Kind: kind, Parent: parent.ID, Index: index, Changed: true}
 	result := mutation{receipt: receipt}
 	if unitBlock {
+		if setsPart && partText != "" {
+			return mutation{}, fail("structure.part-on-node", "a block does not carry a part")
+		}
 		parent.Blocks = insertID(parent.Blocks, index, id)
 		result.receipt.Order = append([]model.ID(nil), parent.Blocks...)
 		result.created = []model.ID{id}
@@ -679,9 +760,19 @@ func applyAdd(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, erro
 		if step.Value != "" {
 			return mutation{}, fail("structure.text-on-node", "text needs a block; a node has no body")
 		}
-		node := &model.Node{ID: id, Kind: model.Kind(kind), Title: cleanTitle}
+		if partText != "" {
+			if kind != string(model.KindChapter) && kind != string(model.KindLink) {
+				return mutation{}, fail("structure.part-on-node",
+					"part is allowed on a chapter or a link, not on %q", kind)
+			}
+			if err := checkPartCap(manifest, partText); err != nil {
+				return mutation{}, err
+			}
+		}
+		node := &model.Node{ID: id, Kind: model.Kind(kind), Title: cleanTitle, Part: partText}
 		parent.Children = insertNode(parent.Children, index, node)
 		result.receipt.Order = childIDs(parent.Children)
+		result.receipt.Part = partText
 	}
 	return result, nil
 }
@@ -722,11 +813,18 @@ func applyAddLink(manifest *model.Manifest, ids *bookIDs, step Step) (mutation, 
 	if err != nil {
 		return mutation{}, err
 	}
-	node := &model.Node{ID: id, Kind: model.KindLink, Title: cleanTitle, Ref: step.Ref}
+	partText, _, partErr := partOf(step)
+	if partErr != nil {
+		return mutation{}, partErr
+	}
+	if err := checkPartCap(manifest, partText); err != nil {
+		return mutation{}, err
+	}
+	node := &model.Node{ID: id, Kind: model.KindLink, Title: cleanTitle, Part: partText, Ref: step.Ref}
 	parent.Children = insertNode(parent.Children, index, node)
 	return mutation{receipt: Receipt{
 		Book: manifest.ID, Target: id, Kind: "link", Parent: parent.ID, Index: index,
-		Order: childIDs(parent.Children), Changed: true,
+		Part: partText, Order: childIDs(parent.Children), Changed: true,
 	}}, nil
 }
 
@@ -1034,6 +1132,122 @@ func applyStatusConfig(manifest *model.Manifest, step Step) (mutation, error) {
 	}}, nil
 }
 
+// normalizePart turns one author input into a part text. A number is a slot and expands to the
+// hardcoded default, a number outside one to ten is a range error, and any other value is stored with
+// its inner whitespace collapsed. An empty result clears the part.
+func normalizePart(raw string) (string, error) {
+	if slot, ok := model.ParsePartSlot(raw); ok {
+		label, inRange := model.PartLabel(slot)
+		if !inRange {
+			return "", fail("part.out-of-range",
+				"part %q is outside the range 1 to %d", strings.TrimSpace(raw), model.PartLimit)
+		}
+		return label, nil
+	}
+	return strings.Join(strings.Fields(raw), " "), nil
+}
+
+// partOf normalizes the optional part of a step. The boolean reports whether the step touches the
+// part at all: a nil pointer means the caller keeps whatever the node carries.
+func partOf(step Step) (string, bool, error) {
+	if step.Part == nil {
+		return "", false, nil
+	}
+	text, err := normalizePart(*step.Part)
+	if err != nil {
+		return "", false, err
+	}
+	return text, true, nil
+}
+
+// hasPart reports whether the book already carries the text.
+func hasPart(manifest *model.Manifest, text string) bool {
+	for _, part := range manifest.Parts() {
+		if part == text {
+			return true
+		}
+	}
+	return false
+}
+
+// checkPartCap rejects a new part text once the book carries the limit. A text the book already knows
+// never grows the count, so it always passes.
+func checkPartCap(manifest *model.Manifest, text string) error {
+	if text == "" || hasPart(manifest, text) {
+		return nil
+	}
+	if len(manifest.Parts()) >= model.PartLimit {
+		return fail("part.limit",
+			"the book already carries %d parts; raising the limit is a maintainer decision",
+			model.PartLimit)
+	}
+	return nil
+}
+
+// setPart writes one part text onto a node, enforcing the kind rule and the cap.
+func setPart(manifest *model.Manifest, node *model.Node, text string) (mutation, error) {
+	if node.Kind != model.KindChapter && node.Kind != model.KindLink {
+		return mutation{}, fail("structure.part-on-node",
+			"part is allowed on a chapter or a link, not on %q", node.Kind)
+	}
+	if err := checkPartCap(manifest, text); err != nil {
+		return mutation{}, err
+	}
+	changed := node.Part != text
+	node.Part = text
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Target: node.ID, Kind: "part", Index: -1, Part: text, Changed: changed,
+	}}, nil
+}
+
+func applyPart(manifest *model.Manifest, step Step) (mutation, error) {
+	node, ok := manifest.FindNode(step.Target)
+	if !ok {
+		return mutation{}, fail("structure.unknown-target", "unit %s does not exist", step.Target)
+	}
+	text, err := normalizePart(step.Value)
+	if err != nil {
+		return mutation{}, err
+	}
+	return setPart(manifest, node, text)
+}
+
+// applyPartLabel rewrites every chapter and link that carries one group text. The whole group moves in
+// one step, so a book never shows two spellings of the same group.
+func applyPartLabel(manifest *model.Manifest, step Step) (mutation, error) {
+	from := strings.Join(strings.Fields(step.Key), " ")
+	if from == "" {
+		return mutation{}, fail("part.unknown-group", "the group text must not be empty")
+	}
+	text, err := normalizePart(step.Value)
+	if err != nil {
+		return mutation{}, err
+	}
+	if text == "" {
+		return mutation{}, fail("part.empty-label", "a group label needs a text")
+	}
+	affected := make([]model.ID, 0)
+	for _, node := range manifest.Root.Children {
+		if node.Part != from {
+			continue
+		}
+		affected = append(affected, node.ID)
+	}
+	if len(affected) == 0 {
+		return mutation{}, fail("part.unknown-group",
+			"no chapter or link carries the part %q", from)
+	}
+	for _, node := range manifest.Root.Children {
+		if node.Part == from {
+			node.Part = text
+		}
+	}
+	return mutation{receipt: Receipt{
+		Book: manifest.ID, Kind: "part-label", Index: -1, Part: text,
+		Order: affected, Changed: from != text,
+	}}, nil
+}
+
 func applyBadge(manifest *model.Manifest, step Step) (mutation, error) {
 	if step.Badge == nil {
 		return mutation{}, fail("structure.invalid-badge", "a badge is required")
@@ -1261,9 +1475,22 @@ func applyRename(manifest *model.Manifest, step Step) (mutation, error) {
 		return mutation{}, fail("structure.empty-title", "the title must not be empty")
 	}
 	node.Title = cleanTitle
-	return mutation{receipt: Receipt{
+	receipt := Receipt{
 		Book: manifest.ID, Target: step.Target, Kind: string(node.Kind), Index: -1, Changed: true,
-	}}, nil
+	}
+	partText, setsPart, partErr := partOf(step)
+	if partErr != nil {
+		return mutation{}, partErr
+	}
+	if setsPart {
+		partResult, partMutationErr := setPart(manifest, node, partText)
+		if partMutationErr != nil {
+			return mutation{}, partMutationErr
+		}
+		receipt.Part = partResult.receipt.Part
+		receipt.Changed = receipt.Changed || partResult.receipt.Changed
+	}
+	return mutation{receipt: receipt}, nil
 }
 
 func applyMove(manifest *model.Manifest, step Step) (mutation, error) {

@@ -24,6 +24,7 @@ func Register(registry *cli.Registry) {
 	registry.Add(regionCommand())
 	registry.Add(asciiuiCommand())
 	registry.Add(statusCommand())
+	registry.Add(partCommand())
 	registry.Add(badgeCommand())
 	registry.Add(layoutCommand())
 }
