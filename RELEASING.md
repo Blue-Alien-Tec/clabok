@@ -66,6 +66,12 @@ repository layout with `pecia sync --write` because the tracked file set changes
 `homebrew-clabok` tap is the cleaner long-term layout; the formula in this repository is the first
 step.
 
+**Rebuild the dev binary before that render.** The `version` badge resolves from
+`buildinfo.Version` of the binary that renders, not from the source tree, so a `pecia.exe` built
+before the bump publishes the previous version in the README badge. Run
+`go build -o pecia.exe ./cmd/pecia` after the bump and confirm `pecia version` reports the new number
+before `sync --write`.
+
 ## Signing
 
 Windows Authenticode and macOS notarization are out of scope: both require paid certificates or
