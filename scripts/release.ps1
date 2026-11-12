@@ -69,6 +69,33 @@ if ($LASTEXITCODE -ne 0) { Fail 'go test failed' }
 & go build ./...
 if ($LASTEXITCODE -ne 0) { Fail 'go build failed' }
 
+# The version badge resolves from the running binary's build version, so rebuild the development
+# binary and render the layout before tagging. A stale binary publishes the previous version, and a
+# stale render is a dirty tree the release must not tag.
+& go build -o pecia.exe ./cmd/pecia
+if ($LASTEXITCODE -ne 0) { Fail 'go build -o pecia.exe failed' }
+$builtVersion = (& .\pecia.exe version | ConvertFrom-Json).data.version
+if ($builtVersion -ne $Version -and $builtVersion -ne "$Version-dev") {
+    Fail "the built binary reports '$builtVersion', expected '$Version' or '$Version-dev'"
+}
+if ($DryRun) {
+    & .\pecia.exe sync --check
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'pecia sync --check reports drift; run pecia sync --write and commit the result'
+    }
+} else {
+    & .\pecia.exe sync --write
+    if ($LASTEXITCODE -ne 0) { Fail 'pecia sync --write failed' }
+    $rendered = git status --porcelain
+    if ($rendered) {
+        Fail "the render changed tracked files; commit them and run the release again:`n$rendered"
+    }
+}
+$badge = "badge/version-$Version-"
+if (-not (Select-String -LiteralPath 'README.md' -Pattern $badge -SimpleMatch)) {
+    Fail "README.md does not carry the version $Version badge; the render used a binary of another version"
+}
+
 $tag = "v$Version"
 $localTag = git rev-parse -q --verify "refs/tags/$tag" 2>$null
 if ($LASTEXITCODE -eq 0 -and $localTag) {

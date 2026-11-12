@@ -26,6 +26,12 @@ existing tag, unformatted Go files or failing vet/test/build. It then creates `v
 it. Use `-DryRun` (PowerShell) or `--dry-run` (shell) to run every check without creating or pushing
 the tag.
 
+Before the tag, the script rebuilds `pecia.exe`, renders the layout and asserts two things: the
+working tree is still clean afterwards, and `README.md` carries the `version-<version>` badge. A stale
+render therefore aborts the release with the changed files listed — commit them and run again. The
+render step exists because the `version` badge resolves from `buildinfo.Version` of the binary that
+renders, not from the source tree, so a binary built before the bump publishes the previous version.
+
 If the local execution policy blocks PowerShell scripts, run
 `powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1 <version>` or use
 `scripts/release.sh`.
@@ -65,12 +71,6 @@ commit them as `chore(release): update the package manifests to v<version>`, and
 repository layout with `pecia sync --write` because the tracked file set changes. A separate
 `homebrew-clabok` tap is the cleaner long-term layout; the formula in this repository is the first
 step.
-
-**Rebuild the dev binary before that render.** The `version` badge resolves from
-`buildinfo.Version` of the binary that renders, not from the source tree, so a `pecia.exe` built
-before the bump publishes the previous version in the README badge. Run
-`go build -o pecia.exe ./cmd/pecia` after the bump and confirm `pecia version` reports the new number
-before `sync --write`.
 
 ## Signing
 

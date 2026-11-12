@@ -56,6 +56,34 @@ go vet ./...
 go test ./... -count=1
 go build ./...
 
+# The version badge resolves from the running binary's build version, so rebuild the development
+# binary and render the layout before tagging. A stale binary publishes the previous version, and a
+# stale render is a dirty tree the release must not tag.
+go build -o pecia ./cmd/pecia
+built_version="$(./pecia version | sed -n 's/.*"version": "\(.*\)".*/\1/p' | head -n 1)"
+if [[ "$built_version" != "$version" && "$built_version" != "$version-dev" ]]; then
+  echo "the built binary reports '$built_version', expected '$version' or '$version-dev'" >&2
+  exit 1
+fi
+if [[ "$dry_run" == "1" ]]; then
+  if ! ./pecia sync --check >/dev/null; then
+    echo "pecia sync --check reports drift; run pecia sync --write and commit the result" >&2
+    exit 1
+  fi
+else
+  ./pecia sync --write
+  rendered="$(git status --porcelain)"
+  if [[ -n "$rendered" ]]; then
+    echo "the render changed tracked files; commit them and run the release again:" >&2
+    echo "$rendered" >&2
+    exit 1
+  fi
+fi
+if ! grep -q -- "badge/version-$version-" README.md; then
+  echo "README.md does not carry the version $version badge; the render used a binary of another version" >&2
+  exit 1
+fi
+
 tag="v$version"
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
   echo "tag $tag already exists locally" >&2
