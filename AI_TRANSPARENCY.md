@@ -1,8 +1,8 @@
 # AI Transparency
 
-How this codebase was built and what was not verified. This file describes the development process
-of CLABOK; the tool and its usage are documented in the [README](README.md) and the
-[CLABOK book](Docs/clabok/README.md).
+How this codebase is built and what was not verified. The statements below describe the development
+process, not a release: the same workflow produces every version in this repository. The tool and its
+usage are documented in the [README](README.md) and the [CLABOK book](Docs/clabok/README.md).
 
 ## Who did what
 
@@ -18,15 +18,18 @@ of CLABOK; the tool and its usage are documented in the [README](README.md) and 
 
 ## Verified and unverified
 
-| Aspect | Human-verified? |
-|---|---|
-| Rendered Markdown matches expectations | Yes |
-| Product behaviour matches the intended use cases | Yes, through the rendered output |
-| Go source correctness | No |
-| Test validity and coverage | No; the same agent wrote the tests |
-| Security properties (CLI input handling, file I/O, dependencies) | No |
-| Dependency audit and supply chain | No |
-| Commit contents and authorship | No |
+The middle column is what the maintainer actually did, not what the project claims. The right column
+names what limits the risk in each case.
+
+| Aspect | What the maintainer did | Mitigation |
+|---|---|---|
+| Rendered Markdown matches expectations | read and spot-checked | deterministic rendering; `pecia sync --check` fails on drift |
+| Product behaviour matches the intended use cases | ran on real books | the tool produces the project's own documentation |
+| Go source correctness | nothing | `go vet` and `scripts/check.ps1` (format, vet, build, tests) |
+| Test validity and coverage | nothing | none; the tests share the author's blind spots |
+| Security properties (CLI input handling, file I/O, dependencies) | nothing | two pinned parsers, otherwise the standard library; LanguageTool stays optional |
+| Dependency audit and supply chain | nothing | pinned versions; a new dependency needs a reason |
+| Commit contents and authorship | nothing | the commit form is fixed by the planning policy; authorship is not review |
 
 ## Tests are not independent evidence
 
@@ -49,11 +52,13 @@ consider. Treat a green suite as a smoke signal, not a guarantee.
 | Tool / model | Provider | Used for |
 |---|---|---|
 | Kilo CLI coding agent (`ucoder`) | Kilo | Conception, planning, Go implementation, tests, documentation, git operations and releases |
-| `deepseek/deepseek-flash` | DeepSeek | Model of the sessions that produced versions 0.5.5 to 1.1.0; earlier sessions may have used other models and are not recorded individually |
+| `deepseek/deepseek-flash` | DeepSeek | Model of the agent sessions recorded in this repository (2026-11-05 to 2026-11-12); earlier sessions may have used other models and are not recorded individually |
 
 The agent and model are chosen per session; this table is a best-effort account, not an audit log.
+`deepseek/deepseek-flash` is a provider alias, not a pinned snapshot; the resolved model can change
+between sessions.
 
 ## Scope
 
-This disclosure covers version 1.1.0 (2026-11-11) and is based on the maintainer's own record. It is
-not an independent audit.
+This is the maintainer's own account of how the project is built and what has been verified. It has
+no version scope and is not an independent audit.

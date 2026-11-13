@@ -69,7 +69,7 @@ MIT. See [LICENSE](LICENSE).
 
 <p align="center"><IMG src="generated-content.png" alt="AI badge" width="128"></p>
 
-This project was built almost entirely by an AI coding agent under continuous human direction, including its test suite. The maintainer is a C# developer, does not read Go and has not reviewed the source line by line; verification was limited to the rendered Markdown output. Treat the code as not independently audited. See [AI_TRANSPARENCY.md](AI_TRANSPARENCY.md) for what was and was not verified.
+This project is built almost entirely by an AI coding agent under continuous human direction, including its test suite. The maintainer is a C# developer, does not read Go and has not reviewed the source line by line; verification stops at the rendered Markdown output. Treat the code as not independently audited. [AI_TRANSPARENCY.md](AI_TRANSPARENCY.md) separates what was verified from what was not, names what limits each risk, and records which model produced which sessions.
 
 
 [CLABOK](Docs/clabok/README.md)
